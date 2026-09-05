@@ -5,4 +5,5 @@ pub mod format;
 pub mod fx;
 pub mod model;
 pub mod night;
+pub mod scene;
 pub mod theme;
