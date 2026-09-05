@@ -1,1 +1,26 @@
-//! Kubernetes and other data sources for the rack monitor.
+//! Data sources: they run on tokio and push `Event`s into a std mpsc channel
+//! that the render thread drains with `try_recv`.
+
+use rackscreen_core::event::Event;
+use tokio_util::sync::CancellationToken;
+
+pub mod fake;
+
+pub type EventTx = std::sync::mpsc::Sender<Event>;
+
+#[derive(Clone)]
+pub struct SourceCtx {
+    pub tx: EventTx,
+    pub shutdown: CancellationToken,
+}
+
+impl SourceCtx {
+    pub fn emit(&self, ev: Event) {
+        let _ = self.tx.send(ev);
+    }
+    pub fn emit_all(&self, evs: Vec<Event>) {
+        for ev in evs {
+            self.emit(ev);
+        }
+    }
+}
