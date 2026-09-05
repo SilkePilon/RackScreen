@@ -5,6 +5,7 @@ use rackscreen_core::event::Event;
 use tokio_util::sync::CancellationToken;
 
 pub mod fake;
+pub mod k8s;
 
 pub type EventTx = std::sync::mpsc::Sender<Event>;
 
