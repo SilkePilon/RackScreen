@@ -1,0 +1,266 @@
+//! Splash overlays and sweep scenes layered on top of role scenes.
+
+use crate::anim::{pulse, Easing, Secs};
+use crate::fx::{Splash, Sweep, SweepPhase, SPLASH_SECS};
+use crate::scene::{connecting_scene, no_data_scene, role_scene, Drawable, Scene, SegState};
+use crate::theme::layout::*;
+use crate::theme::{Role, WHITE};
+
+const RIPPLE_SECS: f32 = 0.3;
+const ICON_SWAP_START: f32 = 0.1;
+const ICON_SWAP_SECS: f32 = 0.4;
+const FADE_BACK_START: f32 = 2.0;
+const FLASH_STAGGER: f32 = 0.01;
+const FLASH_SECS: f32 = 0.3;
+
+fn unit(x: f32) -> f32 {
+    x.clamp(0.0, 1.0)
+}
+
+pub fn splash_overlay(mut base: Scene, splash: &Splash, now: Secs) -> Scene {
+    let e = splash.elapsed(now);
+    if e >= SPLASH_SECS as f32 {
+        return base;
+    }
+    let color = splash.kind.color();
+
+    // 1. ring flash wave
+    if let Some(Drawable::Ring { states, .. }) = base.ring_mut() {
+        for (i, st) in states.iter_mut().enumerate() {
+            let t0 = i as f32 * FLASH_STAGGER;
+            let f = 1.0 - unit((e - t0) / FLASH_SECS);
+            if e >= t0 && f > 0.0 {
+                let (c, a) = match *st {
+                    SegState::On(c, a) => (c, a),
+                    SegState::Off => (crate::theme::OFF, 1.0),
+                };
+                *st = SegState::On(c.mix(color, f), a.max(f));
+            }
+        }
+    }
+
+    // 2. role icon fades out then back in
+    let swap = unit((e - ICON_SWAP_START) / ICON_SWAP_SECS);
+    let back = unit((e - FADE_BACK_START) / (SPLASH_SECS as f32 - FADE_BACK_START));
+    let role_alpha = (1.0 - swap).max(back);
+    let (icx, icy, isize) = match base.main_icon_mut() {
+        Some(Drawable::Icon { alpha, cx, cy, size, .. }) => {
+            *alpha *= role_alpha;
+            (*cx, *cy, *size)
+        }
+        _ => (CX, ICON_CY, ICON_SIZE),
+    };
+
+    // 3. event icon pops in with spring, fades out at the end
+    if swap > 0.0 {
+        let scale = Easing::Spring.apply(swap);
+        let alpha = swap.min(1.0 - back);
+        base.push(Drawable::Icon { name: splash.kind.icon(), cx: icx, cy: icy, size: isize, color, alpha, scale, dy: 0.0 });
+    }
+
+    // 4. ripple
+    if e < RIPPLE_SECS {
+        let t = e / RIPPLE_SECS;
+        base.push(Drawable::Ripple {
+            cx: CX,
+            cy: CY,
+            r: 110.0 * Easing::OutCubic.apply(t),
+            thickness: 3.0,
+            color,
+            alpha: 0.8 * (1.0 - t),
+        });
+    }
+
+    // 5. collapsed counter in the badge
+    if splash.count > 1 {
+        for d in base.items.iter_mut() {
+            if let Drawable::Badge { text, .. } = d {
+                *text = format!("+{}", splash.count);
+            }
+        }
+    }
+    base
+}
+
+pub fn sweep_scene(sweep: &Sweep, role: Role, phase: SweepPhase, now: Secs) -> Scene {
+    let color = sweep.kind.color(role);
+    let n = SEG_N;
+    let (lit, ring_alpha, icon_alpha) = match phase {
+        SweepPhase::Idle => (0, 1.0, 0.0),
+        SweepPhase::WipeIn(p) => {
+            let p = Easing::OutCubic.apply(p);
+            ((p * n as f32).round() as usize, 1.0, p)
+        }
+        SweepPhase::Hold(_) => (n, 0.6 + 0.4 * pulse(now, 1.2), 1.0),
+        SweepPhase::WipeOut(p) => (((1.0 - p) * n as f32).round() as usize, 1.0, 1.0 - p),
+    };
+    let states = (0..n).map(|i| if i < lit { SegState::On(color, ring_alpha) } else { SegState::Off }).collect();
+    let mut s = Scene::new();
+    s.push(Drawable::Ring { cx: CX, cy: CY, radius: RING_R, n, states });
+    s.push(Drawable::Icon {
+        name: sweep.kind.icon(role),
+        cx: CX,
+        cy: CY,
+        size: BIG_ICON_SIZE,
+        color: if matches!(sweep.kind, crate::fx::SweepKind::Boot) { WHITE } else { color },
+        alpha: icon_alpha,
+        scale: 1.0,
+        dy: 0.0,
+    });
+    s
+}
+
+impl crate::model::Model {
+    fn needs_data(&self, role: Role) -> bool {
+        let st = self.state();
+        match role {
+            Role::Cpu | Role::Mem => !(self.link().prom && st.have_metrics),
+            Role::Pods => !st.have_pods,
+            Role::Health => !st.have_nodes,
+        }
+    }
+
+    /// Everything the render loop needs for one screen at one instant.
+    pub fn scene(&self, role: Role, now: Secs) -> Scene {
+        if !self.link().api {
+            return connecting_scene(now);
+        }
+        let sweep = self.fx().sweeps.active();
+        if let Some(sw) = sweep {
+            match sw.phase(role, now) {
+                SweepPhase::Idle => {}
+                ph => return sweep_scene(sw, role, ph, now),
+            }
+        }
+        let base = if self.needs_data(role) { no_data_scene(now) } else { role_scene(self, role, now) };
+        if sweep.is_some() {
+            return base;
+        }
+        match self.fx().splashes[role.index()].active() {
+            Some(sp) => splash_overlay(base, sp, now),
+            None => base,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{Event, LinkTarget};
+    use crate::fx::{SplashKind, SweepKind};
+    use crate::model::{Model, Thresholds};
+
+    fn ready_model() -> Model {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
+        m.apply(Event::Link { target: LinkTarget::Prometheus, up: true }, 0.0);
+        m.apply(
+            Event::Metrics { cpu_pct: 42.0, mem_pct: 60.0, mem_used_gb: 1.0, mem_total_gb: 8.0, hot_cpu: None, hot_mem: None },
+            0.0,
+        );
+        m.apply(Event::PodSnapshot { running: 10, pending: 0, failed: 0, total: 10 }, 0.0);
+        m.apply(Event::NodeSnapshot { ready: 2, total: 2, not_ready: vec![] }, 0.0);
+        m
+    }
+
+    fn icons(s: &Scene) -> Vec<(&'static str, f32, f32)> {
+        s.items
+            .iter()
+            .filter_map(|d| match d {
+                Drawable::Icon { name, alpha, scale, .. } => Some((*name, *alpha, *scale)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn connecting_when_api_down() {
+        let m = Model::new(Thresholds::default());
+        let s = m.scene(Role::Cpu, 0.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "plug-zap"));
+    }
+
+    #[test]
+    fn no_data_until_metrics_arrive() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
+        let s = m.scene(Role::Cpu, 0.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
+        let s = m.scene(Role::Pods, 0.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
+    }
+
+    #[test]
+    fn splash_swaps_icon_with_overshoot_and_ripple() {
+        let mut m = ready_model();
+        m.apply(Event::PodCrashed { ns: "a".into(), name: "b".into() }, 1.0);
+        m.tick(1.0);
+        let s = m.scene(Role::Pods, 1.15);
+        assert!(s.items.iter().any(|d| matches!(d, Drawable::Ripple { .. })));
+        let s = m.scene(Role::Pods, 1.35);
+        let ic = icons(&s);
+        let (_, role_alpha, _) = ic.iter().find(|(n, ..)| *n == "box").unwrap();
+        let (_, ev_alpha, ev_scale) = ic.iter().find(|(n, ..)| *n == "package-x").unwrap();
+        assert!(*role_alpha < 0.6);
+        assert!(*ev_alpha > 0.5);
+        assert!(*ev_scale > 1.0, "spring overshoot around 60% of swap");
+        let s = m.scene(Role::Pods, 3.6);
+        assert!(icons(&s).iter().all(|(n, ..)| *n != "package-x"));
+    }
+
+    #[test]
+    fn splash_counter_in_badge() {
+        let mut m = ready_model();
+        for _ in 0..3 {
+            m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 1.0);
+        }
+        m.tick(1.0);
+        let s = m.scene(Role::Pods, 1.5);
+        let text = s.items.iter().find_map(|d| match d {
+            Drawable::Badge { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(text.as_deref(), Some("+3"));
+    }
+
+    #[test]
+    fn sweep_takes_over_all_screens_and_suppresses_splash() {
+        let mut m = ready_model();
+        m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 1.0);
+        m.apply(Event::NodeReady { name: "n".into(), ready: false }, 1.0);
+        m.tick(1.0);
+        let s = m.scene(Role::Health, 1.1);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
+        assert!(s.lit_count() > 0 && s.lit_count() < 60);
+        let s = m.scene(Role::Cpu, 1.1);
+        assert!(icons(&s).iter().all(|(n, ..)| *n == "cpu"), "cpu not yet reached, shows role, no splash");
+        let s = m.scene(Role::Cpu, 2.0);
+        assert_eq!(s.lit_count(), 60);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
+        let s = m.scene(Role::Pods, 2.0);
+        assert!(icons(&s).iter().all(|(n, ..)| *n != "package-plus"));
+        // tick at ~30 Hz like the real loop so the frozen splash is shifted correctly
+        for i in 33..=200 {
+            m.tick(i as f64 / 33.0);
+        }
+        let s = m.scene(Role::Pods, 200.0 / 33.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "package-plus"), "splash resumes after sweep");
+    }
+
+    #[test]
+    fn boot_uses_role_colours() {
+        let sw = Sweep { kind: SweepKind::Boot, started: 0.0 };
+        let s = sweep_scene(&sw, Role::Mem, SweepPhase::Hold(0.5), 0.0);
+        if let Some(Drawable::Ring { states, .. }) = s.items.iter().find(|d| matches!(d, Drawable::Ring { .. })) {
+            assert!(matches!(states[0], SegState::On(c, _) if c == Role::Mem.accent()));
+        }
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "memory-stick"));
+    }
+
+    #[test]
+    fn splash_kinds_have_icons() {
+        for k in [SplashKind::PodStarted, SplashKind::PodCrashed, SplashKind::PodGone, SplashKind::HotNode, SplashKind::TorrentAdded] {
+            assert!(!k.icon().is_empty());
+        }
+    }
+}

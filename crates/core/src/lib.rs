@@ -6,4 +6,5 @@ pub mod fx;
 pub mod model;
 pub mod night;
 pub mod scene;
+pub mod scene_fx;
 pub mod theme;
