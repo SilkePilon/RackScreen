@@ -6,6 +6,8 @@ use tokio_util::sync::CancellationToken;
 
 pub mod fake;
 pub mod k8s;
+pub mod prometheus;
+pub mod tunnel;
 
 pub type EventTx = std::sync::mpsc::Sender<Event>;
 
