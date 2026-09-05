@@ -1,1 +1,2 @@
-//! Frame rendering and layout for the RackScreen displays.
+//! Software rasterizer for RackScreen scenes.
+pub mod assets;
