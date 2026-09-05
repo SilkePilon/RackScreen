@@ -1,0 +1,12 @@
+[package]
+name = "rackscreen-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rackscreen-core = { path = "../core" }
+tiny-skia.workspace = true
+usvg = "0.48"
+fontdue = "0.9"
+anyhow.workspace = true

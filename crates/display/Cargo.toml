@@ -1,0 +1,18 @@
+[package]
+name = "rackscreen-display"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rackscreen-render = { path = "../render" }
+tiny-skia.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+rppal = { version = "0.22", optional = true }
+minifb = { version = "0.28", optional = true }
+
+[features]
+default = []
+pi = ["dep:rppal"]
+sim = ["dep:minifb"]
