@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::anim::{Secs, Smooth};
 use crate::event::{Event, LinkTarget, Torrent};
+use crate::fx::Fx;
 use crate::theme::Role;
 
 pub const SMOOTH_SECS: Secs = 0.8;
@@ -75,6 +76,7 @@ pub struct Model {
     hot_last: HashMap<(Role, String), Secs>,
     night_override: Option<bool>,
     fx: Vec<FxRequest>,
+    fx_state: Fx,
     seen_api_up: bool,
 }
 
@@ -90,6 +92,7 @@ impl Model {
             hot_last: HashMap::new(),
             night_override: None,
             fx: Vec::new(),
+            fx_state: Fx::default(),
             seen_api_up: false,
         }
     }
@@ -120,6 +123,18 @@ impl Model {
     }
     pub fn take_fx(&mut self) -> Vec<FxRequest> {
         std::mem::take(&mut self.fx)
+    }
+
+    pub fn fx(&self) -> &Fx {
+        &self.fx_state
+    }
+
+    /// Drain animation requests into the queues and advance them. Call once per frame.
+    pub fn tick(&mut self, now: Secs) {
+        for req in std::mem::take(&mut self.fx) {
+            self.fx_state.apply(req, now);
+        }
+        self.fx_state.tick(now);
     }
 
     pub fn all_healthy(&self) -> bool {
@@ -267,6 +282,15 @@ mod tests {
         m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 2.0);
         assert_eq!(m.take_fx(), vec![FxRequest::LinkUp]);
         assert!(m.link().api);
+    }
+
+    #[test]
+    fn tick_moves_requests_into_queues() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 0.0);
+        m.tick(0.0);
+        assert!(m.pending_fx().is_empty());
+        assert!(m.fx().splashes[Role::Pods.index()].active().is_some());
     }
 
     #[test]

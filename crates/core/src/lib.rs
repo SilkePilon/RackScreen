@@ -2,5 +2,6 @@
 pub mod anim;
 pub mod event;
 pub mod format;
+pub mod fx;
 pub mod model;
 pub mod theme;
