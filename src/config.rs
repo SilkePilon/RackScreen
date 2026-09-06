@@ -76,6 +76,8 @@ pub struct DisplayCfg {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+// Pin fields are only read by the SPI backend.
+#[cfg_attr(not(feature = "pi"), allow(dead_code))]
 pub struct ScreenCfg {
     pub role: String,
     pub spi: u8,

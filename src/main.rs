@@ -11,7 +11,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use rackscreen_core::model::Thresholds;
 use rackscreen_core::night::parse_hhmm;
-use rackscreen_display::{spawn_display_thread, Display, Mailbox};
+#[cfg(feature = "pi")]
+use rackscreen_display::Display;
+use rackscreen_display::{spawn_display_thread, Mailbox};
 use rackscreen_render::frame::Orient;
 use rackscreen_sources::SourceCtx;
 use tokio_util::sync::CancellationToken;
@@ -170,7 +172,9 @@ fn main() -> Result<()> {
     // ---- displays ----
     let mut slots = Vec::new();
     let mut display_threads = Vec::new();
+    // Without `pi` the non-sim branch bails, so the initial None is never read.
     #[cfg(feature = "sim")]
+    #[cfg_attr(not(feature = "pi"), allow(unused_assignments))]
     let mut sim_hub = None;
 
     if cli.sim {
