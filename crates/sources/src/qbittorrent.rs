@@ -113,6 +113,25 @@ struct Session {
     port: u16,
 }
 
+/// qBittorrent answers a successful login with 200 "Ok." (<=4.x) or 204 empty (5.x).
+fn login_ok(status: u16, body: &str) -> bool {
+    matches!(status, 200 | 204) && (body.trim() == "Ok." || body.trim().is_empty())
+}
+
+/// The session cookie is `SID` on 4.x and `QBT_SID_<port>` on 5.x.
+fn session_cookie(headers: &hyper::HeaderMap) -> Option<String> {
+    headers
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(|c| {
+            c.split(';')
+                .next()
+                .filter(|p| p.split('=').next().is_some_and(|n| n.contains("SID")))
+                .map(str::to_string)
+        })
+}
+
 impl Session {
     fn origin(&self) -> String {
         format!("http://localhost:{}", self.port)
@@ -134,22 +153,12 @@ impl Session {
             )
             .await?;
         anyhow::ensure!(
-            r.status == 200 && (r.body.trim() == "Ok." || r.body.trim().is_empty()),
+            login_ok(r.status, &r.body),
             "login HTTP {} {:?}",
             r.status,
             r.body.trim()
         );
-        self.cookie = r
-            .headers
-            .get_all("set-cookie")
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .find_map(|c| {
-                c.split(';')
-                    .next()
-                    .filter(|p| p.starts_with("SID="))
-                    .map(str::to_string)
-            });
+        self.cookie = session_cookie(&r.headers);
         Ok(())
     }
 
@@ -255,6 +264,27 @@ mod tests {
             eta: 100,
             dlspeed: speed,
         }
+    }
+
+    #[test]
+    fn login_accepts_200_ok_and_204_empty() {
+        assert!(login_ok(200, "Ok."));
+        assert!(login_ok(204, ""));
+        assert!(!login_ok(200, "Fails."));
+        assert!(!login_ok(403, ""));
+    }
+
+    #[test]
+    fn session_cookie_matches_sid_and_qbt_sid() {
+        let mut h = hyper::HeaderMap::new();
+        h.append("set-cookie", "QBT_SID_8080=abc123; HttpOnly; path=/".parse().unwrap());
+        assert_eq!(session_cookie(&h).as_deref(), Some("QBT_SID_8080=abc123"));
+        let mut h = hyper::HeaderMap::new();
+        h.append("set-cookie", "SID=xyz; path=/".parse().unwrap());
+        assert_eq!(session_cookie(&h).as_deref(), Some("SID=xyz"));
+        let mut h = hyper::HeaderMap::new();
+        h.append("set-cookie", "other=1; path=/".parse().unwrap());
+        assert_eq!(session_cookie(&h), None);
     }
 
     #[test]

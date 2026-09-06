@@ -19,7 +19,6 @@ pub struct Response {
 pub struct Tunnel {
     send: SendRequest<Full<Bytes>>,
     _pf: Portforwarder,
-    port: u16,
 }
 
 impl Tunnel {
@@ -38,15 +37,7 @@ impl Tunnel {
                 tracing::debug!("tunnel connection closed: {e}");
             }
         });
-        Ok(Tunnel {
-            send,
-            _pf: pf,
-            port,
-        })
-    }
-
-    fn base(&self) -> String {
-        format!("http://localhost:{}", self.port)
+        Ok(Tunnel { send, _pf: pf })
     }
 
     async fn send(&mut self, req: Request<Full<Bytes>>) -> Result<Response> {
@@ -63,13 +54,7 @@ impl Tunnel {
     }
 
     pub async fn get(&mut self, path: &str, headers: &[(&str, &str)]) -> Result<Response> {
-        let mut b = Request::builder()
-            .method("GET")
-            .uri(format!("{}{path}", self.base()))
-            .header("host", "localhost");
-        for (k, v) in headers {
-            b = b.header(*k, *v);
-        }
+        let b = build("GET", path, headers);
         self.send(b.body(Full::new(Bytes::new()))?).await
     }
 
@@ -79,17 +64,24 @@ impl Tunnel {
         body: &str,
         headers: &[(&str, &str)],
     ) -> Result<Response> {
-        let mut b = Request::builder()
-            .method("POST")
-            .uri(format!("{}{path}", self.base()))
-            .header("host", "localhost")
+        let b = build("POST", path, headers)
             .header("content-type", "application/x-www-form-urlencoded");
-        for (k, v) in headers {
-            b = b.header(*k, *v);
-        }
         self.send(b.body(Full::new(Bytes::from(body.to_owned())))?)
             .await
     }
+}
+
+/// hyper's HTTP/1 client serializes the URI verbatim, so it must be origin-form
+/// (`/path?query`). Absolute-form request lines make servers like qBittorrent 404.
+fn build(method: &str, path: &str, headers: &[(&str, &str)]) -> hyper::http::request::Builder {
+    let mut b = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("host", "localhost");
+    for (k, v) in headers {
+        b = b.header(*k, *v);
+    }
+    b
 }
 
 /// Resolve a service (exact name, or "auto" = first service whose name contains `needle`
@@ -152,4 +144,19 @@ pub async fn find_pod_for_service(
         })
         .with_context(|| format!("no ready pod for service {svc_name}"))?;
     Ok((pod.metadata.name.clone().unwrap_or_default(), svc_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_line_is_origin_form() {
+        let r = build("GET", "/api/v2/torrents/info?filter=downloading", &[("referer", "http://localhost:8080")])
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        assert_eq!(r.uri().to_string(), "/api/v2/torrents/info?filter=downloading");
+        assert_eq!(r.headers()["host"], "localhost");
+        assert_eq!(r.headers()["referer"], "http://localhost:8080");
+    }
 }
