@@ -2416,6 +2416,7 @@ dependencies = [
  "ratatui",
  "sha2 0.11.0",
  "tempfile",
+ "tiny-skia",
  "tracing",
  "tracing-subscriber",
 ]

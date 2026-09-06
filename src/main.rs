@@ -25,6 +25,15 @@ struct Cli {
 enum Cmd {
     /// Run the monitor (what the systemd service runs)
     Run(RunArgs),
+    /// Fix screen rotation and mirroring interactively
+    Calibrate {
+        /// Desktop simulator window instead of SPI displays
+        #[arg(long)]
+        sim: bool,
+        /// Config file (default: /etc/rackscreen/config.yaml)
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Interactive setup (default when run in a terminal)
     Setup {
         /// Desktop simulator window instead of SPI displays
@@ -94,6 +103,9 @@ fn main() -> Result<()> {
             Monitor::start(&cfg, opts)?.run_blocking()
         }
         Some(Cmd::Setup { sim, config }) => setup(rackscreen_setup::Start::Menu, sim, config),
+        Some(Cmd::Calibrate { sim, config }) => {
+            setup(rackscreen_setup::Start::Calibrate, sim, config)
+        }
         None => {
             if std::io::stdin().is_terminal() {
                 setup(rackscreen_setup::Start::Menu, false, None)

@@ -1,4 +1,5 @@
 //! Application wiring shared by the `rackscreen` binary and the setup TUI.
+pub mod calibrate;
 pub mod config;
 pub mod panels;
 pub mod run;
