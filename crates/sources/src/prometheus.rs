@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use kube::Client;
 use rackscreen_core::event::{Event, LinkTarget};
 use serde_json::Value;
@@ -17,6 +17,58 @@ pub struct PromConfig {
     pub service: String,
     pub port: u16,
     pub poll_secs: u64,
+    /// Alert names that never count as firing (e.g. kube-prometheus-stack's
+    /// permanently firing `Watchdog`).
+    pub ignore_alerts: Vec<String>,
+}
+
+/// Diffs the set of firing alerts between polls. The first poll only primes
+/// the set (a snapshot, no `AlertChanged`) so a process restart does not replay
+/// every already-firing alert as a fresh red sweep.
+#[derive(Debug, Default)]
+pub struct AlertTracker {
+    primed: bool,
+    prev: HashSet<String>,
+    ignore: HashSet<String>,
+}
+
+impl AlertTracker {
+    pub fn new(ignore: &[String]) -> Self {
+        Self {
+            primed: false,
+            prev: HashSet::new(),
+            ignore: ignore.iter().cloned().collect(),
+        }
+    }
+
+    pub fn diff(&mut self, mut firing: HashSet<String>) -> Vec<Event> {
+        firing.retain(|a| !self.ignore.contains(a));
+        let mut out = Vec::new();
+        if self.primed {
+            let mut added: Vec<&String> = firing.difference(&self.prev).collect();
+            added.sort();
+            for a in added {
+                out.push(Event::AlertChanged {
+                    name: a.clone(),
+                    firing: true,
+                });
+            }
+            let mut gone: Vec<&String> = self.prev.difference(&firing).collect();
+            gone.sort();
+            for a in gone {
+                out.push(Event::AlertChanged {
+                    name: a.clone(),
+                    firing: false,
+                });
+            }
+        }
+        let mut list: Vec<String> = firing.iter().cloned().collect();
+        list.sort();
+        out.push(Event::AlertSnapshot { firing: list });
+        self.prev = firing;
+        self.primed = true;
+        out
+    }
 }
 
 pub fn parse_scalar(json: &str) -> Option<f64> {
@@ -98,47 +150,49 @@ fn hottest(v: &[(HashMap<String, String>, f64)]) -> Option<(String, f32)> {
         })
 }
 
-async fn poll(t: &mut Tunnel, prev_alerts: &mut HashSet<String>) -> Result<Vec<Event>> {
-    let cpu = parse_scalar(&query(t, Q_CPU).await?).unwrap_or(0.0);
+/// A missing series is an error, not 0%: two consecutive misses drop the
+/// Prometheus link so the No-data scene shows instead of a confident zero.
+fn metrics_from(
+    cpu: Option<f64>,
+    mem: Option<f64>,
+    mem_used: Option<f64>,
+    mem_total: Option<f64>,
+    cpu_by: &[(HashMap<String, String>, f64)],
+    mem_by: &[(HashMap<String, String>, f64)],
+) -> Result<Event> {
+    let need =
+        |v: Option<f64>, q: &str| v.ok_or_else(|| anyhow!("prometheus returned no data for {q}"));
+    Ok(Event::Metrics {
+        cpu_pct: need(cpu, Q_CPU)? as f32,
+        mem_pct: need(mem, Q_MEM)? as f32,
+        mem_used_gb: need(mem_used, Q_MEM_USED)? as f32,
+        mem_total_gb: need(mem_total, Q_MEM_TOTAL)? as f32,
+        hot_cpu: hottest(cpu_by),
+        hot_mem: hottest(mem_by),
+    })
+}
+
+async fn poll(t: &mut Tunnel, alerts: &mut AlertTracker) -> Result<Vec<Event>> {
+    let cpu = parse_scalar(&query(t, Q_CPU).await?);
     let cpu_by = parse_vector(&query(t, Q_CPU_BY).await?);
-    let mem = parse_scalar(&query(t, Q_MEM).await?).unwrap_or(0.0);
-    let mem_used = parse_scalar(&query(t, Q_MEM_USED).await?).unwrap_or(0.0);
-    let mem_total = parse_scalar(&query(t, Q_MEM_TOTAL).await?).unwrap_or(0.0);
+    let mem = parse_scalar(&query(t, Q_MEM).await?);
+    let mem_used = parse_scalar(&query(t, Q_MEM_USED).await?);
+    let mem_total = parse_scalar(&query(t, Q_MEM_TOTAL).await?);
     let mem_by = parse_vector(&query(t, Q_MEM_BY).await?);
-    let alerts = parse_vector(&query(t, Q_ALERTS).await?);
-    let mut out = vec![Event::Metrics {
-        cpu_pct: cpu as f32,
-        mem_pct: mem as f32,
-        mem_used_gb: mem_used as f32,
-        mem_total_gb: mem_total as f32,
-        hot_cpu: hottest(&cpu_by),
-        hot_mem: hottest(&mem_by),
-    }];
-    let firing: HashSet<String> = alerts
+    let firing_raw = parse_vector(&query(t, Q_ALERTS).await?);
+    let mut out = vec![metrics_from(
+        cpu, mem, mem_used, mem_total, &cpu_by, &mem_by,
+    )?];
+    let firing: HashSet<String> = firing_raw
         .iter()
         .filter_map(|(m, _)| m.get("alertname").cloned())
         .collect();
-    for a in firing.difference(prev_alerts) {
-        out.push(Event::AlertChanged {
-            name: a.clone(),
-            firing: true,
-        });
-    }
-    for a in prev_alerts.difference(&firing) {
-        out.push(Event::AlertChanged {
-            name: a.clone(),
-            firing: false,
-        });
-    }
-    let mut list: Vec<String> = firing.iter().cloned().collect();
-    list.sort();
-    out.push(Event::AlertSnapshot { firing: list });
-    *prev_alerts = firing;
+    out.extend(alerts.diff(firing));
     Ok(out)
 }
 
 pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
-    let mut prev_alerts = HashSet::new();
+    let mut alerts = AlertTracker::new(&cfg.ignore_alerts);
     let mut backoff = 5u64;
     loop {
         if ctx.shutdown.is_cancelled() {
@@ -179,7 +233,7 @@ pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
         backoff = 5;
         let mut failures = 0;
         loop {
-            match poll(&mut t, &mut prev_alerts).await {
+            match poll(&mut t, &mut alerts).await {
                 Ok(evs) => {
                     failures = 0;
                     ctx.emit(Event::Link {
@@ -236,6 +290,86 @@ mod tests {
     fn node_tags() {
         assert_eq!(node_tag("192.168.1.5:9100"), ".5");
         assert_eq!(node_tag("nodename:9100"), "nodename");
+    }
+
+    fn set(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn alert_tracker_primes_silently_then_diffs() {
+        let mut t = AlertTracker::new(&[]);
+        let evs = t.diff(set(&["Down", "Slow"]));
+        assert_eq!(
+            evs,
+            vec![Event::AlertSnapshot {
+                firing: vec!["Down".into(), "Slow".into()]
+            }],
+            "first poll only primes: no AlertChanged"
+        );
+        let evs = t.diff(set(&["Down", "New"]));
+        assert_eq!(
+            evs,
+            vec![
+                Event::AlertChanged {
+                    name: "New".into(),
+                    firing: true
+                },
+                Event::AlertChanged {
+                    name: "Slow".into(),
+                    firing: false
+                },
+                Event::AlertSnapshot {
+                    firing: vec!["Down".into(), "New".into()]
+                },
+            ]
+        );
+        assert_eq!(
+            t.diff(set(&["Down", "New"])),
+            vec![Event::AlertSnapshot {
+                firing: vec!["Down".into(), "New".into()]
+            }],
+            "steady state is snapshot only"
+        );
+    }
+
+    #[test]
+    fn alert_tracker_ignores_configured_names() {
+        let mut t = AlertTracker::new(&["Watchdog".to_string(), "InfoInhibitor".to_string()]);
+        let evs = t.diff(set(&["Watchdog"]));
+        assert_eq!(evs, vec![Event::AlertSnapshot { firing: vec![] }]);
+        let evs = t.diff(set(&["Watchdog", "InfoInhibitor", "Real"]));
+        assert_eq!(
+            evs,
+            vec![
+                Event::AlertChanged {
+                    name: "Real".into(),
+                    firing: true
+                },
+                Event::AlertSnapshot {
+                    firing: vec!["Real".into()]
+                },
+            ]
+        );
+        let evs = t.diff(set(&["Real"]));
+        assert_eq!(
+            evs,
+            vec![Event::AlertSnapshot {
+                firing: vec!["Real".into()]
+            }],
+            "ignored alert going away is not a resolve"
+        );
+    }
+
+    #[test]
+    fn missing_series_is_an_error_not_zero() {
+        let ok = metrics_from(Some(1.0), Some(2.0), Some(3.0), Some(4.0), &[], &[]).unwrap();
+        assert!(matches!(ok, Event::Metrics { cpu_pct, hot_cpu: None, .. } if cpu_pct == 1.0));
+        for i in 0..4 {
+            let v = |j: usize| if i == j { None } else { Some(1.0) };
+            let err = metrics_from(v(0), v(1), v(2), v(3), &[], &[]).unwrap_err();
+            assert!(err.to_string().contains("no data"), "{err}");
+        }
     }
 
     #[test]

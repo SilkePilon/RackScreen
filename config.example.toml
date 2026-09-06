@@ -8,6 +8,7 @@ namespace = "monitoring"
 service = "auto"        # "auto" picks the first service containing "prometheus" that exposes `port`
 port = 9090
 poll_secs = 5
+ignore_alerts = ["Watchdog", "InfoInhibitor"]   # always-firing alerts that must not turn HEALTH red
 
 [qbittorrent]
 enabled = true

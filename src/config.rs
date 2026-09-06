@@ -37,6 +37,7 @@ pub struct PromCfg {
     pub service: String,
     pub port: u16,
     pub poll_secs: u64,
+    pub ignore_alerts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,6 +120,7 @@ impl Default for PromCfg {
             service: "auto".into(),
             port: 9090,
             poll_secs: 5,
+            ignore_alerts: vec!["Watchdog".into(), "InfoInhibitor".into()],
         }
     }
 }
@@ -221,6 +223,7 @@ mod tests {
         assert_eq!(c.screens[3].role().unwrap(), Role::Health);
         assert_eq!(c.screens[2].hz, 16_000_000);
         assert_eq!(c.prometheus.port, 9090);
+        assert_eq!(c.prometheus.ignore_alerts, ["Watchdog", "InfoInhibitor"]);
         assert!(c.qbittorrent.enabled);
     }
 
@@ -231,6 +234,7 @@ mod tests {
         assert_eq!(c.night.start, "23:00");
         assert_eq!(c.screens[0].hz, 40_000_000);
         assert_eq!(c.display.fps, 30);
+        assert_eq!(c.prometheus.ignore_alerts, ["Watchdog", "InfoInhibitor"]);
     }
 
     #[test]

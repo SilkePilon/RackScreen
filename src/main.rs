@@ -112,6 +112,7 @@ fn main() -> Result<()> {
                     service: cfg2.prometheus.service.clone(),
                     port: cfg2.prometheus.port,
                     poll_secs: cfg2.prometheus.poll_secs,
+                    ignore_alerts: cfg2.prometheus.ignore_alerts.clone(),
                 };
                 tokio::spawn(rackscreen_sources::prometheus::run_prometheus(
                     client.clone(),
