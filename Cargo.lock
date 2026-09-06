@@ -1798,18 +1798,8 @@ name = "rackscreen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
- "dirs",
  "rackscreen-app",
- "rackscreen-core",
- "rackscreen-display",
- "rackscreen-render",
- "rackscreen-sources",
- "serde",
- "tiny-skia",
- "tokio",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]

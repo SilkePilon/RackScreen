@@ -8,8 +8,8 @@ Design: `docs/superpowers/specs/2026-09-05-rackscreen-design.md`.
 
 ## Develop on the desktop
 
-    cargo run -- --sim                 # fake data, keyboard drives events
-    cargo run -- --sim --source k8s    # real cluster, simulator window
+    cargo run -- run --sim             # fake data, keyboard drives events
+    cargo run -- run --sim --source k8s  # real cluster, simulator window
 
 `--source k8s` reads the kubeconfig path from the config file (`[k8s] kubeconfig`, default `~/k8s-monitor.yaml`). Use `--config <file>` to point at an alternative config; without it the binary reads `~/.config/rackscreen/config.toml`.
 

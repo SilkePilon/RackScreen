@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=%i
-ExecStart=/usr/local/bin/rackscreen
+ExecStart=/usr/local/bin/rackscreen run
 Restart=always
 RestartSec=3
 Environment=RUST_LOG=info

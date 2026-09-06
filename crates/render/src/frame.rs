@@ -51,6 +51,7 @@ pub fn new_pixmap() -> Pixmap {
 
 /// Maps destination pixels to source pixels for a rotation (clockwise, multiples of 90)
 /// followed by an optional horizontal flip.
+#[derive(Clone)]
 pub struct Orient {
     size: u32,
     map: Vec<u32>,
