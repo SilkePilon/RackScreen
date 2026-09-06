@@ -10,12 +10,17 @@ use ratatui::Frame;
 use crate::anim::Slide;
 use crate::{Action, Screen, ScreenId, Shared};
 
-pub const ITEMS: [(ScreenId, &str, &str); 6] = [
+pub const ITEMS: [(ScreenId, &str, &str); 7] = [
     (ScreenId::Install, "Install", "set up service + config"),
     (
         ScreenId::Calibrate,
         "Calibrate screens",
         "fix rotation / mirroring",
+    ),
+    (
+        ScreenId::Screens,
+        "Screens",
+        "what each screen shows, cycling",
     ),
     (ScreenId::Configure, "Configure", "cluster, night, display"),
     (ScreenId::Status, "Status", "service, links, logs"),

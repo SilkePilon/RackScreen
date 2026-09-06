@@ -1,4 +1,4 @@
-//! Interactive setup: install, calibrate, configure, status, run, uninstall.
+//! Interactive setup: install, calibrate, screens, configure, status, run, uninstall.
 
 pub mod anim;
 pub mod ops;
@@ -40,6 +40,7 @@ pub enum ScreenId {
     Menu,
     Install,
     Calibrate,
+    Screens,
     Configure,
     Status,
     RunHere,
@@ -60,6 +61,20 @@ pub struct Shared {
     pub service_active: Option<bool>,
     pub banner: Option<String>,
     pub log_sink: LogSink,
+}
+
+impl Shared {
+    /// A detached copy, so a test can pass `&mut Shared` while keeping its own.
+    #[cfg(test)]
+    pub fn clone_for_test(&self) -> Shared {
+        Shared {
+            ctx: self.ctx.clone(),
+            theme: self.theme,
+            service_active: self.service_active,
+            banner: self.banner.clone(),
+            log_sink: self.log_sink.clone(),
+        }
+    }
 }
 
 pub trait Screen {
