@@ -57,6 +57,7 @@ pub struct Status {
     log_view: bool,
     scroll: usize,
     restart_note: Option<String>,
+    restart_rx: Option<Receiver<String>>,
 }
 
 impl Status {
@@ -82,6 +83,7 @@ impl Status {
             log_view: false,
             scroll: 0,
             restart_note: None,
+            restart_rx: None,
         }
     }
 
@@ -93,6 +95,7 @@ impl Status {
             log_view: false,
             scroll: 0,
             restart_note: None,
+            restart_rx: None,
         }
     }
 }
@@ -133,6 +136,12 @@ impl Screen for Status {
             }
             KeyCode::Up => {
                 self.scroll = self.scroll.saturating_add(1);
+                if let Some(s) = &self.snap {
+                    let max = s.logs.len().saturating_sub(1);
+                    if self.scroll > max {
+                        self.scroll = max;
+                    }
+                }
                 Action::None
             }
             KeyCode::Down => {
@@ -140,11 +149,22 @@ impl Screen for Status {
                 Action::None
             }
             KeyCode::Char('r') => {
-                let sh = RealShell;
-                self.restart_note = Some(match Systemd::new(&sh, &service_user()).restart() {
-                    Ok(()) => "service restarted".into(),
-                    Err(e) => format!("restart failed: {e:#}"),
-                });
+                if self.restart_rx.is_none() {
+                    self.restart_note = Some("restarting...".into());
+                    let (tx, rx) = mpsc::channel();
+                    std::thread::Builder::new()
+                        .name("restart".into())
+                        .spawn(move || {
+                            let sh = RealShell;
+                            let msg = match Systemd::new(&sh, &service_user()).restart() {
+                                Ok(()) => "service restarted".into(),
+                                Err(e) => format!("restart failed: {e:#}"),
+                            };
+                            let _ = tx.send(msg);
+                        })
+                        .expect("spawn restart");
+                    self.restart_rx = Some(rx);
+                }
                 let _ = &shared;
                 Action::None
             }
@@ -156,6 +176,19 @@ impl Screen for Status {
         while let Ok(s) = self.rx.try_recv() {
             shared.service_active = Some(s.info.active == "active");
             self.snap = Some(s);
+        }
+        if let Some(rx) = &self.restart_rx {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    self.restart_note = Some(msg);
+                    self.restart_rx = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.restart_note = Some("restart thread died".into());
+                    self.restart_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
         }
     }
 
@@ -384,5 +417,46 @@ mod tests {
         assert!(text.contains("spi1 overlay"));
         assert!(text.contains("line two"));
         assert_eq!(fmt_uptime(90_000), "1d 1h");
+    }
+
+    #[test]
+    fn log_scroll_is_clamped_to_available_lines() {
+        let snap = Snapshot {
+            info: ServiceInfo {
+                active: "active".into(),
+                sub: "running".into(),
+                uptime_secs: Some(4000),
+            },
+            enabled: true,
+            binary_present: true,
+            config_present: true,
+            ready: Some(Readiness {
+                spi_on: true,
+                spi1_overlay: false,
+                bufsiz: true,
+            }),
+            logs: vec!["line one".into(), "line two".into()],
+            links: LinkDots {
+                api: Dot::Up,
+                prometheus: Dot::Down,
+                qbittorrent: Dot::Unknown,
+            },
+        };
+        let mut sh = Shared {
+            ctx: Ctx {
+                config_path: "/etc/rackscreen/config.yaml".into(),
+                sim: false,
+                version: "0.2.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+            log_sink: LogSink::new(10),
+        };
+        let mut screen = Status::with_snapshot(snap);
+        for _ in 0..100 {
+            screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
+            assert!(screen.scroll <= 1);
+        }
     }
 }
