@@ -62,6 +62,30 @@ pub fn temp_color(c: f32) -> Color {
     }
 }
 
+/// Electricity Maps carbon intensity scale (gCO2eq/kWh).
+pub fn carbon_color(g: f32) -> Color {
+    const STOPS: [(f32, u32); 4] = [
+        (0.0, 0x2AA364),
+        (150.0, 0xF5EB4D),
+        (600.0, 0x9E4229),
+        (800.0, 0x381D02),
+    ];
+    let g = g.clamp(0.0, 800.0);
+    for w in STOPS.windows(2) {
+        let (g0, c0) = w[0];
+        let (g1, c1) = w[1];
+        if g <= g1 {
+            return Color::hex(c0).mix(Color::hex(c1), (g - g0) / (g1 - g0));
+        }
+    }
+    Color::hex(STOPS[3].1)
+}
+
+/// 0 = cheapest of the day (green) .. 1 = most expensive (red).
+pub fn price_color(t: f32) -> Color {
+    GREEN.mix(RED, t.clamp(0.0, 1.0))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Role {
     Cpu,
@@ -204,6 +228,21 @@ mod tests {
         let mid = temp_color(45.0);
         assert!(mid.r > BLUE.r && mid.r < AMBER.r, "45 °C sits between");
         assert_eq!(lerp(BLACK, WHITE, 0.5), BLACK.mix(WHITE, 0.5));
+    }
+
+    #[test]
+    fn carbon_and_price_scales() {
+        assert_eq!(carbon_color(0.0), Color::hex(0x2AA364));
+        assert_eq!(carbon_color(-50.0), Color::hex(0x2AA364));
+        assert_eq!(carbon_color(150.0), Color::hex(0xF5EB4D));
+        assert_eq!(carbon_color(600.0), Color::hex(0x9E4229));
+        assert_eq!(carbon_color(1000.0), Color::hex(0x381D02));
+        let mid = carbon_color(75.0);
+        assert_eq!(mid, Color::hex(0x2AA364).mix(Color::hex(0xF5EB4D), 0.5));
+        assert_eq!(price_color(0.0), GREEN);
+        assert_eq!(price_color(1.0), RED);
+        assert_eq!(price_color(-1.0), GREEN);
+        assert_eq!(price_color(0.5), GREEN.mix(RED, 0.5));
     }
 
     #[test]

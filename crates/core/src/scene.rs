@@ -435,9 +435,10 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         }
         Role::Thermal => crate::scene_thermal::thermal_scene(model, now),
         Role::Storage => crate::scene_storage::storage_scene(model, now),
-        // PowerMix, Price, Carbon, Renewable: scenes arrive with their data
-        // sources; until then they show the no-data ring.
-        _ => no_data_scene(now),
+        Role::PowerMix => crate::scene_electricity::power_mix_scene(model, now),
+        Role::Price => crate::scene_electricity::price_scene(model, now, model.local_hour()),
+        Role::Carbon => crate::scene_electricity::carbon_scene(model, now),
+        Role::Renewable => crate::scene_electricity::renewable_scene(model, now),
     }
 }
 
@@ -505,6 +506,12 @@ pub fn connecting_scene(now: Secs) -> Scene {
 }
 
 pub fn no_data_scene(now: Secs) -> Scene {
+    no_data_scene_with(now, "cloud-off")
+}
+
+/// The dim ring with a chosen centre icon: `cloud-off` when a source is silent,
+/// `key-round` when it was never configured.
+pub fn no_data_scene_with(now: Secs, icon: &'static str) -> Scene {
     let n = SEG_N;
     let mut states = vec![SegState::On(DIM_GREY, 1.0); n];
     let phase = now % 4.0;
@@ -514,13 +521,7 @@ pub fn no_data_scene(now: Secs) -> Scene {
     }
     let mut s = Scene::new();
     s.push(ring(RING_R, states));
-    s.push(icon_at(
-        "cloud-off",
-        CY,
-        BIG_ICON_SIZE,
-        Color::hex(0x666666),
-        1.0,
-    ));
+    s.push(icon_at(icon, CY, BIG_ICON_SIZE, Color::hex(0x666666), 1.0));
     s
 }
 
@@ -775,5 +776,14 @@ mod tests {
                 ..
             }
         ));
+        let k = no_data_scene_with(2.0, "key-round");
+        assert!(matches!(
+            k.items[2],
+            Drawable::Icon {
+                name: "key-round",
+                ..
+            }
+        ));
+        assert_eq!(k.lit_count(), 60);
     }
 }

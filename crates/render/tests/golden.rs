@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{Event, LinkTarget, Robustness, Torrent};
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::theme::Role;
@@ -292,6 +293,87 @@ fn storage_idle_and_degraded() {
     let mut px2 = new_pixmap();
     r.render(&m2.scene_for_role(Role::Storage, 5.0), &mut px2);
     check("storage_degraded", &px2);
+}
+
+fn electricity_model() -> Model {
+    let mut m = ready_model();
+    m.set_token_present(true);
+    m.apply(
+        Event::Electricity {
+            zone: "NL".into(),
+            mix_mw: vec![
+                (Source::Solar, 4800.0),
+                (Source::Wind, 2400.0),
+                (Source::Gas, 1300.0),
+                (Source::Coal, 700.0),
+                (Source::Nuclear, 400.0),
+                (Source::Biomass, 200.0),
+                (Source::Hydro, 200.0),
+            ],
+            renewable_pct: 61.0,
+            fossil_free_pct: 73.0,
+            carbon_gco2: 214.0,
+            updated_at: "2026-09-07T12:00:00Z".into(),
+        },
+        0.0,
+    );
+    // a cheap night, a dear evening, 22.1 ct at 14:00
+    let mut ct: Vec<f32> = (0..24).map(|h| 6.2 + h as f32).collect();
+    ct[14] = 22.1;
+    m.apply(
+        Event::Prices {
+            date: "2026-09-07".into(),
+            ct_per_kwh: ct,
+            currency: "EUR".into(),
+        },
+        0.0,
+    );
+    m.set_local_hour(14);
+    m
+}
+
+#[test]
+fn power_mix_ring() {
+    let m = electricity_model();
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::PowerMix, 5.0), &mut px);
+    // segment 0 is the head of the solar section
+    let (red, g, b) = pixel(&px, 120, 18);
+    assert!(
+        red > 200 && g > 150 && b < 80,
+        "segment 0 solar yellow, got {red},{g},{b}"
+    );
+    check("power_mix", &px);
+}
+
+#[test]
+fn price_carbon_and_renewable() {
+    let m = electricity_model();
+    let mut r = Renderer::new().unwrap();
+
+    // 1.2 s: the badge has faded in and sits in the "current price" window.
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Price, 1.2), &mut px);
+    check("price", &px);
+
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Carbon, 5.0), &mut px);
+    check("carbon", &px);
+
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Renewable, 1.2), &mut px);
+    check("renewable", &px);
+}
+
+#[test]
+fn electricity_without_a_token_shows_a_key() {
+    let m = ready_model();
+    assert!(!m.token_present());
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Carbon, 2.0), &mut px);
+    check("no_token", &px);
 }
 
 #[test]

@@ -1,0 +1,243 @@
+//! Electricity Maps sources, colours, icons and the power-mix ring partition.
+
+use crate::theme::Color;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Source {
+    Nuclear,
+    Geothermal,
+    Biomass,
+    Coal,
+    Wind,
+    Solar,
+    Hydro,
+    Gas,
+    Oil,
+    Unknown,
+    HydroStorage,
+    BatteryStorage,
+}
+
+impl Source {
+    pub const ALL: [Source; 12] = [
+        Source::Nuclear,
+        Source::Geothermal,
+        Source::Biomass,
+        Source::Coal,
+        Source::Wind,
+        Source::Solar,
+        Source::Hydro,
+        Source::Gas,
+        Source::Oil,
+        Source::Unknown,
+        Source::HydroStorage,
+        Source::BatteryStorage,
+    ];
+
+    /// The key Electricity Maps uses in `powerProductionBreakdown`.
+    pub fn from_api_key(k: &str) -> Option<Source> {
+        Some(match k {
+            "nuclear" => Source::Nuclear,
+            "geothermal" => Source::Geothermal,
+            "biomass" => Source::Biomass,
+            "coal" => Source::Coal,
+            "wind" => Source::Wind,
+            "solar" => Source::Solar,
+            "hydro" => Source::Hydro,
+            "gas" => Source::Gas,
+            "oil" => Source::Oil,
+            "unknown" => Source::Unknown,
+            "hydro discharge" => Source::HydroStorage,
+            "battery discharge" => Source::BatteryStorage,
+            _ => return None,
+        })
+    }
+
+    pub fn color(self) -> Color {
+        Color::hex(match self {
+            Source::Biomass => 0x008043,
+            Source::Geothermal => 0xA73C15,
+            Source::Hydro => 0x1878EA,
+            Source::Solar => 0xFFC700,
+            Source::Wind => 0x69D6F8,
+            Source::Nuclear => 0x9D71F7,
+            Source::BatteryStorage => 0x1DA484,
+            Source::HydroStorage => 0x2B3CD8,
+            Source::Coal => 0xac8c35,
+            Source::Gas => 0xAAA189,
+            Source::Oil => 0x584745,
+            Source::Unknown => 0xACACAC,
+        })
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Source::Biomass => "em-biomass",
+            Source::Geothermal => "em-geothermal",
+            Source::Hydro => "em-hydro",
+            Source::Solar => "em-solar",
+            Source::Wind => "em-wind",
+            Source::Nuclear => "em-nuclear",
+            Source::BatteryStorage => "em-battery-storage",
+            Source::HydroStorage => "em-hydro-storage",
+            Source::Coal => "em-coal",
+            Source::Gas => "em-gas",
+            Source::Oil => "em-oil",
+            Source::Unknown => "em-unknown",
+        }
+    }
+
+    /// Position in `ALL`; the tie-break for equal shares.
+    pub fn index(self) -> usize {
+        Source::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    }
+}
+
+/// A section shorter than this gets no icon: there is no room for one.
+pub const MIX_ICON_MIN_SEGS: usize = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Section {
+    pub source: Source,
+    /// First segment index (0 = 12 o'clock).
+    pub start: usize,
+    /// Lit segments, gap excluded.
+    pub len: usize,
+}
+
+/// Split `n` segments by share. Input is (source, share) with shares > 0, any order.
+/// Output is sorted by share descending; each source gets at least one lit segment;
+/// between two sources one segment stays unlit (taken from the larger neighbour).
+pub fn partition(shares: &[(Source, f32)], n: usize) -> Vec<Section> {
+    let mut items: Vec<(Source, f32)> = shares.iter().copied().filter(|(_, s)| *s > 0.0).collect();
+    if items.is_empty() || n == 0 {
+        return Vec::new();
+    }
+    items.sort_by(|a, b| {
+        b.1.total_cmp(&a.1)
+            .then_with(|| a.0.index().cmp(&b.0.index()))
+    });
+    let count = items.len().min(n);
+    items.truncate(count);
+    let total: f32 = items.iter().map(|(_, s)| s).sum();
+    let gaps = if count > 1 { count } else { 0 };
+    let usable = n.saturating_sub(gaps).max(count);
+    // largest remainder apportionment with a floor of 1
+    let mut alloc: Vec<usize> = items
+        .iter()
+        .map(|(_, s)| ((s / total) * usable as f32).floor() as usize)
+        .collect();
+    for a in alloc.iter_mut() {
+        if *a == 0 {
+            *a = 1;
+        }
+    }
+    let mut used: usize = alloc.iter().sum();
+    while used > usable {
+        let idx = alloc
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, a)| **a)
+            .map(|(i, _)| i)
+            .expect("alloc is not empty");
+        alloc[idx] -= 1;
+        used -= 1;
+    }
+    let mut remainders: Vec<(usize, f32)> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (_, s))| (i, (s / total) * usable as f32 - alloc[i] as f32))
+        .collect();
+    remainders.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let mut i = 0;
+    while used < usable {
+        let idx = remainders[i % remainders.len()].0;
+        alloc[idx] += 1;
+        used += 1;
+        i += 1;
+    }
+    let mut out = Vec::with_capacity(count);
+    let mut start = 0;
+    for (k, (source, _)) in items.iter().enumerate() {
+        out.push(Section {
+            source: *source,
+            start,
+            len: alloc[k],
+        });
+        start += alloc[k] + if gaps > 0 { 1 } else { 0 };
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_keys_and_palette() {
+        assert_eq!(
+            Source::from_api_key("hydro discharge"),
+            Some(Source::HydroStorage)
+        );
+        assert_eq!(
+            Source::from_api_key("battery discharge"),
+            Some(Source::BatteryStorage)
+        );
+        assert_eq!(Source::from_api_key("fusion"), None);
+        assert_eq!(Source::Solar.color(), Color::hex(0xFFC700));
+        assert_eq!(Source::Coal.icon(), "em-coal");
+        for s in Source::ALL {
+            assert_eq!(Source::ALL[s.index()], s);
+        }
+    }
+
+    #[test]
+    fn partition_sorts_gaps_and_floors() {
+        let p = partition(
+            &[
+                (Source::Wind, 24.0),
+                (Source::Solar, 48.0),
+                (Source::Gas, 13.0),
+                (Source::Hydro, 0.4),
+                (Source::Nuclear, 0.0),
+            ],
+            60,
+        );
+        assert_eq!(p.len(), 4, "zero share absent");
+        assert_eq!(p[0].source, Source::Solar);
+        assert_eq!(p[0].start, 0);
+        let lit: usize = p.iter().map(|s| s.len).sum();
+        assert_eq!(lit + 4, 60, "one gap per section, including after the last");
+        assert!(p.iter().all(|s| s.len >= 1));
+        for w in p.windows(2) {
+            assert_eq!(w[1].start, w[0].start + w[0].len + 1);
+        }
+        assert!(p[0].len > p[1].len && p[1].len > p[2].len);
+    }
+
+    #[test]
+    fn partition_single_and_empty() {
+        let p = partition(&[(Source::Solar, 1.0)], 60);
+        assert_eq!(
+            p,
+            vec![Section {
+                source: Source::Solar,
+                start: 0,
+                len: 60
+            }]
+        );
+        assert!(partition(&[], 60).is_empty());
+        assert!(partition(&[(Source::Solar, 0.0)], 60).is_empty());
+    }
+
+    #[test]
+    fn partition_fits_the_ring_with_every_source() {
+        let many: Vec<(Source, f32)> = Source::ALL.iter().map(|s| (*s, 1.0)).collect();
+        let p = partition(&many, 60);
+        assert_eq!(p.len(), 12);
+        let end = p.last().map(|s| s.start + s.len).unwrap_or(0);
+        assert!(end <= 60, "last section ends at {end}");
+        assert!(p.iter().all(|s| s.len >= 1));
+        assert!(partition(&many, 0).is_empty());
+    }
+}

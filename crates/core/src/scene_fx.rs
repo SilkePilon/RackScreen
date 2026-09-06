@@ -2,7 +2,9 @@
 
 use crate::anim::{pulse, Easing, Secs};
 use crate::fx::{Splash, Sweep, SweepPhase, SPLASH_SECS};
-use crate::scene::{connecting_scene, no_data_scene, role_scene, Drawable, Scene, SegState};
+use crate::scene::{
+    connecting_scene, no_data_scene, no_data_scene_with, role_scene, Drawable, Scene, SegState,
+};
 use crate::theme::layout::*;
 use crate::theme::{Role, WHITE};
 
@@ -154,8 +156,8 @@ impl crate::model::Model {
             Role::Health => !st.have_nodes,
             Role::Thermal => !st.have_temps,
             Role::Storage => !st.have_storage,
-            // Sources for these arrive later; until then they always show no-data.
-            Role::PowerMix | Role::Price | Role::Carbon | Role::Renewable => true,
+            Role::PowerMix | Role::Carbon | Role::Renewable => !self.electricity().have,
+            Role::Price => !self.prices().have,
         }
     }
 
@@ -196,10 +198,18 @@ impl crate::model::Model {
 
     /// Role scene without transition or splash (tests, goldens, calibrate).
     pub fn scene_for_role(&self, role: Role, now: Secs) -> Scene {
-        if self.needs_data(role) {
-            no_data_scene(now)
+        if !self.needs_data(role) {
+            return role_scene(self, role, now);
+        }
+        let electricity = matches!(
+            role,
+            Role::PowerMix | Role::Price | Role::Carbon | Role::Renewable
+        );
+        if electricity && !self.token_present() {
+            // never configured, rather than a source that went quiet
+            no_data_scene_with(now, "key-round")
         } else {
-            role_scene(self, role, now)
+            no_data_scene(now)
         }
     }
 }

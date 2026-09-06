@@ -1,8 +1,9 @@
 //! Cluster state and the fold of events into it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
+use crate::electricity::Source;
 use crate::event::{Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::screens::ScreenState;
@@ -36,7 +37,34 @@ pub struct LinkState {
     pub api: bool,
     pub prom: bool,
     pub qbit: bool,
+    pub electricity: bool,
+    pub prices: bool,
 }
+
+/// The latest Electricity Maps sample.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ElectricityState {
+    pub zone: String,
+    /// Production per source in MW, as reported.
+    pub mix: Vec<(Source, f32)>,
+    pub renewable_pct: f32,
+    pub fossil_free_pct: f32,
+    pub carbon_gco2: f32,
+    pub updated_at: String,
+    pub have: bool,
+}
+
+/// Day-ahead prices, one entry per local hour starting at 00:00.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PriceState {
+    pub date: String,
+    pub ct: Vec<f32>,
+    pub currency: String,
+    pub have: bool,
+}
+
+/// A smoothed share below this is treated as gone: no segment, no icon.
+const SHARE_EPS: f32 = 0.05;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClusterState {
@@ -94,6 +122,18 @@ pub struct Model {
     pods: Smooth,
     hot_temp: Smooth,
     storage_pct: Smooth,
+    electricity: ElectricityState,
+    prices: PriceState,
+    /// Percent of total production per source, eased.
+    shares: HashMap<Source, Smooth>,
+    renewable: Smooth,
+    fossil_free: Smooth,
+    carbon: Smooth,
+    /// An Electricity Maps token is configured; without one the electricity
+    /// roles show a key instead of the offline cloud.
+    token_present: bool,
+    /// Local wall-clock hour, set by the render loop.
+    local_hour: u32,
     hot_last: HashMap<(Role, String), Secs>,
     hot_temp_last: HashMap<String, Secs>,
     night_override: Option<bool>,
@@ -115,6 +155,8 @@ impl Model {
                 api: false,
                 prom: false,
                 qbit: false,
+                electricity: false,
+                prices: false,
             },
             thresholds,
             cpu: Smooth::new(0.0, SMOOTH_SECS),
@@ -122,6 +164,14 @@ impl Model {
             pods: Smooth::new(0.0, SMOOTH_SECS),
             hot_temp: Smooth::new(0.0, SMOOTH_SECS),
             storage_pct: Smooth::new(0.0, SMOOTH_SECS),
+            electricity: ElectricityState::default(),
+            prices: PriceState::default(),
+            shares: HashMap::new(),
+            renewable: Smooth::new(0.0, SMOOTH_SECS),
+            fossil_free: Smooth::new(0.0, SMOOTH_SECS),
+            carbon: Smooth::new(0.0, SMOOTH_SECS),
+            token_present: false,
+            local_hour: 12,
             hot_last: HashMap::new(),
             hot_temp_last: HashMap::new(),
             night_override: None,
@@ -162,6 +212,52 @@ impl Model {
     }
     pub fn smooth_storage_pct(&self, now: Secs) -> f32 {
         self.storage_pct.value(now)
+    }
+    pub fn electricity(&self) -> &ElectricityState {
+        &self.electricity
+    }
+    pub fn prices(&self) -> &PriceState {
+        &self.prices
+    }
+    /// Eased share of total production for one source, in percent.
+    pub fn smooth_share(&self, source: Source, now: Secs) -> f32 {
+        self.shares
+            .get(&source)
+            .map(|s| s.value(now))
+            .unwrap_or(0.0)
+    }
+    /// Every source still worth drawing, in `Source::ALL` order.
+    pub fn smooth_shares(&self, now: Secs) -> Vec<(Source, f32)> {
+        let mut out: Vec<(Source, f32)> = self
+            .shares
+            .iter()
+            .map(|(s, sm)| (*s, sm.value(now)))
+            .filter(|(_, v)| *v >= SHARE_EPS)
+            .collect();
+        out.sort_by_key(|(s, _)| s.index());
+        out
+    }
+    pub fn smooth_renewable(&self, now: Secs) -> f32 {
+        self.renewable.value(now)
+    }
+    pub fn smooth_fossil_free(&self, now: Secs) -> f32 {
+        self.fossil_free.value(now)
+    }
+    pub fn smooth_carbon(&self, now: Secs) -> f32 {
+        self.carbon.value(now)
+    }
+    pub fn set_token_present(&mut self, present: bool) {
+        self.token_present = present;
+    }
+    pub fn token_present(&self) -> bool {
+        self.token_present
+    }
+    /// The local wall-clock hour (0..=23) the price ring marks as "now".
+    pub fn set_local_hour(&mut self, h: u32) {
+        self.local_hour = h.min(23);
+    }
+    pub fn local_hour(&self) -> u32 {
+        self.local_hour
     }
     pub fn pending_fx(&self) -> &[FxRequest] {
         &self.fx
@@ -206,6 +302,9 @@ impl Model {
     /// Drain animation requests into the queues and advance them, then advance
     /// each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
+        // sources that left the mix ease to zero, then stop costing anything
+        self.shares
+            .retain(|_, sm| sm.target() > 0.0 || sm.value(now) >= SHARE_EPS);
         for req in std::mem::take(&mut self.fx) {
             self.fx_state.apply(req, now);
         }
@@ -330,6 +429,57 @@ impl Model {
             Event::HotTemp { .. } => self.fx.push(FxRequest::HotTemp),
             Event::VolumeDegraded { .. } => self.fx.push(FxRequest::VolumeDegraded),
             Event::VolumeHealthy { .. } => self.fx.push(FxRequest::VolumeHealthy),
+            Event::Electricity {
+                zone,
+                mix_mw,
+                renewable_pct,
+                fossil_free_pct,
+                carbon_gco2,
+                updated_at,
+            } => {
+                let total: f32 = mix_mw.iter().map(|(_, mw)| mw.max(0.0)).sum();
+                for (src, mw) in &mix_mw {
+                    let pct = if total > 0.0 {
+                        mw.max(0.0) / total * 100.0
+                    } else {
+                        0.0
+                    };
+                    self.shares
+                        .entry(*src)
+                        .or_insert_with(|| Smooth::new(0.0, SMOOTH_SECS))
+                        .set(pct, now);
+                }
+                let present: HashSet<Source> = mix_mw.iter().map(|(s, _)| *s).collect();
+                for (src, sm) in self.shares.iter_mut() {
+                    if !present.contains(src) {
+                        sm.set(0.0, now);
+                    }
+                }
+                self.renewable.set(renewable_pct, now);
+                self.fossil_free.set(fossil_free_pct, now);
+                self.carbon.set(carbon_gco2, now);
+                self.electricity = ElectricityState {
+                    zone,
+                    mix: mix_mw,
+                    renewable_pct,
+                    fossil_free_pct,
+                    carbon_gco2,
+                    updated_at,
+                    have: true,
+                };
+            }
+            Event::Prices {
+                date,
+                ct_per_kwh,
+                currency,
+            } => {
+                self.prices = PriceState {
+                    date,
+                    ct: ct_per_kwh,
+                    currency,
+                    have: true,
+                };
+            }
             Event::Torrents(list) => self.state.torrents = list,
             Event::TorrentAdded { .. } => self.fx.push(FxRequest::TorrentAdded),
             Event::TorrentDone { .. } => self.fx.push(FxRequest::TorrentDone),
@@ -351,6 +501,8 @@ impl Model {
                 }
                 LinkTarget::Prometheus => self.link.prom = up,
                 LinkTarget::QBittorrent => self.link.qbit = up,
+                LinkTarget::Electricity => self.link.electricity = up,
+                LinkTarget::Prices => self.link.prices = up,
             },
             Event::Boot => {
                 if self.link.api {
@@ -645,6 +797,117 @@ mod tests {
         assert_eq!(m.screen_count(), 1);
         assert!(m.screen(0).is_some());
         assert!(m.screen(1).is_none());
+    }
+
+    fn mix(list: &[(Source, f32)], carbon: f32) -> Event {
+        Event::Electricity {
+            zone: "NL".into(),
+            mix_mw: list.to_vec(),
+            renewable_pct: 61.0,
+            fossil_free_pct: 73.0,
+            carbon_gco2: carbon,
+            updated_at: "2026-09-07T12:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn electricity_fold_normalises_shares_to_percent() {
+        let mut m = Model::new(Thresholds::default());
+        assert!(!m.electricity().have);
+        m.apply(
+            mix(
+                &[
+                    (Source::Wind, 2400.0),
+                    (Source::Solar, 4800.0),
+                    (Source::Gas, 1300.0),
+                    (Source::Coal, -10.0),
+                ],
+                214.0,
+            ),
+            0.0,
+        );
+        assert!(m.electricity().have);
+        assert_eq!(m.electricity().zone, "NL");
+        assert_eq!(m.electricity().mix.len(), 4);
+        let shares = m.smooth_shares(5.0);
+        let sum: f32 = shares.iter().map(|(_, v)| v).sum();
+        assert!((sum - 100.0).abs() < 1e-3, "shares sum to 100, got {sum}");
+        assert!((m.smooth_share(Source::Solar, 5.0) - 4800.0 / 8500.0 * 100.0).abs() < 1e-3);
+        assert_eq!(
+            shares
+                .iter()
+                .find(|(s, _)| *s == Source::Coal)
+                .map(|(_, v)| *v),
+            None,
+            "a negative reading is clamped to zero and drops out"
+        );
+        assert!((m.smooth_renewable(5.0) - 61.0).abs() < 1e-4);
+        assert!((m.smooth_fossil_free(5.0) - 73.0).abs() < 1e-4);
+        assert!((m.smooth_carbon(5.0) - 214.0).abs() < 1e-4);
+        assert!(m.smooth_carbon(0.0) < 1.0, "carbon eases in");
+    }
+
+    #[test]
+    fn a_source_that_leaves_the_mix_eases_to_zero_and_is_dropped() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            mix(&[(Source::Solar, 50.0), (Source::Wind, 50.0)], 100.0),
+            0.0,
+        );
+        assert_eq!(m.smooth_shares(5.0).len(), 2);
+        m.apply(mix(&[(Source::Wind, 50.0)], 100.0), 5.0);
+        let mid = m.smooth_share(Source::Solar, 5.2);
+        assert!(mid > 0.0 && mid < 50.0, "solar eases out, got {mid}");
+        assert_eq!(m.smooth_shares(5.2).len(), 2, "still drawn while it fades");
+        assert_eq!(m.smooth_shares(10.0).len(), 1, "gone once it reaches zero");
+        m.tick(10.0);
+        assert_eq!(m.smooth_share(Source::Solar, 10.0), 0.0);
+        assert!((m.smooth_share(Source::Wind, 10.0) - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn prices_and_links_and_token() {
+        let mut m = Model::new(Thresholds::default());
+        assert!(!m.prices().have);
+        assert_eq!(
+            m.local_hour(),
+            12,
+            "noon until the render loop says otherwise"
+        );
+        m.apply(
+            Event::Prices {
+                date: "2026-09-07".into(),
+                ct_per_kwh: vec![10.0, 12.5, 22.1],
+                currency: "EUR".into(),
+            },
+            0.0,
+        );
+        assert!(m.prices().have);
+        assert_eq!(m.prices().ct.len(), 3);
+        assert_eq!(m.prices().currency, "EUR");
+        assert_eq!(m.prices().date, "2026-09-07");
+        m.apply(
+            Event::Link {
+                target: LinkTarget::Electricity,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Link {
+                target: LinkTarget::Prices,
+                up: true,
+            },
+            0.0,
+        );
+        assert!(m.link().electricity && m.link().prices);
+        assert!(!m.token_present());
+        m.set_token_present(true);
+        assert!(m.token_present());
+        m.set_local_hour(14);
+        assert_eq!(m.local_hour(), 14);
+        m.set_local_hour(99);
+        assert_eq!(m.local_hour(), 23, "clamped into the day");
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! Events emitted by sources and folded into the model.
 
+use crate::electricity::Source;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Torrent {
     pub name: String,
@@ -35,6 +37,8 @@ pub enum LinkTarget {
     K8sApi,
     Prometheus,
     QBittorrent,
+    Electricity,
+    Prices,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -98,6 +102,22 @@ pub enum Event {
     },
     VolumeHealthy {
         name: String,
+    },
+    /// One Electricity Maps power-breakdown sample for a zone.
+    Electricity {
+        zone: String,
+        /// Production per source in MW, only the sources the zone reports.
+        mix_mw: Vec<(Source, f32)>,
+        renewable_pct: f32,
+        fossil_free_pct: f32,
+        carbon_gco2: f32,
+        updated_at: String,
+    },
+    /// Day-ahead prices, one entry per local hour starting at 00:00.
+    Prices {
+        date: String,
+        ct_per_kwh: Vec<f32>,
+        currency: String,
     },
     Torrents(Vec<Torrent>),
     TorrentAdded {
