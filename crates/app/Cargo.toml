@@ -1,0 +1,29 @@
+[package]
+name = "rackscreen-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rackscreen-core = { path = "../core" }
+rackscreen-render = { path = "../render" }
+rackscreen-display = { path = "../display", default-features = false }
+rackscreen-sources = { path = "../sources" }
+anyhow.workspace = true
+serde.workspace = true
+serde_yaml_ng = "0.10"
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tiny-skia.workspace = true
+chrono = "0.4"
+dirs = "7"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+sim = ["rackscreen-display/sim"]
+pi = ["rackscreen-display/pi"]

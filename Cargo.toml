@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/render", "crates/display", "crates/sources"]
+members = ["crates/core", "crates/render", "crates/display", "crates/sources", "crates/app"]
 resolver = "2"
 
 [workspace.package]
@@ -35,13 +35,13 @@ rackscreen-core = { path = "crates/core" }
 rackscreen-render = { path = "crates/render" }
 rackscreen-display = { path = "crates/display", default-features = false }
 rackscreen-sources = { path = "crates/sources" }
+rackscreen-app = { path = "crates/app" }
 anyhow.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-toml = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "7"
 tiny-skia.workspace = true
@@ -49,8 +49,8 @@ chrono = "0.4"
 
 [features]
 default = ["sim", "pi"]
-sim = ["rackscreen-display/sim"]
-pi = ["rackscreen-display/pi"]
+sim = ["rackscreen-display/sim", "rackscreen-app/sim"]
+pi = ["rackscreen-display/pi", "rackscreen-app/pi"]
 
 [profile.release]
 opt-level = 3

@@ -1,6 +1,5 @@
 //! RackScreen: animated Kubernetes monitor for four round displays.
 
-mod config;
 mod runloop;
 
 use std::path::PathBuf;
@@ -18,7 +17,7 @@ use rackscreen_render::frame::Orient;
 use rackscreen_sources::SourceCtx;
 use tokio_util::sync::CancellationToken;
 
-use config::{expand_home, Config};
+use rackscreen_app::config::{expand_home, Config};
 use runloop::{NightWindow, RenderLoop, ScreenSlot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -30,7 +29,7 @@ enum SourceKind {
 #[derive(Parser, Debug)]
 #[command(name = "rackscreen", version, about)]
 struct Cli {
-    /// Config file (default: ~/.config/rackscreen/config.toml)
+    /// Config file (default: /etc/rackscreen/config.yaml)
     #[arg(long)]
     config: Option<PathBuf>,
     /// Desktop simulator window instead of SPI displays

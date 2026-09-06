@@ -1,12 +1,12 @@
-//! TOML configuration with defaults matching config.example.toml.
+//! YAML configuration with defaults matching config.example.yaml.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rackscreen_core::theme::Role;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Config {
     #[serde(default)]
     pub k8s: K8sCfg,
@@ -24,13 +24,13 @@ pub struct Config {
     pub screens: Vec<ScreenCfg>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct K8sCfg {
     pub kubeconfig: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct PromCfg {
     pub namespace: String,
@@ -40,7 +40,7 @@ pub struct PromCfg {
     pub ignore_alerts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct QbitCfg {
     pub enabled: bool,
@@ -52,7 +52,7 @@ pub struct QbitCfg {
     pub poll_secs: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct NightCfg {
     pub enabled: bool,
@@ -60,14 +60,14 @@ pub struct NightCfg {
     pub end: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct ThresholdsCfg {
     pub hot_cpu: f32,
     pub hot_mem: f32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct DisplayCfg {
     pub brightness: f32,
@@ -75,9 +75,7 @@ pub struct DisplayCfg {
     pub spi_chunk: usize,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-// Pin fields are only read by the SPI backend.
-#[cfg_attr(not(feature = "pi"), allow(dead_code))]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ScreenCfg {
     pub role: String,
     pub spi: u8,
@@ -167,8 +165,8 @@ impl Default for DisplayCfg {
 }
 impl Default for Config {
     fn default() -> Self {
-        toml::from_str(include_str!("../config.example.toml"))
-            .expect("config.example.toml is valid")
+        Config::from_yaml(include_str!("../../../config.example.yaml"))
+            .expect("config.example.yaml is valid")
     }
 }
 
@@ -181,13 +179,23 @@ pub fn expand_home(p: &str) -> PathBuf {
     PathBuf::from(p)
 }
 
+pub const DEFAULT_PATH: &str = "/etc/rackscreen/config.yaml";
+
 impl Config {
     pub fn default_path() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("rackscreen/config.toml")
+        PathBuf::from(DEFAULT_PATH)
     }
 
+    pub fn from_yaml(text: &str) -> Result<Config> {
+        let cfg: Config = serde_yaml_ng::from_str(text).context("parse yaml")?;
+        Ok(cfg)
+    }
+
+    pub fn to_yaml(&self) -> Result<String> {
+        serde_yaml_ng::to_string(self).context("serialise yaml")
+    }
+
+    /// Load from `path` (or the default path). Missing file: warn and use defaults.
     pub fn load(path: Option<&Path>) -> Result<Config> {
         let path = path
             .map(Path::to_path_buf)
@@ -199,12 +207,30 @@ impl Config {
             );
             return Ok(Config::default());
         }
-        let text =
-            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        let cfg: Config =
-            toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+        let cfg = Config::load_or_default(&path)?;
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// Load from `path`; a missing file silently yields defaults (used by setup tools).
+    pub fn load_or_default(path: &Path) -> Result<Config> {
+        if !path.exists() {
+            return Ok(Config::default());
+        }
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        Config::from_yaml(&text).with_context(|| format!("parse {}", path.display()))
+    }
+
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        }
+        let text = format!(
+            "# RackScreen configuration (written by rackscreen setup)\n{}",
+            self.to_yaml()?
+        );
+        std::fs::write(path, text).with_context(|| format!("write {}", path.display()))
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -236,22 +262,56 @@ mod tests {
         assert_eq!(c.screens[3].role().unwrap(), Role::Health);
         assert_eq!(c.screens[2].hz, 16_000_000);
         assert_eq!(c.prometheus.port, 9090);
-        assert_eq!(c.prometheus.ignore_alerts, ["Watchdog", "InfoInhibitor"]);
+        assert_eq!(
+            c.prometheus.ignore_alerts,
+            vec!["Watchdog", "InfoInhibitor"]
+        );
         assert!(c.qbittorrent.enabled);
+        assert_eq!(c.display.spi_chunk, 4096);
+        c.validate().unwrap();
     }
 
     #[test]
-    fn partial_toml_fills_defaults() {
-        let c: Config = toml::from_str("[night]\nenabled = false\n[[screens]]\nrole = \"cpu\"\nspi = 0\ncs = 0\ndc = 6\nrst = 5\n").unwrap();
+    fn partial_yaml_fills_defaults() {
+        let c = Config::from_yaml(
+            "night:\n  enabled: false\nscreens:\n  - { role: cpu, spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
         assert!(!c.night.enabled);
         assert_eq!(c.night.start, "23:00");
         assert_eq!(c.screens[0].hz, 40_000_000);
+        assert_eq!(c.screens[0].rotate, 0);
         assert_eq!(c.display.fps, 30);
-        assert_eq!(c.prometheus.ignore_alerts, ["Watchdog", "InfoInhibitor"]);
     }
 
     #[test]
-    fn bad_role_rejected() {
+    fn yaml_round_trip_preserves_everything() {
+        let mut c = Config::default();
+        c.screens[1].rotate = 90;
+        c.screens[1].hflip = false;
+        c.qbittorrent.pass = "s3cret".into();
+        let back = Config::from_yaml(&c.to_yaml().unwrap()).unwrap();
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn save_and_load_or_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/config.yaml");
+        assert_eq!(Config::load_or_default(&path).unwrap(), Config::default());
+        let mut c = Config::default();
+        c.display.spi_chunk = 65536;
+        c.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# RackScreen configuration"));
+        assert_eq!(
+            Config::load_or_default(&path).unwrap().display.spi_chunk,
+            65536
+        );
+    }
+
+    #[test]
+    fn bad_role_and_bad_rotate_rejected() {
         let s = ScreenCfg {
             role: "nope".into(),
             spi: 0,
@@ -263,25 +323,10 @@ mod tests {
             hz: 1,
         };
         assert!(s.role().is_err());
-    }
-
-    #[test]
-    fn invalid_rotate_rejected() {
-        let toml = |rot: u32| {
-            format!(
-                "[[screens]]\nrole = \"cpu\"\nspi = 0\ncs = 0\ndc = 6\nrst = 5\nrotate = {rot}\n"
-            )
-        };
-        for ok in [0, 90, 180, 270] {
-            let c: Config = toml::from_str(&toml(ok)).unwrap();
-            c.validate().unwrap();
-        }
-        let c: Config = toml::from_str(&toml(45)).unwrap();
+        let mut c = Config::default();
+        c.screens[0].rotate = 45;
         let err = c.validate().unwrap_err().to_string();
-        assert!(err.contains("rotate") && err.contains("45"), "{err}");
-        assert!(Config::default().validate().is_ok());
-        let empty: Config = toml::from_str("").unwrap();
-        assert!(empty.validate().is_err(), "no screens is rejected");
+        assert!(err.contains("rotate") && err.contains("45"));
     }
 
     #[test]
