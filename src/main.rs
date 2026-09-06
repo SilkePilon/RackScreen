@@ -61,7 +61,7 @@ async fn wait_for_shutdown(stop: &AtomicBool) {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT, stopping"),
         _ = sigterm() => tracing::info!("SIGTERM, stopping"),
-        _ = render_stopped => tracing::warn!("render loop stopped, shutting down"),
+        _ = render_stopped => tracing::info!("stop flag set (render loop exited or window closed), shutting down"),
     }
 }
 
@@ -268,14 +268,21 @@ fn main() -> Result<()> {
     );
 
     // ---- block main thread ----
+    // Signal handling runs on the runtime from the start so SIGINT/SIGTERM also
+    // stop the simulator, whose window loop owns the main thread.
+    let waiter = {
+        let stop = stop.clone();
+        runtime.spawn(async move {
+            wait_for_shutdown(&stop).await;
+            stop.store(true, Ordering::Relaxed);
+        })
+    };
     #[cfg(feature = "sim")]
     if let Some(hub) = sim_hub {
         hub.run(stop.clone());
-    }
-    if !stop.load(Ordering::Relaxed) {
-        runtime.block_on(wait_for_shutdown(&stop));
         stop.store(true, Ordering::Relaxed);
     }
+    let _ = runtime.block_on(waiter);
 
     shutdown.cancel();
     let _ = render_thread.join();
