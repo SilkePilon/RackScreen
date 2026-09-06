@@ -14,7 +14,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use tiny_skia::Pixmap;
 
-use crate::ops::config_file::set_orientation;
+use crate::ops::config_file::{save_config, set_orientation};
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
@@ -37,6 +37,9 @@ pub struct Calibrate {
     error: Option<String>,
     service_was_active: bool,
     message: String,
+    /// The file on disk could not be loaded: the panels show defaults for testing, but
+    /// `s` must never overwrite the user's file with them.
+    unreadable: bool,
 }
 
 /// The terminal preview of one panel after rotate/hflip: 5 text rows with an arrow,
@@ -82,7 +85,14 @@ pub fn mini_panel(rotate: u32, hflip: bool, number: usize, unicode: bool) -> Vec
 
 impl Calibrate {
     pub fn new(shared: &Shared) -> Calibrate {
-        let cfg = Config::load_or_default(&shared.ctx.config_path).unwrap_or_default();
+        let (cfg, error, unreadable) = match Config::load_or_default(&shared.ctx.config_path) {
+            Ok(cfg) => (cfg, None, false),
+            Err(e) => (
+                Config::default(),
+                Some(format!("config unreadable: {e:#}; fix the file by hand")),
+                true,
+            ),
+        };
         let orient = cfg
             .screens
             .iter()
@@ -91,12 +101,6 @@ impl Calibrate {
                 hflip: s.hflip,
             })
             .collect();
-        let sh = RealShell;
-        let sd = Systemd::new(&sh, &service_user());
-        let service_was_active = !shared.ctx.sim && sd.is_active().unwrap_or(false);
-        if service_was_active {
-            let _ = sd.stop();
-        }
         let mut me = Calibrate {
             cfg,
             orient,
@@ -105,15 +109,31 @@ impl Calibrate {
             renderer: None,
             frames: Vec::new(),
             scratch: new_pixmap(),
-            error: None,
-            service_was_active,
+            error,
+            service_was_active: false,
             message: "adjust each screen until the arrow points up and the dot is top-right".into(),
+            unreadable,
         };
-        match (
-            open_panels(&me.cfg, shared.ctx.sim, false, None),
-            Renderer::new(),
-        ) {
-            (Ok(p), Ok(r)) => {
+        // Stop the service only now that `me` exists: a panic while opening the panels
+        // still runs `Drop`, which starts it again.
+        if !shared.ctx.sim {
+            let sh = RealShell;
+            let sd = Systemd::new(&sh, &service_user());
+            if sd.is_active().unwrap_or(false) {
+                me.service_was_active = true;
+                let _ = sd.stop();
+            }
+        }
+        let opened =
+            open_panels(&me.cfg, shared.ctx.sim, false, None).and_then(|p| match Renderer::new() {
+                Ok(r) => Ok((p, r)),
+                Err(e) => {
+                    p.shutdown();
+                    Err(e)
+                }
+            });
+        match opened {
+            Ok((p, r)) => {
                 me.frames = (0..p.handles.len()).map(|_| new_pixmap()).collect();
                 me.panels = Some(p);
                 me.renderer = Some(r);
@@ -121,7 +141,12 @@ impl Calibrate {
                     me.push(i);
                 }
             }
-            (Err(e), _) | (_, Err(e)) => me.error = Some(format!("{e:#}")),
+            Err(e) => {
+                me.error = Some(match me.error.take() {
+                    Some(prev) => format!("{prev}; {e:#}"),
+                    None => format!("{e:#}"),
+                })
+            }
         }
         me
     }
@@ -143,12 +168,15 @@ impl Calibrate {
     }
 
     fn save(&mut self, shared: &mut Shared) -> Result<(), String> {
+        if self.unreadable {
+            return Err(
+                "not saved: the existing config is unreadable; fix the file by hand".into(),
+            );
+        }
         for (i, o) in self.orient.iter().enumerate() {
             set_orientation(&mut self.cfg, i, o.rotate, o.hflip);
         }
-        self.cfg
-            .save(&shared.ctx.config_path)
-            .map_err(|e| format!("{e:#}"))
+        save_config(&self.cfg, &shared.ctx.config_path).map_err(|e| format!("{e:#}"))
     }
 
     /// Build a screen without panels or a renderer (tests).
@@ -164,6 +192,7 @@ impl Calibrate {
             error: None,
             service_was_active: false,
             message: String::new(),
+            unreadable: false,
         }
     }
 
@@ -405,5 +434,101 @@ mod tests {
         // Drawing with no screens must be safe too.
         let mut term = Terminal::new(TestBackend::new(60, 14)).unwrap();
         term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+    }
+
+    #[test]
+    fn unreadable_config_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let mut sh = Shared {
+            ctx: Ctx {
+                config_path: path.clone(),
+                sim: true,
+                version: "0.2.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+            log_sink: LogSink::new(10),
+        };
+        // One screen, so `s` reaches `save` (with none the key is ignored outright).
+        let one = vec![Orientation {
+            rotate: 0,
+            hflip: false,
+        }];
+        let mut screen = Calibrate::from_parts(Config::default(), one);
+        screen.unreadable = true;
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0),
+            Action::None
+        ));
+        assert!(!path.exists(), "defaults must not replace the user's file");
+        assert!(screen.error.as_deref().unwrap().contains("not saved"));
+    }
+
+    /// Corner (0 TR, 1 BR, 2 BL, 3 TL) holding the amber marker, found by the centroid
+    /// of pixels close to `#ffb020` inside the ring (radius < 96 excludes the ring).
+    fn marker_corner(px: &Pixmap) -> Option<usize> {
+        let d = px.data();
+        let close = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 24;
+        let (mut sx, mut sy, mut n) = (0.0f64, 0.0f64, 0usize);
+        for y in 0..240usize {
+            for x in 0..240usize {
+                let (dx, dy) = (x as f64 - 120.0, y as f64 - 120.0);
+                if (dx * dx + dy * dy).sqrt() >= 96.0 {
+                    continue;
+                }
+                let i = (y * 240 + x) * 4;
+                if close(d[i], 0xff) && close(d[i + 1], 0xb0) && close(d[i + 2], 0x20) {
+                    sx += x as f64;
+                    sy += y as f64;
+                    n += 1;
+                }
+            }
+        }
+        if n < 20 {
+            return None;
+        }
+        let (cx, cy) = (sx / n as f64, sy / n as f64);
+        Some(match (cx > 120.0, cy > 120.0) {
+            (true, false) => 0,
+            (true, true) => 1,
+            (false, true) => 2,
+            (false, false) => 3,
+        })
+    }
+
+    /// The corner `mini_panel` puts its marker in, same numbering as `marker_corner`.
+    fn mini_corner(lines: &[String]) -> usize {
+        if lines[0].ends_with("● ") {
+            0
+        } else if lines[4].ends_with("● ") {
+            1
+        } else if lines[4].starts_with(" ●") {
+            2
+        } else {
+            assert!(lines[0].starts_with(" ●"), "{lines:?}");
+            3
+        }
+    }
+
+    /// The terminal preview and the pixels sent to a panel must agree for every
+    /// rotate/hflip combination, otherwise the user calibrates against a lie.
+    #[test]
+    fn oriented_marker_matches_mini_panel_corner() {
+        use rackscreen_core::theme::Role;
+        let mut r = Renderer::new().unwrap();
+        let mut base = new_pixmap();
+        r.render(&test_pattern(0, Role::Pods), &mut base);
+        assert_eq!(marker_corner(&base), Some(0), "source marker is top-right");
+        let mut out = new_pixmap();
+        for rotate in [0, 90, 180, 270] {
+            for hflip in [false, true] {
+                Orient::new(rotate, hflip).apply(&base, &mut out);
+                let got = marker_corner(&out).expect("marker visible after orienting");
+                let want = mini_corner(&mini_panel(rotate, hflip, 1, true));
+                assert_eq!(got, want, "rotate {rotate} hflip {hflip}");
+            }
+        }
     }
 }

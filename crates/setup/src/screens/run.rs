@@ -24,22 +24,28 @@ pub struct RunHere {
 impl RunHere {
     pub fn new(shared: &Shared) -> RunHere {
         shared.log_sink.clear();
-        let sh = RealShell;
-        let sd = Systemd::new(&sh, &service_user());
-        let service_was_active = !shared.ctx.sim && sd.is_active().unwrap_or(false);
-        if service_was_active {
-            tracing::info!("stopping the service while running in the foreground");
-            let _ = sd.stop();
+        let mut me = RunHere {
+            monitor: None,
+            error: None,
+            service_was_active: false,
+            stopping: false,
+        };
+        // Stop the service only now that `me` exists: a panic in `Monitor::start` still
+        // runs `Drop`, which starts it again.
+        if !shared.ctx.sim {
+            let sh = RealShell;
+            let sd = Systemd::new(&sh, &service_user());
+            if sd.is_active().unwrap_or(false) {
+                tracing::info!("stopping the service while running in the foreground");
+                me.service_was_active = true;
+                let _ = sd.stop();
+            }
         }
         let cfg = match Config::load_or_default(&shared.ctx.config_path) {
             Ok(c) => c,
             Err(e) => {
-                return RunHere {
-                    monitor: None,
-                    error: Some(format!("{e:#}")),
-                    service_was_active,
-                    stopping: false,
-                }
+                me.error = Some(format!("{e:#}"));
+                return me;
             }
         };
         let opts = RunOptions {
@@ -47,19 +53,10 @@ impl RunHere {
             ..RunOptions::default()
         };
         match Monitor::start(&cfg, opts) {
-            Ok(m) => RunHere {
-                monitor: Some(m),
-                error: None,
-                service_was_active,
-                stopping: false,
-            },
-            Err(e) => RunHere {
-                monitor: None,
-                error: Some(format!("{e:#}")),
-                service_was_active,
-                stopping: false,
-            },
+            Ok(m) => me.monitor = Some(m),
+            Err(e) => me.error = Some(format!("{e:#}")),
         }
+        me
     }
 
     fn finish(&mut self) {
@@ -143,7 +140,6 @@ impl Screen for RunHere {
     fn subtitle(&self) -> String {
         "Run here".into()
     }
-    fn animating(&self, _now: Secs) -> bool {
-        self.monitor.is_some()
-    }
+    // No `animating` override: the 10 Hz idle redraw is plenty for a log tail, and
+    // 60 Hz would only burn CPU next to the monitor.
 }
