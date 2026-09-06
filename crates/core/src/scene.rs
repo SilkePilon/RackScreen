@@ -24,6 +24,10 @@ pub enum Drawable {
         radius: f32,
         n: usize,
         states: Vec<SegState>,
+        /// Degrees between segments; `360 / n` for a closed ring, less for an arc.
+        pitch_deg: f32,
+        /// Angle of segment 0, clockwise from 12 o'clock.
+        start_deg: f32,
     },
     Icon {
         name: &'static str,
@@ -62,6 +66,18 @@ pub enum Drawable {
         spacing: f32,
         r: f32,
         colors: Vec<Color>,
+    },
+    /// A single radial tick over `r0..r1` at `angle_deg` from 12 o'clock; the
+    /// round cap adds `width / 2` at each end, as it does for ring segments.
+    Tick {
+        cx: f32,
+        cy: f32,
+        angle_deg: f32,
+        r0: f32,
+        r1: f32,
+        width: f32,
+        color: Color,
+        alpha: f32,
     },
 }
 
@@ -155,7 +171,55 @@ fn ring(radius: f32, states: Vec<SegState>) -> Drawable {
         radius,
         n,
         states,
+        pitch_deg: 360.0 / n as f32,
+        start_deg: 0.0,
     }
+}
+
+/// A badge wide enough for `colors.len()` dots plus the dots themselves.
+///
+/// Up to four nodes this keeps the original 64 px badge with `DOT_SPACING` /
+/// `DOT_R` geometry; past that the badge grows (`12 * n + 16`) and the dots
+/// tighten to spacing 12 / radius 4.5 so eight of them still fit.
+pub fn node_dots_badge(
+    cy: f32,
+    stroke: Color,
+    colors: Vec<Color>,
+    breathe_idx: Option<usize>,
+    now: Secs,
+) -> Vec<Drawable> {
+    let n = colors.len();
+    let wanted = 12.0 * n as f32 + 16.0;
+    let (w, spacing, r) = if wanted > BADGE_W {
+        (wanted, 12.0, 4.5)
+    } else {
+        (BADGE_W, DOT_SPACING, DOT_R)
+    };
+    let mut b = badge(cy, stroke, String::new());
+    if let Drawable::Badge { w: bw, .. } = &mut b {
+        *bw = w;
+    }
+    let colors = colors
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            if Some(i) == breathe_idx {
+                c.with_alpha(breathe(now, 2.4))
+            } else {
+                c
+            }
+        })
+        .collect();
+    vec![
+        b,
+        Drawable::Dots {
+            cx: CX,
+            cy,
+            spacing,
+            r,
+            colors,
+        },
+    ]
 }
 
 /// Segment count for a ring of the given radius (60 at r=102, fewer inside).
@@ -315,24 +379,18 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
                 *scale = 1.0 + 0.12 * heartbeat(now);
             }
             s.push(heart);
-            s.push(badge(
-                BADGE_CY,
-                if alert { RED } else { GREEN },
-                String::new(),
-            ));
+            let accent = if alert { RED } else { GREEN };
             let total = st.nodes_total as usize;
             if total > 0 {
                 let ready = st.nodes_ready as usize;
                 let colors = (0..total)
                     .map(|i| if i < ready { GREEN } else { RED })
                     .collect();
-                s.push(Drawable::Dots {
-                    cx: CX,
-                    cy: BADGE_CY,
-                    spacing: DOT_SPACING,
-                    r: DOT_R,
-                    colors,
-                });
+                for d in node_dots_badge(BADGE_CY, accent, colors, None, now) {
+                    s.push(d);
+                }
+            } else {
+                s.push(badge(BADGE_CY, accent, String::new()));
             }
             if alert {
                 s.push(Drawable::Dots {
@@ -433,6 +491,51 @@ mod tests {
     use super::*;
     use crate::event::{Event, LinkTarget};
     use crate::model::Thresholds;
+
+    #[test]
+    fn node_dots_badge_widens_past_four_nodes() {
+        let d = node_dots_badge(165.0, GREEN, vec![GREEN; 8], None, 0.0);
+        assert_eq!(d.len(), 2);
+        match (&d[0], &d[1]) {
+            (
+                Drawable::Badge { w, .. },
+                Drawable::Dots {
+                    spacing, colors, ..
+                },
+            ) => {
+                assert_eq!(*w, 112.0);
+                assert_eq!(*spacing, 12.0);
+                assert_eq!(colors.len(), 8);
+            }
+            _ => panic!("badge then dots"),
+        }
+        let d = node_dots_badge(165.0, GREEN, vec![GREEN; 3], None, 0.0);
+        match (&d[0], &d[1]) {
+            (
+                Drawable::Badge { w, .. },
+                Drawable::Dots {
+                    spacing, colors, ..
+                },
+            ) => {
+                assert_eq!(*w, 64.0);
+                assert_eq!(*spacing, DOT_SPACING);
+                assert_eq!(colors.len(), 3);
+            }
+            _ => panic!("badge then dots"),
+        }
+    }
+
+    #[test]
+    fn node_dots_badge_breathes_one_dot() {
+        let d = node_dots_badge(165.0, GREEN, vec![GREEN; 4], Some(2), 0.0);
+        match &d[1] {
+            Drawable::Dots { colors, .. } => {
+                assert_eq!(colors[0], GREEN);
+                assert!(colors[2].a < 255, "dot 2 breathes");
+            }
+            _ => panic!("dots"),
+        }
+    }
 
     fn model_with_cpu(pct: f32) -> Model {
         let mut m = Model::new(Thresholds::default());

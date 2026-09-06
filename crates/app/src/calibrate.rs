@@ -12,6 +12,8 @@ pub fn test_pattern(index: usize, role: Role) -> Scene {
         radius: RING_R,
         n: SEG_N,
         states: vec![SegState::On(role.accent(), 1.0); SEG_N],
+        pitch_deg: 6.0,
+        start_deg: 0.0,
     });
     s.push(Drawable::Icon {
         name: "arrow-up",

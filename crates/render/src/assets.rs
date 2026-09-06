@@ -33,6 +33,26 @@ icons!(
     "plug-zap",
     "plug",
     "cloud-off",
+    "euro",
+    "cloud",
+    "leaf",
+    "thermometer",
+    "database",
+    "database-zap",
+    "key-round",
+    "zap",
+    "em-biomass",
+    "em-geothermal",
+    "em-hydro",
+    "em-solar",
+    "em-wind",
+    "em-nuclear",
+    "em-battery-storage",
+    "em-hydro-storage",
+    "em-coal",
+    "em-gas",
+    "em-oil",
+    "em-unknown",
 );
 
 #[cfg(test)]
@@ -45,7 +65,11 @@ mod tests {
             let data = icon_svg(name).expect(name);
             let tree = usvg::Tree::from_data(data, &usvg::Options::default())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert_eq!(tree.size().width(), 24.0, "{name}");
+            assert!(
+                matches!(tree.size().width() as u32, 8 | 16 | 24),
+                "{name}: {}",
+                tree.size().width()
+            );
         }
     }
 

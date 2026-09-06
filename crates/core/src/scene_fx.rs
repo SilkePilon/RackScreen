@@ -125,6 +125,8 @@ pub fn sweep_scene(sweep: &Sweep, role: Role, phase: SweepPhase, now: Secs) -> S
         radius: RING_R,
         n,
         states,
+        pitch_deg: 6.0,
+        start_deg: 0.0,
     });
     s.push(Drawable::Icon {
         name: sweep.kind.icon(role),

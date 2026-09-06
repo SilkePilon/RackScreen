@@ -61,8 +61,16 @@ pub fn segment_outline(
     outline(&line, width).expect("segment outline")
 }
 
+/// Geometry key for a ring: centre, radius, count, pitch and start angle, each
+/// quantised so equal rings share one entry.
+type SegKey = (u32, u32, u32, usize, u32, u32);
+
+/// How many distinct rings to keep before dropping the lot. Rotating rings vary
+/// `start_deg` every frame, so without a cap the map would grow without bound.
+const SEG_CACHE_MAX: usize = 512;
+
 pub struct SegmentCache {
-    map: HashMap<(u32, u32, u32, usize), Vec<Path>>,
+    map: HashMap<SegKey, Vec<Path>>,
 }
 
 impl SegmentCache {
@@ -72,20 +80,47 @@ impl SegmentCache {
         }
     }
 
+    /// A full ring: `n` segments evenly spaced from 12 o'clock.
     pub fn segments(&mut self, cx: f32, cy: f32, radius: f32, n: usize) -> &[Path] {
+        self.segments_pitched(cx, cy, radius, n, 360.0 / n as f32, 0.0)
+    }
+
+    /// `n` segments `pitch_deg` apart, the first at `start_deg` clockwise from
+    /// 12 o'clock, so an arc can be shorter than a full turn and can rotate.
+    pub fn segments_pitched(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        n: usize,
+        pitch_deg: f32,
+        start_deg: f32,
+    ) -> &[Path] {
         use rackscreen_core::theme::layout::{SEG_LEN, SEG_W};
         let key = (
             (cx * 10.0) as u32,
             (cy * 10.0) as u32,
             (radius * 10.0) as u32,
             n,
+            (pitch_deg * 100.0) as u32,
+            (start_deg.rem_euclid(360.0) * 100.0) as u32,
         );
+        if self.map.len() > SEG_CACHE_MAX && !self.map.contains_key(&key) {
+            self.map.clear();
+        }
         self.map
             .entry(key)
             .or_insert_with(|| {
                 (0..n)
                     .map(|i| {
-                        segment_outline(cx, cy, radius, i as f32 * 360.0 / n as f32, SEG_LEN, SEG_W)
+                        segment_outline(
+                            cx,
+                            cy,
+                            radius,
+                            start_deg + i as f32 * pitch_deg,
+                            SEG_LEN,
+                            SEG_W,
+                        )
                     })
                     .collect()
             })
@@ -158,6 +193,30 @@ mod tests {
         assert_eq!(c.map.len(), 1);
         c.segments(120.0, 120.0, 86.0, 51);
         assert_eq!(c.map.len(), 2);
+    }
+
+    #[test]
+    fn pitched_segments_start_where_asked() {
+        let mut c = SegmentCache::new();
+        assert_eq!(
+            c.segments_pitched(120.0, 120.0, 102.0, 48, 7.5, 0.0).len(),
+            48
+        );
+        let seg = c.segments_pitched(120.0, 120.0, 102.0, 48, 7.5, 90.0)[0].clone();
+        let mut px = Pixmap::new(240, 240).unwrap();
+        px.fill(tiny_skia::Color::BLACK);
+        fill(&mut px, &seg, WHITE, 1.0);
+        assert!(pixel(&px, 222, 120).0 > 200, "segment 0 sits at 3 o'clock");
+        assert_eq!(pixel(&px, 120, 18), (0, 0, 0), "and not at 12 o'clock");
+    }
+
+    #[test]
+    fn segment_cache_is_capped() {
+        let mut c = SegmentCache::new();
+        for i in 0..(SEG_CACHE_MAX + 4) {
+            c.segments_pitched(120.0, 120.0, 102.0, 1, 6.0, i as f32 * 0.5);
+        }
+        assert!(c.map.len() <= SEG_CACHE_MAX + 1, "len {}", c.map.len());
     }
 
     #[test]

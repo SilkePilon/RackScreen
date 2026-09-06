@@ -9,11 +9,12 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Path, Pixmap, Stroke, Transform};
 use crate::assets::{icon_svg, ICON_NAMES};
 use crate::prims::paint;
 
-const ICON_UNITS: f32 = 24.0;
-
 struct IconPaths {
     strokes: Vec<(Path, f32)>,
     fills: Vec<Path>,
+    /// viewBox width of the source SVG: Lucide is 24, the Electricity Maps
+    /// icons are 8 or 16, so the draw scale is per icon.
+    units: f32,
 }
 
 fn collect(group: &usvg::Group, out: &mut IconPaths) {
@@ -42,6 +43,7 @@ fn load(svg: &[u8]) -> Result<IconPaths> {
     let mut out = IconPaths {
         strokes: Vec::new(),
         fills: Vec::new(),
+        units: tree.size().width(),
     };
     collect(tree.root(), &mut out);
     anyhow::ensure!(
@@ -89,10 +91,10 @@ impl IconCache {
         let Some(icon) = self.icons.get(name) else {
             return;
         };
-        let k = scale * size / ICON_UNITS;
+        let k = scale * size / icon.units;
         let ts = Transform::from_translate(cx, cy + dy)
             .pre_scale(k, k)
-            .pre_translate(-ICON_UNITS / 2.0, -ICON_UNITS / 2.0);
+            .pre_translate(-icon.units / 2.0, -icon.units / 2.0);
         let p = paint(color, alpha);
         for (path, width) in &icon.strokes {
             let stroke = Stroke {
@@ -153,6 +155,26 @@ mod tests {
         assert!((cy - 98.0).abs() <= 1.5, "cy {cy}");
         let w = (x1 - x0) as f32;
         assert!(w > 56.0 && w <= 74.0, "width {w}");
+    }
+
+    #[test]
+    fn em_icons_use_their_own_viewbox_units() {
+        let c = IconCache::new().unwrap();
+        let mut p = Pixmap::new(240, 240).unwrap();
+        p.fill(tiny_skia::Color::BLACK);
+        c.draw(&mut p, "em-solar", 60.0, 60.0, 26.0, WHITE, 1.0, 1.0, 0.0);
+        let (x0, y0, x1, y1) = lit_bbox(&p).unwrap();
+        let cx = (x0 + x1) as f32 / 2.0;
+        let cy = (y0 + y1) as f32 / 2.0;
+        assert!((cx - 60.0).abs() <= 1.5, "cx {cx}");
+        assert!((cy - 60.0).abs() <= 1.5, "cy {cy}");
+        let w = (x1 - x0) as f32;
+        assert!((18.0..=28.0).contains(&w), "width {w}");
+
+        let mut q = Pixmap::new(240, 240).unwrap();
+        q.fill(tiny_skia::Color::BLACK);
+        c.draw(&mut q, "em-coal", 120.0, 120.0, 60.0, WHITE, 1.0, 1.0, 0.0);
+        assert!(lit_bbox(&q).is_some(), "em-coal drew nothing");
     }
 
     #[test]
