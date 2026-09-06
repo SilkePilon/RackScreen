@@ -50,6 +50,28 @@ fn layout(n: usize, grid: bool) -> (usize, usize, Vec<(usize, usize)>) {
     }
 }
 
+/// The simulator's key map: everything the fake source understands.
+fn key_char(key: Key) -> Option<char> {
+    Some(match key {
+        Key::Key1 => '1',
+        Key::Key2 => '2',
+        Key::Key3 => '3',
+        Key::Key4 => '4',
+        Key::Key5 => '5',
+        Key::Key6 => '6',
+        Key::Key7 => '7',
+        Key::Key8 => '8',
+        Key::Key9 => '9',
+        Key::Key0 => '0',
+        Key::T => 't',
+        Key::N => 'n',
+        Key::B => 'b',
+        Key::H => 'h',
+        Key::P => 'p',
+        _ => return None,
+    })
+}
+
 fn draw_bezel(buf: &mut [u32], stride: usize, ox: usize, oy: usize) {
     let c = PANEL as f32 / 2.0 - 0.5;
     for y in 0..PANEL {
@@ -111,21 +133,9 @@ impl SimHub {
             && !stop.load(Ordering::Relaxed)
         {
             for key in self.window.get_keys_pressed(KeyRepeat::No) {
-                let ch = match key {
-                    Key::Key1 => '1',
-                    Key::Key2 => '2',
-                    Key::Key3 => '3',
-                    Key::Key4 => '4',
-                    Key::Key5 => '5',
-                    Key::Key6 => '6',
-                    Key::Key7 => '7',
-                    Key::Key8 => '8',
-                    Key::T => 't',
-                    Key::N => 'n',
-                    Key::B => 'b',
-                    _ => continue,
-                };
-                let _ = self.key_tx.send(ch);
+                if let Some(ch) = key_char(key) {
+                    let _ = self.key_tx.send(ch);
+                }
             }
             let snapshot = self.buf.lock().unwrap().clone();
             if self
@@ -137,7 +147,7 @@ impl SimHub {
             }
             frames += 1;
             if last.elapsed() >= Duration::from_secs(1) {
-                self.window.set_title(&format!("RackScreen sim  {frames} fps  [1-8 events, t torrent, n night, b boot, Esc quit]"));
+                self.window.set_title(&format!("RackScreen sim  {frames} fps  [1-8 events, 9/0 volume, h hot, p price outage, t torrent, n night, b boot, Esc quit]"));
                 frames = 0;
                 last = Instant::now();
             }
@@ -211,6 +221,23 @@ mod tests {
         let (w, h, o) = layout(4, true);
         assert_eq!((w, h), (540, 540));
         assert_eq!(o[3], (280, 280));
+    }
+
+    #[test]
+    fn keys_forward_every_fake_command() {
+        for (key, ch) in [
+            (Key::Key9, '9'),
+            (Key::Key0, '0'),
+            (Key::H, 'h'),
+            (Key::P, 'p'),
+            (Key::Key1, '1'),
+            (Key::T, 't'),
+            (Key::N, 'n'),
+            (Key::B, 'b'),
+        ] {
+            assert_eq!(key_char(key), Some(ch));
+        }
+        assert_eq!(key_char(Key::Escape), None);
     }
 
     #[test]
