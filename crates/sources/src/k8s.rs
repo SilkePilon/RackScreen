@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
@@ -244,13 +245,66 @@ impl NodeTracker {
     }
 }
 
+/// How long the pod watch may keep failing before the API link is reported down.
+pub const LINK_GRACE: Duration = Duration::from_secs(10);
+
+/// Turns a noisy watch stream (410 Gone after a long watch, a single TCP reset)
+/// into link edges: down only after errors have persisted for `grace`, up on
+/// the first completed list after that (or the very first one).
+#[derive(Debug)]
+pub struct LinkEdge {
+    grace: Duration,
+    up: bool,
+    first_err: Option<Instant>,
+}
+
+impl LinkEdge {
+    pub fn new(grace: Duration) -> Self {
+        Self {
+            grace,
+            up: false,
+            first_err: None,
+        }
+    }
+
+    pub fn is_up(&self) -> bool {
+        self.up
+    }
+
+    pub fn on_error(&mut self, now: Instant) -> Option<Event> {
+        let first = *self.first_err.get_or_insert(now);
+        if self.up && now.duration_since(first) > self.grace {
+            self.up = false;
+            return Some(Event::Link {
+                target: LinkTarget::K8sApi,
+                up: false,
+            });
+        }
+        None
+    }
+
+    /// `synced` is true when the item completes a (re)list, i.e. `InitDone`;
+    /// the link only comes up once the tracker holds a full snapshot again.
+    pub fn on_ok(&mut self, _now: Instant, synced: bool) -> Option<Event> {
+        self.first_err = None;
+        if synced && !self.up {
+            self.up = true;
+            return Some(Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            });
+        }
+        None
+    }
+}
+
 pub async fn run_pod_watch(client: Client, ctx: SourceCtx) {
     let api: Api<Pod> = Api::all(client);
     let mut stream = watcher(api, watcher::Config::default().any_semantic())
         .default_backoff()
         .boxed();
     let mut tracker = PodTracker::new();
-    let mut link_up = false;
+    let mut link = LinkEdge::new(LINK_GRACE);
     loop {
         let item = tokio::select! {
             _ = ctx.shutdown.cancelled() => return,
@@ -259,35 +313,26 @@ pub async fn run_pod_watch(client: Client, ctx: SourceCtx) {
         let Some(item) = item else { return };
         match item {
             Ok(ev) => {
+                let synced = matches!(ev, watcher::Event::InitDone);
                 let evs = match ev {
                     watcher::Event::Init => {
                         tracker.begin_init();
                         Vec::new()
                     }
                     watcher::Event::InitApply(p) => tracker.apply(&p),
-                    watcher::Event::InitDone => {
-                        if !link_up {
-                            link_up = true;
-                            ctx.emit(Event::Link {
-                                target: LinkTarget::K8sApi,
-                                up: true,
-                            });
-                        }
-                        tracker.init_done()
-                    }
+                    watcher::Event::InitDone => tracker.init_done(),
                     watcher::Event::Apply(p) => tracker.apply(&p),
                     watcher::Event::Delete(p) => tracker.delete(&p),
                 };
+                if let Some(edge) = link.on_ok(Instant::now(), synced) {
+                    ctx.emit(edge);
+                }
                 ctx.emit_all(evs);
             }
             Err(e) => {
                 tracing::warn!("pod watch: {e}");
-                if link_up {
-                    link_up = false;
-                    ctx.emit(Event::Link {
-                        target: LinkTarget::K8sApi,
-                        up: false,
-                    });
+                if let Some(edge) = link.on_error(Instant::now()) {
+                    ctx.emit(edge);
                 }
             }
         }
@@ -483,6 +528,60 @@ mod tests {
         t.init_done();
         let evs = t.apply(&pod("fresh", "Running", 0, None));
         assert!(matches!(evs[0], Event::PodStarted { .. }));
+    }
+
+    #[test]
+    fn link_edge_tolerates_short_outages() {
+        let t0 = Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        let up = Event::Link {
+            target: LinkTarget::K8sApi,
+            up: true,
+        };
+        let down = Event::Link {
+            target: LinkTarget::K8sApi,
+            up: false,
+        };
+        let mut e = LinkEdge::new(Duration::from_secs(10));
+        assert_eq!(
+            e.on_error(at(0)),
+            None,
+            "errors before first sync are silent"
+        );
+        assert_eq!(
+            e.on_ok(at(1), false),
+            None,
+            "Init/InitApply do not raise the link"
+        );
+        assert_eq!(e.on_ok(at(2), true), Some(up.clone()), "first InitDone");
+        assert!(e.is_up());
+        // a single 410 Gone then a quick re-list: no edge at all
+        assert_eq!(e.on_error(at(100)), None);
+        assert_eq!(e.on_ok(at(101), false), None);
+        assert_eq!(
+            e.on_ok(at(102), true),
+            None,
+            "no up without a preceding down"
+        );
+        // errors persisting past the grace period drop the link exactly once
+        assert_eq!(e.on_error(at(200)), None);
+        assert_eq!(e.on_error(at(205)), None);
+        assert_eq!(
+            e.on_error(at(210)),
+            None,
+            "not strictly older than grace yet"
+        );
+        assert_eq!(e.on_error(at(211)), Some(down.clone()));
+        assert!(!e.is_up());
+        assert_eq!(e.on_error(at(230)), None, "down emitted once");
+        // recovery: up only once the re-list completes
+        assert_eq!(e.on_ok(at(240), false), None);
+        assert_eq!(e.on_ok(at(241), true), Some(up));
+        // an ok item resets the error clock
+        assert_eq!(e.on_error(at(300)), None);
+        assert_eq!(e.on_ok(at(305), false), None);
+        assert_eq!(e.on_error(at(312)), None, "clock restarted at 312");
+        assert_eq!(e.on_error(at(323)), Some(down));
     }
 
     #[test]
