@@ -85,7 +85,7 @@ pub fn step_list(
         };
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(format!("{glyph:<2}"), style),
+            Span::styled(format!("{glyph:<3}"), style),
             Span::styled(s.title.clone(), title_style),
         ]));
         if let Some(n) = note {

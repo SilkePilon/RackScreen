@@ -244,10 +244,10 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(70, 16)).unwrap();
         term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
-        assert!(text.contains("✓ Check platform"));
+        assert!(text.contains("✓  Check platform"));
         assert!(text.contains("Raspberry Pi"));
-        assert!(text.contains("○ Write config"));
-        assert!(text.contains("✗ Boot"));
+        assert!(text.contains("○  Write config"));
+        assert!(text.contains("✗  Boot"));
         assert!(text.contains("no permission"));
     }
 }
