@@ -27,17 +27,21 @@ pub enum DisplayCmd {
     Quit,
 }
 
-impl DisplayCmd {
-    fn is_control(&self) -> bool {
-        !matches!(self, DisplayCmd::Frame(..))
-    }
+/// What is waiting for the display thread. Frames accumulate (dirty rects are
+/// unioned, the newest full pixmap is kept) so a slow panel never misses a
+/// region that changed in a frame it did not get to push. A pending control
+/// command is delivered before the pending frame and never causes a frame to
+/// be dropped.
+#[derive(Default)]
+struct Slot {
+    frame: Option<(Pixmap, Rect)>,
+    control: Option<DisplayCmd>,
 }
 
-/// Single-slot mailbox. A newer frame replaces an unconsumed older frame;
-/// control commands are never replaced by frames.
+/// Per-screen mailbox between the render loop and one display thread.
 #[derive(Clone)]
 pub struct Mailbox {
-    inner: Arc<(Mutex<Option<DisplayCmd>>, Condvar)>,
+    inner: Arc<(Mutex<Slot>, Condvar)>,
 }
 
 impl Default for Mailbox {
@@ -49,16 +53,22 @@ impl Default for Mailbox {
 impl Mailbox {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new((Mutex::new(None), Condvar::new())),
+            inner: Arc::new((Mutex::new(Slot::default()), Condvar::new())),
         }
     }
 
     pub fn put(&self, cmd: DisplayCmd) {
         let (lock, cv) = &*self.inner;
         let mut slot = lock.lock().unwrap();
-        match (&*slot, &cmd) {
-            (Some(existing), DisplayCmd::Frame(..)) if existing.is_control() => return,
-            _ => *slot = Some(cmd),
+        match cmd {
+            DisplayCmd::Frame(px, rect) => {
+                let rect = match slot.frame.take() {
+                    Some((_, old)) => old.union(rect),
+                    None => rect,
+                };
+                slot.frame = Some((px, rect));
+            }
+            control => slot.control = Some(control),
         }
         cv.notify_one();
     }
@@ -67,7 +77,7 @@ impl Mailbox {
         let (lock, cv) = &*self.inner;
         let mut slot = lock.lock().unwrap();
         loop {
-            if let Some(cmd) = slot.take() {
+            if let Some(cmd) = Self::pop(&mut slot) {
                 return cmd;
             }
             slot = cv.wait(slot).unwrap();
@@ -75,7 +85,14 @@ impl Mailbox {
     }
 
     pub fn try_take(&self) -> Option<DisplayCmd> {
-        self.inner.0.lock().unwrap().take()
+        Self::pop(&mut self.inner.0.lock().unwrap())
+    }
+
+    fn pop(slot: &mut Slot) -> Option<DisplayCmd> {
+        if let Some(c) = slot.control.take() {
+            return Some(c);
+        }
+        slot.frame.take().map(|(px, r)| DisplayCmd::Frame(px, r))
     }
 }
 
@@ -108,6 +125,12 @@ pub fn spawn_display_thread(
 mod tests {
     use super::*;
 
+    fn frame_at(tag: u8, x: u32, y: u32) -> DisplayCmd {
+        let mut p = Pixmap::new(2, 2).unwrap();
+        p.data_mut()[0] = tag;
+        DisplayCmd::Frame(p, Rect { x, y, w: 1, h: 1 })
+    }
+
     fn frame(tag: u8) -> DisplayCmd {
         let mut p = Pixmap::new(2, 2).unwrap();
         p.data_mut()[0] = tag;
@@ -135,14 +158,50 @@ mod tests {
     }
 
     #[test]
+    fn unconsumed_frames_accumulate_dirty_rect() {
+        let mb = Mailbox::new();
+        mb.put(frame_at(1, 10, 10));
+        mb.put(frame_at(2, 100, 100));
+        match mb.take() {
+            DisplayCmd::Frame(p, r) => {
+                assert_eq!(p.data()[0], 2, "newest pixmap is kept");
+                assert_eq!(
+                    r,
+                    Rect {
+                        x: 10,
+                        y: 10,
+                        w: 91,
+                        h: 91
+                    },
+                    "dirty rect is the union of both frames"
+                );
+            }
+            _ => panic!(),
+        }
+        assert!(mb.try_take().is_none());
+    }
+
+    #[test]
+    fn frame_is_delivered_after_pending_control() {
+        let mb = Mailbox::new();
+        mb.put(DisplayCmd::Sleep);
+        mb.put(frame(1));
+        assert!(matches!(mb.take(), DisplayCmd::Sleep));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(p, _) if p.data()[0] == 1));
+        assert!(mb.try_take().is_none());
+    }
+
+    #[test]
     fn control_is_not_replaced_by_frame() {
         let mb = Mailbox::new();
         mb.put(DisplayCmd::Sleep);
         mb.put(frame(1));
         assert!(matches!(mb.take(), DisplayCmd::Sleep));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(..)));
         mb.put(frame(1));
         mb.put(DisplayCmd::Quit);
         assert!(matches!(mb.take(), DisplayCmd::Quit));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(..)));
     }
 
     #[test]
