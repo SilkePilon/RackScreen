@@ -306,7 +306,11 @@ impl Screen for Status {
             Span::styled(g.dot, dot_style(s.links.prometheus, th)),
             Span::styled(" prometheus   ", th.normal()),
             Span::styled(g.dot, dot_style(s.links.qbittorrent, th)),
-            Span::styled(" qbittorrent", th.normal()),
+            Span::styled(" qbittorrent   ", th.normal()),
+            Span::styled(g.dot, dot_style(s.links.electricity, th)),
+            Span::styled(" electricity   ", th.normal()),
+            Span::styled(g.dot, dot_style(s.links.prices, th)),
+            Span::styled(" prices", th.normal()),
         ]));
         if let Some(n) = &self.restart_note {
             lines.push(Line::from(Span::styled(format!("  {n}"), th.warning())));
@@ -395,6 +399,8 @@ mod tests {
                 api: Dot::Up,
                 prometheus: Dot::Down,
                 qbittorrent: Dot::Unknown,
+                electricity: Dot::Unknown,
+                prices: Dot::Unknown,
             },
         };
         let sh = Shared {
@@ -440,6 +446,8 @@ mod tests {
                 api: Dot::Up,
                 prometheus: Dot::Down,
                 qbittorrent: Dot::Unknown,
+                electricity: Dot::Unknown,
+                prices: Dot::Unknown,
             },
         };
         let mut sh = Shared {

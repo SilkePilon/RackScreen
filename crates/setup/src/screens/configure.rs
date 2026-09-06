@@ -24,6 +24,17 @@ pub enum FieldKind {
     Secret,
     Number,
     Bool,
+    /// One of a fixed set of strings, cycled with Enter/space.
+    Choice,
+}
+
+/// The values a `FieldKind::Choice` field cycles through, in order.
+pub const PRICE_SOURCES: [&str; 3] = ["energyzero", "entsoe", "none"];
+
+/// The value after `cur` in `PRICE_SOURCES`, wrapping; the first one if `cur` is unknown.
+fn next_choice(cur: &str) -> &'static str {
+    let i = PRICE_SOURCES.iter().position(|v| *v == cur);
+    PRICE_SOURCES[i.map_or(0, |i| (i + 1) % PRICE_SOURCES.len())]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,9 +59,19 @@ pub enum Field {
     Brightness,
     Fps,
     SpiChunk,
+    ElecEnabled,
+    ElecZone,
+    ElecToken,
+    ElecPoll,
+    PriceSource,
+    EntsoeToken,
+    EntsoeZone,
+    IncludeVat,
+    PricePoll,
+    HotTemp,
 }
 
-pub const FIELDS: [(Field, &str, FieldKind); 20] = [
+pub const FIELDS: [(Field, &str, FieldKind); 30] = [
     (Field::Kubeconfig, "kubeconfig path", FieldKind::Text),
     (
         Field::PromNamespace,
@@ -79,6 +100,16 @@ pub const FIELDS: [(Field, &str, FieldKind); 20] = [
     (Field::Brightness, "brightness 0.1-1.0", FieldKind::Number),
     (Field::Fps, "fps", FieldKind::Number),
     (Field::SpiChunk, "spi chunk bytes", FieldKind::Number),
+    (Field::ElecEnabled, "electricity enabled", FieldKind::Bool),
+    (Field::ElecZone, "electricity zone", FieldKind::Text),
+    (Field::ElecToken, "electricity api token", FieldKind::Secret),
+    (Field::ElecPoll, "electricity poll secs", FieldKind::Number),
+    (Field::PriceSource, "price source", FieldKind::Choice),
+    (Field::EntsoeToken, "entsoe token", FieldKind::Secret),
+    (Field::EntsoeZone, "entsoe zone (EIC)", FieldKind::Text),
+    (Field::IncludeVat, "price incl. VAT", FieldKind::Bool),
+    (Field::PricePoll, "price poll secs", FieldKind::Number),
+    (Field::HotTemp, "hot node temp °C", FieldKind::Number),
 ];
 
 pub fn get(cfg: &Config, f: Field) -> String {
@@ -103,6 +134,16 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::Brightness => format!("{}", cfg.display.brightness),
         Field::Fps => cfg.display.fps.to_string(),
         Field::SpiChunk => cfg.display.spi_chunk.to_string(),
+        Field::ElecEnabled => cfg.electricity.enabled.to_string(),
+        Field::ElecZone => cfg.electricity.zone.clone(),
+        Field::ElecToken => cfg.electricity.token.clone(),
+        Field::ElecPoll => cfg.electricity.poll_secs.to_string(),
+        Field::PriceSource => cfg.price.source.clone(),
+        Field::EntsoeToken => cfg.price.entsoe_token.clone(),
+        Field::EntsoeZone => cfg.price.entsoe_zone.clone(),
+        Field::IncludeVat => cfg.price.include_vat.to_string(),
+        Field::PricePoll => cfg.price.poll_secs.to_string(),
+        Field::HotTemp => format!("{}", cfg.thresholds.hot_temp),
     }
 }
 
@@ -147,6 +188,24 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         }
         Field::Fps => cfg.display.fps = num::<u32>(t, "fps")?.clamp(1, 60),
         Field::SpiChunk => cfg.display.spi_chunk = num::<usize>(t, "spi chunk")?.max(64),
+        Field::ElecEnabled => cfg.electricity.enabled = t == "true",
+        Field::ElecZone => cfg.electricity.zone = t.into(),
+        Field::ElecToken => cfg.electricity.token = text.into(),
+        Field::ElecPoll => cfg.electricity.poll_secs = num::<u64>(t, "poll secs")?.max(60),
+        Field::PriceSource => {
+            if !PRICE_SOURCES.contains(&t) {
+                return Err(format!(
+                    "price source must be one of {}",
+                    PRICE_SOURCES.join(", ")
+                ));
+            }
+            cfg.price.source = t.into();
+        }
+        Field::EntsoeToken => cfg.price.entsoe_token = text.into(),
+        Field::EntsoeZone => cfg.price.entsoe_zone = t.into(),
+        Field::IncludeVat => cfg.price.include_vat = t == "true",
+        Field::PricePoll => cfg.price.poll_secs = num::<u64>(t, "poll secs")?.max(60),
+        Field::HotTemp => cfg.thresholds.hot_temp = num(t, "temp °C")?,
     }
     Ok(())
 }
@@ -275,6 +334,10 @@ impl Screen for Configure {
                     if kind == FieldKind::Bool {
                         let cur = get(&self.cfg, field) == "true";
                         let _ = set(&mut self.cfg, field, if cur { "false" } else { "true" });
+                        self.dirty = true;
+                    } else if kind == FieldKind::Choice {
+                        let next = next_choice(&get(&self.cfg, field));
+                        let _ = set(&mut self.cfg, field, next);
                         self.dirty = true;
                     } else {
                         self.mode = Mode::Edit(get(&self.cfg, field));
@@ -529,5 +592,61 @@ mod tests {
             let v = get(&c, f);
             assert!(set(&mut c, f, &v).is_ok(), "{f:?} round trip with {v:?}");
         }
+    }
+
+    #[test]
+    fn electricity_price_and_temp_fields() {
+        let mut c = Config::default();
+        assert_eq!(FIELDS.len(), 30);
+        assert_eq!(get(&c, Field::ElecZone), "NL");
+        assert_eq!(get(&c, Field::PriceSource), "energyzero");
+        assert_eq!(get(&c, Field::HotTemp), "70");
+        set(&mut c, Field::ElecEnabled, "true").unwrap();
+        assert!(c.electricity.enabled);
+        set(&mut c, Field::ElecZone, " DE ").unwrap();
+        assert_eq!(c.electricity.zone, "DE");
+        set(&mut c, Field::ElecToken, "tok").unwrap();
+        assert_eq!(c.electricity.token, "tok");
+        set(&mut c, Field::ElecPoll, "10").unwrap();
+        assert_eq!(c.electricity.poll_secs, 60, "poll secs are floored at 60");
+        set(&mut c, Field::EntsoeToken, "et").unwrap();
+        set(&mut c, Field::EntsoeZone, "10YNL----------L").unwrap();
+        assert_eq!(c.price.entsoe_zone, "10YNL----------L");
+        set(&mut c, Field::IncludeVat, "false").unwrap();
+        assert!(!c.price.include_vat);
+        set(&mut c, Field::PricePoll, "1800").unwrap();
+        assert_eq!(c.price.poll_secs, 1800);
+        set(&mut c, Field::HotTemp, "82.5").unwrap();
+        assert_eq!(c.thresholds.hot_temp, 82.5);
+        assert!(set(&mut c, Field::HotTemp, "warm").is_err());
+        // the choice field only takes the three known sources
+        assert!(set(&mut c, Field::PriceSource, "nordpool")
+            .unwrap_err()
+            .contains("price source must be one of"));
+        set(&mut c, Field::PriceSource, "entsoe").unwrap();
+        assert_eq!(c.price.source, "entsoe");
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn choice_field_cycles_on_enter() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        screen.row = FIELDS
+            .iter()
+            .position(|(f, _, _)| *f == Field::PriceSource)
+            .unwrap();
+        assert_eq!(screen.cfg.price.source, "energyzero");
+        for want in ["entsoe", "none", "energyzero"] {
+            screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+            assert_eq!(screen.cfg.price.source, want);
+        }
+        assert!(screen.dirty);
+        // space cycles too, and an unknown value falls back to the first
+        screen.cfg.price.source = "nordpool".into();
+        screen.handle(KeyEvent::from(KeyCode::Char(' ')), &mut sh, 0.0);
+        assert_eq!(screen.cfg.price.source, "energyzero");
+        assert!(matches!(screen.mode, Mode::Browse), "no edit buffer opened");
     }
 }

@@ -223,6 +223,11 @@ pub async fn run_prices(cfg: PriceConfig, ctx: SourceCtx) {
         match fetch_day(&cfg, today).await {
             Ok(ct) => {
                 failures = 0;
+                tracing::info!(
+                    "prices: {} hours for {}",
+                    ct.iter().filter(|v| v.is_finite()).count(),
+                    today
+                );
                 ctx.emit(Event::Link {
                     target: LinkTarget::Prices,
                     up: true,

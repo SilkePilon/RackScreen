@@ -104,6 +104,9 @@ pub async fn run_electricity(cfg: ElectricityConfig, ctx: SourceCtx) {
         match poll_once(&cfg).await {
             Ok(ev) => {
                 failures = 0;
+                if let Event::Electricity { mix_mw, .. } = &ev {
+                    tracing::info!("electricity: poll ok ({} sources)", mix_mw.len());
+                }
                 ctx.emit(Event::Link {
                     target: LinkTarget::Electricity,
                     up: true,

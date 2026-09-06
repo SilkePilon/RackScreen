@@ -133,6 +133,8 @@ pub struct LinkDots {
     pub api: Dot,
     pub prometheus: Dot,
     pub qbittorrent: Dot,
+    pub electricity: Dot,
+    pub prices: Dot,
 }
 
 /// Newest matching log line decides each dot. Lines come oldest first.
@@ -141,6 +143,8 @@ pub fn links_from_logs(lines: &[String]) -> LinkDots {
         api: Dot::Unknown,
         prometheus: Dot::Unknown,
         qbittorrent: Dot::Unknown,
+        electricity: Dot::Unknown,
+        prices: Dot::Unknown,
     };
     for l in lines {
         let lower = l.to_ascii_lowercase();
@@ -154,6 +158,12 @@ pub fn links_from_logs(lines: &[String]) -> LinkDots {
             d.qbittorrent = Dot::Up;
         } else if lower.contains("qbittorrent") && warn {
             d.qbittorrent = Dot::Down;
+        }
+        if lower.contains("electricity:") {
+            d.electricity = if warn { Dot::Down } else { Dot::Up };
+        }
+        if lower.contains("prices:") {
+            d.prices = if warn { Dot::Down } else { Dot::Up };
         }
         if lower.contains("pod watch") && warn {
             d.api = Dot::Down;
@@ -218,10 +228,10 @@ mod tests {
     #[test]
     fn journal_and_links() {
         let sh = FakeShell::new();
-        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO running (4 screens, 30 fps, source K8s)\n"));
+        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO electricity: poll ok (7 sources)\nWARN prices: energyzero status: 503\nINFO running (4 screens, 30 fps, source K8s)\n"));
         let sd = Systemd::new(&sh, "pi");
         let lines = sd.journal_tail(20).unwrap();
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 5);
         assert!(sh.called("journalctl -u rackscreen@pi -n 20"));
         let d = links_from_logs(&lines);
         assert_eq!(
@@ -229,9 +239,18 @@ mod tests {
             LinkDots {
                 api: Dot::Up,
                 prometheus: Dot::Up,
-                qbittorrent: Dot::Down
+                qbittorrent: Dot::Down,
+                electricity: Dot::Up,
+                prices: Dot::Down,
             }
         );
+        // the newest line wins for each dot
+        let later = links_from_logs(&[
+            "WARN electricity: token rejected".to_string(),
+            "INFO prices: 24 hours for 2026-09-07".to_string(),
+        ]);
+        assert_eq!(later.electricity, Dot::Down);
+        assert_eq!(later.prices, Dot::Up);
         assert_eq!(links_from_logs(&[]).api, Dot::Unknown);
     }
 }
