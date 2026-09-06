@@ -65,15 +65,27 @@ pub enum Drawable {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub items: Vec<Drawable>,
+    /// Scale about the centre applied by the renderer (1.0 = none).
+    pub zoom: f32,
+    /// Fraction of every ring's segments that are drawn (1.0 = all).
+    pub ring_reveal: f32,
+}
+
+impl Default for Scene {
+    fn default() -> Self {
+        Scene::new()
+    }
 }
 
 impl Scene {
     pub fn new() -> Self {
         Self {
             items: vec![Drawable::Clear(BLACK)],
+            zoom: 1.0,
+            ring_reveal: 1.0,
         }
     }
     pub fn push(&mut self, d: Drawable) {
@@ -333,6 +345,9 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             }
             s
         }
+        // Thermal, Storage, PowerMix, Price, Carbon, Renewable: scenes arrive with
+        // their data sources; until then they show the no-data ring.
+        _ => no_data_scene(now),
     }
 }
 

@@ -90,15 +90,27 @@ fn ready_model() -> Model {
         },
         0.0,
     );
+    m.set_screens(
+        vec![
+            vec![Role::Cpu],
+            vec![Role::Mem],
+            vec![Role::Pods],
+            vec![Role::Health],
+        ],
+        vec![15.0; 4],
+    );
     m
 }
+
+/// The four roles with goldens; the six newer roles get theirs with their scenes.
+const CLASSIC: [Role; 4] = [Role::Cpu, Role::Mem, Role::Pods, Role::Health];
 
 #[test]
 fn cpu_idle() {
     let m = ready_model();
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene(Role::Cpu, 5.0), &mut px);
+    r.render(&m.scene_for_role(Role::Cpu, 5.0), &mut px);
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
         red > 200 && g > 140 && b < 80,
@@ -114,9 +126,9 @@ fn cpu_idle() {
 fn all_roles_idle() {
     let m = ready_model();
     let mut r = Renderer::new().unwrap();
-    for role in Role::ALL {
+    for role in CLASSIC {
         let mut px = new_pixmap();
-        r.render(&m.scene(role, 5.0), &mut px);
+        r.render(&m.scene_for_role(role, 5.0), &mut px);
         check(&format!("idle_{}", role.icon()), &px);
     }
 }
@@ -126,7 +138,8 @@ fn connecting_and_no_data() {
     let mut r = Renderer::new().unwrap();
     let m = Model::new(Thresholds::default());
     let mut px = new_pixmap();
-    r.render(&m.scene(Role::Cpu, 0.0), &mut px);
+    // `scene` (not `scene_for_role`): the connecting scene comes from the link check.
+    r.render(&m.scene(0, 0.0), &mut px);
     check("connecting", &px);
     let mut m2 = Model::new(Thresholds::default());
     m2.apply(
@@ -137,7 +150,7 @@ fn connecting_and_no_data() {
         0.0,
     );
     let mut px2 = new_pixmap();
-    r.render(&m2.scene(Role::Cpu, 0.5), &mut px2);
+    r.render(&m2.scene_for_role(Role::Cpu, 0.5), &mut px2);
     check("no_data", &px2);
 }
 
@@ -154,7 +167,7 @@ fn pod_crash_splash_mid_swap() {
     m.tick(5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene(Role::Pods, 5.35), &mut px);
+    r.render(&m.scene(Role::Pods.index(), 5.35), &mut px);
     check("pods_splash", &px);
 }
 
@@ -193,7 +206,7 @@ fn torrent_mode() {
     );
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene(Role::Health, 5.0), &mut px);
+    r.render(&m.scene_for_role(Role::Health, 5.0), &mut px);
     check("torrent", &px);
 }
 
@@ -210,7 +223,7 @@ fn sweep_hold() {
     m.tick(5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene(Role::Health, 6.0), &mut px);
+    r.render(&m.scene(3, 6.0), &mut px);
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
         red > 140 && g < 120 && b < 120,

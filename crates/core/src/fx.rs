@@ -182,23 +182,25 @@ pub struct Sweep {
 }
 
 impl Sweep {
-    /// Position of a screen in the wave: 0 is the origin screen.
-    pub fn order_index(direction: Direction, role: Role) -> usize {
+    /// Position of a physical screen in the wave: 0 is the origin screen.
+    /// Down starts at the top screen (index 0), Up at the bottom (index screens-1).
+    pub fn order_index(direction: Direction, screen: usize, screens: usize) -> usize {
         match direction {
-            Direction::Down => role.index(),
-            Direction::Up => 3 - role.index(),
+            Direction::Down => screen,
+            Direction::Up => screens.saturating_sub(1).saturating_sub(screen),
         }
     }
 
-    fn hold_end(&self) -> Secs {
-        self.started + 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS + self.kind.hold()
+    fn hold_end(&self, screens: usize) -> Secs {
+        let last = screens.saturating_sub(1) as f64;
+        self.started + last * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS + self.kind.hold()
     }
 
-    pub fn phase(&self, role: Role, now: Secs) -> SweepPhase {
-        let idx = Sweep::order_index(self.kind.direction(), role) as f64;
+    pub fn phase(&self, screen: usize, screens: usize, now: Secs) -> SweepPhase {
+        let idx = Sweep::order_index(self.kind.direction(), screen, screens) as f64;
         let in_start = self.started + idx * SWEEP_STAGGER_SECS;
         let in_end = in_start + SWEEP_WIPE_SECS;
-        let out_start = self.hold_end() + idx * SWEEP_STAGGER_SECS;
+        let out_start = self.hold_end(screens) + idx * SWEEP_STAGGER_SECS;
         let out_end = out_start + SWEEP_WIPE_SECS;
         if now < in_start || now >= out_end {
             SweepPhase::Idle
@@ -211,8 +213,9 @@ impl Sweep {
         }
     }
 
-    pub fn done(&self, now: Secs) -> bool {
-        now >= self.hold_end() + 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS
+    pub fn done(&self, screens: usize, now: Secs) -> bool {
+        let last = screens.saturating_sub(1) as f64;
+        now >= self.hold_end(screens) + last * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS
     }
 }
 
@@ -228,8 +231,8 @@ impl SweepQueue {
             self.queue.push_back(kind);
         }
     }
-    pub fn tick(&mut self, now: Secs) {
-        if self.active.is_some_and(|s| s.done(now)) {
+    pub fn tick(&mut self, now: Secs, screens: usize) {
+        if self.active.is_some_and(|s| s.done(screens, now)) {
             self.active = None;
         }
         if self.active.is_none() {
@@ -243,10 +246,22 @@ impl SweepQueue {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Fx {
-    pub splashes: [SplashQueue; 4],
+    /// One queue per role, indexed by `Role::index()`.
+    pub splashes: Vec<SplashQueue>,
     pub sweeps: SweepQueue,
+}
+
+impl Default for Fx {
+    fn default() -> Self {
+        Fx {
+            splashes: (0..Role::ALL.len())
+                .map(|_| SplashQueue::default())
+                .collect(),
+            sweeps: SweepQueue::default(),
+        }
+    }
 }
 
 impl Fx {
@@ -270,8 +285,8 @@ impl Fx {
         }
     }
 
-    pub fn tick(&mut self, now: Secs) {
-        self.sweeps.tick(now);
+    pub fn tick(&mut self, now: Secs, screens: usize) {
+        self.sweeps.tick(now, screens);
         let frozen = self.sweeps.active().is_some();
         for q in &mut self.splashes {
             q.tick(now, frozen);
@@ -330,25 +345,44 @@ mod tests {
             kind: SweepKind::NodeNotReady,
             started: 0.0,
         };
-        assert_eq!(Sweep::order_index(Direction::Up, Role::Health), 0);
-        assert_eq!(Sweep::order_index(Direction::Up, Role::Cpu), 3);
-        assert!(matches!(s.phase(Role::Health, 0.1), SweepPhase::WipeIn(_)));
-        assert_eq!(s.phase(Role::Cpu, 0.1), SweepPhase::Idle);
-        assert!(matches!(s.phase(Role::Cpu, 0.5), SweepPhase::WipeIn(_)));
-        assert!(matches!(s.phase(Role::Health, 1.5), SweepPhase::Hold(_)));
-        assert!(matches!(s.phase(Role::Cpu, 1.5), SweepPhase::Hold(_)));
+        // Up: origin is the bottom screen (index 3), top screen (index 0) is last.
+        assert_eq!(Sweep::order_index(Direction::Up, 3, 4), 0);
+        assert_eq!(Sweep::order_index(Direction::Up, 0, 4), 3);
+        assert_eq!(Sweep::order_index(Direction::Down, 0, 4), 0);
+        assert_eq!(Sweep::order_index(Direction::Down, 3, 4), 3);
+        assert!(matches!(s.phase(3, 4, 0.1), SweepPhase::WipeIn(_)));
+        assert_eq!(s.phase(0, 4, 0.1), SweepPhase::Idle);
+        assert!(matches!(s.phase(0, 4, 0.5), SweepPhase::WipeIn(_)));
+        assert!(matches!(s.phase(3, 4, 1.5), SweepPhase::Hold(_)));
+        assert!(matches!(s.phase(0, 4, 1.5), SweepPhase::Hold(_)));
         let hold_end = 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS + SWEEP_HOLD_SECS;
         assert!(matches!(
-            s.phase(Role::Health, hold_end + 0.1),
+            s.phase(3, 4, hold_end + 0.1),
             SweepPhase::WipeOut(_)
         ));
+        assert!(matches!(s.phase(0, 4, hold_end + 0.1), SweepPhase::Hold(_)));
+        assert!(!s.done(4, hold_end + 0.5));
+        assert!(s.done(4, hold_end + 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS));
+        assert_eq!(s.phase(0, 4, 10.0), SweepPhase::Idle);
+    }
+
+    #[test]
+    fn single_screen_sweep_has_no_stagger() {
+        let s = Sweep {
+            kind: SweepKind::TorrentDone,
+            started: 0.0,
+        };
+        let total = SWEEP_WIPE_SECS + SWEEP_HOLD_SECS + SWEEP_WIPE_SECS;
+        assert_eq!(Sweep::order_index(Direction::Up, 0, 1), 0);
+        assert!(matches!(s.phase(0, 1, 0.1), SweepPhase::WipeIn(_)));
         assert!(matches!(
-            s.phase(Role::Cpu, hold_end + 0.1),
+            s.phase(0, 1, SWEEP_WIPE_SECS + 0.1),
             SweepPhase::Hold(_)
         ));
-        assert!(!s.done(hold_end + 0.5));
-        assert!(s.done(hold_end + 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS));
-        assert_eq!(s.phase(Role::Cpu, 10.0), SweepPhase::Idle);
+        assert!(matches!(s.phase(0, 1, total - 0.1), SweepPhase::WipeOut(_)));
+        assert!(!s.done(1, total - 1e-6));
+        assert!(s.done(1, total));
+        assert_eq!(s.phase(0, 1, total), SweepPhase::Idle);
     }
 
     #[test]
@@ -357,13 +391,13 @@ mod tests {
         q.push(SweepKind::AlertFiring);
         q.push(SweepKind::AlertFiring);
         q.push(SweepKind::TorrentDone);
-        q.tick(0.0);
+        q.tick(0.0, 4);
         assert_eq!(q.active().unwrap().kind, SweepKind::AlertFiring);
-        q.tick(1.0);
+        q.tick(1.0, 4);
         assert_eq!(q.active().unwrap().kind, SweepKind::AlertFiring);
-        q.tick(4.0);
+        q.tick(4.0, 4);
         assert_eq!(q.active().unwrap().kind, SweepKind::TorrentDone);
-        q.tick(8.0);
+        q.tick(8.0, 4);
         assert!(q.active().is_none());
     }
 
@@ -372,7 +406,7 @@ mod tests {
         let mut fx = Fx::default();
         fx.apply(FxRequest::HotNode(Role::Mem), 0.0);
         fx.apply(FxRequest::NodeNotReady, 0.0);
-        fx.tick(0.0);
+        fx.tick(0.0, 4);
         assert_eq!(
             fx.splashes[Role::Mem.index()].active().unwrap().kind,
             SplashKind::HotNode

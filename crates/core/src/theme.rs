@@ -55,21 +55,54 @@ pub enum Role {
     Mem,
     Pods,
     Health,
+    Thermal,
+    Storage,
+    PowerMix,
+    Price,
+    Carbon,
+    Renewable,
 }
 
 impl Role {
-    pub const ALL: [Role; 4] = [Role::Cpu, Role::Mem, Role::Pods, Role::Health];
+    pub const ALL: [Role; 10] = [
+        Role::Cpu,
+        Role::Mem,
+        Role::Pods,
+        Role::Health,
+        Role::Thermal,
+        Role::Storage,
+        Role::PowerMix,
+        Role::Price,
+        Role::Carbon,
+        Role::Renewable,
+    ];
 
     pub fn index(self) -> usize {
-        match self {
-            Role::Cpu => 0,
-            Role::Mem => 1,
-            Role::Pods => 2,
-            Role::Health => 3,
-        }
+        Role::ALL
+            .iter()
+            .position(|r| *r == self)
+            .expect("role in ALL")
     }
     pub fn from_index(i: usize) -> Option<Role> {
         Role::ALL.get(i).copied()
+    }
+    /// Config identifier.
+    pub fn name(self) -> &'static str {
+        match self {
+            Role::Cpu => "cpu",
+            Role::Mem => "mem",
+            Role::Pods => "pods",
+            Role::Health => "health",
+            Role::Thermal => "thermal",
+            Role::Storage => "storage",
+            Role::PowerMix => "power-mix",
+            Role::Price => "price",
+            Role::Carbon => "carbon",
+            Role::Renewable => "renewable",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Role> {
+        Role::ALL.iter().copied().find(|r| r.name() == s)
     }
     pub fn accent(self) -> Color {
         match self {
@@ -77,6 +110,12 @@ impl Role {
             Role::Mem => VIOLET,
             Role::Pods => BLUE,
             Role::Health => GREEN,
+            Role::Thermal => AMBER,
+            Role::Storage => VIOLET,
+            Role::PowerMix => Color::hex(0xFFC700),
+            Role::Price => GREEN,
+            Role::Carbon => Color::hex(0x2AA364),
+            Role::Renewable => GREEN,
         }
     }
     pub fn icon(self) -> &'static str {
@@ -85,6 +124,12 @@ impl Role {
             Role::Mem => "memory-stick",
             Role::Pods => "box",
             Role::Health => "heart-pulse",
+            Role::Thermal => "thermometer",
+            Role::Storage => "database",
+            Role::PowerMix => "zap",
+            Role::Price => "euro",
+            Role::Carbon => "cloud",
+            Role::Renewable => "leaf",
         }
     }
 }
@@ -141,6 +186,15 @@ mod tests {
     fn role_index_roundtrip() {
         for r in Role::ALL {
             assert_eq!(Role::from_index(r.index()), Some(r));
+        }
+    }
+
+    #[test]
+    fn role_names_parse_roundtrip() {
+        assert_eq!(Role::parse("power-mix"), Some(Role::PowerMix));
+        assert_eq!(Role::parse("nope"), None);
+        for r in Role::ALL {
+            assert_eq!(Role::parse(r.name()), Some(r));
         }
     }
 }

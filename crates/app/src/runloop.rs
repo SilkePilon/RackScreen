@@ -20,6 +20,10 @@ use tiny_skia::Pixmap;
 const NIGHT_FADE_SECS: Secs = 1.0;
 
 pub struct ScreenSlot {
+    /// Physical position, top to bottom; the model is asked for `scene(index, now)`.
+    pub index: usize,
+    /// Role this panel was opened as (calibrate pattern, logging); the model owns
+    /// which role is actually shown.
     pub role: Role,
     pub orient: Orient,
     pub mailbox: Mailbox,
@@ -30,8 +34,9 @@ pub struct ScreenSlot {
 }
 
 impl ScreenSlot {
-    pub fn new(role: Role, orient: Orient, mailbox: Mailbox) -> Self {
+    pub fn new(index: usize, role: Role, orient: Orient, mailbox: Mailbox) -> Self {
         Self {
+            index,
             role,
             orient,
             mailbox,
@@ -110,6 +115,10 @@ impl Drop for ShutdownGuard {
 pub struct RenderLoop {
     pub rx: Receiver<Event>,
     pub screens: Vec<ScreenSlot>,
+    /// Role list per physical screen, same order as `screens`.
+    pub screens_roles: Vec<Vec<Role>>,
+    /// Dwell per screen before cycling to its next role.
+    pub cycle_secs: Vec<Secs>,
     pub thresholds: Thresholds,
     pub night: NightWindow,
     pub fps: u32,
@@ -125,6 +134,7 @@ impl RenderLoop {
         let mut renderer = Renderer::new()?;
         let start = Instant::now();
         let mut model = Model::new(self.thresholds);
+        model.set_screens(self.screens_roles.clone(), self.cycle_secs.clone());
         model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
@@ -171,7 +181,7 @@ impl RenderLoop {
             };
 
             for s in &mut self.screens {
-                let scene = model.scene(s.role, now);
+                let scene = model.scene(s.index, now);
                 renderer.render(&scene, &mut s.cur);
                 if let Some(f) = fade {
                     darken(&mut s.cur, 1.0 - f);
@@ -228,7 +238,7 @@ mod tests {
     #[test]
     fn first_flush_is_full_then_dirty_only() {
         let mb = Mailbox::new();
-        let mut slot = ScreenSlot::new(Role::Cpu, Orient::identity(), mb.clone());
+        let mut slot = ScreenSlot::new(0, Role::Cpu, Orient::identity(), mb.clone());
         assert_eq!(slot.flush(), Some(Rect::full()));
         assert!(matches!(mb.take(), DisplayCmd::Frame(_, r) if r == Rect::full()));
         assert_eq!(slot.flush(), None, "identical frame pushes nothing");

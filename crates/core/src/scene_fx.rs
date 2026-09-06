@@ -150,32 +150,57 @@ impl crate::model::Model {
             Role::Cpu | Role::Mem => !(self.link().prom && st.have_metrics),
             Role::Pods => !st.have_pods,
             Role::Health => !st.have_nodes,
+            // Sources for these arrive later; until then they always show no-data.
+            Role::Thermal
+            | Role::Storage
+            | Role::PowerMix
+            | Role::Price
+            | Role::Carbon
+            | Role::Renewable => true,
         }
     }
 
-    /// Everything the render loop needs for one screen at one instant.
-    pub fn scene(&self, role: Role, now: Secs) -> Scene {
+    /// Scene for one screen at one instant; the only call the render loop makes.
+    pub fn scene(&self, screen: usize, now: Secs) -> Scene {
+        let screens = self.screen_count();
+        let state = match self.screen(screen) {
+            Some(s) => s,
+            None => return connecting_scene(now),
+        };
+        let role = state.current();
         if !self.link().api {
             return connecting_scene(now);
         }
-        let sweep = self.fx().sweeps.active();
-        if let Some(sw) = sweep {
-            match sw.phase(role, now) {
+        if let Some(sw) = self.fx().sweeps.active() {
+            match sw.phase(screen, screens, now) {
                 SweepPhase::Idle => {}
                 ph => return sweep_scene(sw, role, ph, now),
             }
         }
-        let base = if self.needs_data(role) {
-            no_data_scene(now)
-        } else {
-            role_scene(self, role, now)
-        };
-        if sweep.is_some() {
+        if let Some(tr) = state.transition(now) {
+            let (zoom, reveal) = crate::screens::transition_transform(tr.t);
+            let shown = if tr.t < 0.5 { tr.from } else { tr.to };
+            let mut s = self.scene_for_role(shown, now);
+            s.zoom = zoom;
+            s.ring_reveal = reveal;
+            return s;
+        }
+        let base = self.scene_for_role(role, now);
+        if self.fx().sweeps.active().is_some() {
             return base;
         }
         match self.fx().splashes[role.index()].active() {
             Some(sp) => splash_overlay(base, sp, now),
             None => base,
+        }
+    }
+
+    /// Role scene without transition or splash (tests, goldens, calibrate).
+    pub fn scene_for_role(&self, role: Role, now: Secs) -> Scene {
+        if self.needs_data(role) {
+            no_data_scene(now)
+        } else {
+            role_scene(self, role, now)
         }
     }
 }
@@ -231,6 +256,15 @@ mod tests {
             },
             0.0,
         );
+        m.set_screens(
+            vec![
+                vec![Role::Cpu],
+                vec![Role::Mem],
+                vec![Role::Pods],
+                vec![Role::Health],
+            ],
+            vec![15.0; 4],
+        );
         m
     }
 
@@ -249,7 +283,7 @@ mod tests {
     #[test]
     fn connecting_when_api_down() {
         let m = Model::new(Thresholds::default());
-        let s = m.scene(Role::Cpu, 0.0);
+        let s = m.scene(Role::Cpu.index(), 0.0);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "plug-zap"));
     }
 
@@ -263,9 +297,9 @@ mod tests {
             },
             0.0,
         );
-        let s = m.scene(Role::Cpu, 0.0);
+        let s = m.scene(Role::Cpu.index(), 0.0);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
-        let s = m.scene(Role::Pods, 0.0);
+        let s = m.scene(Role::Pods.index(), 0.0);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
     }
 
@@ -280,16 +314,16 @@ mod tests {
             1.0,
         );
         m.tick(1.0);
-        let s = m.scene(Role::Pods, 1.15);
+        let s = m.scene(Role::Pods.index(), 1.15);
         assert!(s.items.iter().any(|d| matches!(d, Drawable::Ripple { .. })));
-        let s = m.scene(Role::Pods, 1.35);
+        let s = m.scene(Role::Pods.index(), 1.35);
         let ic = icons(&s);
         let (_, role_alpha, _) = ic.iter().find(|(n, ..)| *n == "box").unwrap();
         let (_, ev_alpha, ev_scale) = ic.iter().find(|(n, ..)| *n == "package-x").unwrap();
         assert!(*role_alpha < 0.6);
         assert!(*ev_alpha > 0.5);
         assert!(*ev_scale > 1.0, "spring overshoot around 60% of swap");
-        let s = m.scene(Role::Pods, 3.6);
+        let s = m.scene(Role::Pods.index(), 3.6);
         assert!(icons(&s).iter().all(|(n, ..)| *n != "package-x"));
     }
 
@@ -306,7 +340,7 @@ mod tests {
             );
         }
         m.tick(1.0);
-        let s = m.scene(Role::Pods, 1.5);
+        let s = m.scene(Role::Pods.index(), 1.5);
         let text = s.items.iter().find_map(|d| match d {
             Drawable::Badge { text, .. } => Some(text.clone()),
             _ => None,
@@ -332,28 +366,75 @@ mod tests {
             1.0,
         );
         m.tick(1.0);
-        let s = m.scene(Role::Health, 1.1);
+        let s = m.scene(Role::Health.index(), 1.1);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
         assert!(s.lit_count() > 0 && s.lit_count() < 60);
-        let s = m.scene(Role::Cpu, 1.1);
+        let s = m.scene(Role::Cpu.index(), 1.1);
         assert!(
             icons(&s).iter().all(|(n, ..)| *n == "cpu"),
             "cpu not yet reached, shows role, no splash"
         );
-        let s = m.scene(Role::Cpu, 2.0);
+        let s = m.scene(Role::Cpu.index(), 2.0);
         assert_eq!(s.lit_count(), 60);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
-        let s = m.scene(Role::Pods, 2.0);
+        let s = m.scene(Role::Pods.index(), 2.0);
         assert!(icons(&s).iter().all(|(n, ..)| *n != "package-plus"));
         // tick at ~30 Hz like the real loop so the frozen splash is shifted correctly
         for i in 33..=200 {
             m.tick(i as f64 / 33.0);
         }
-        let s = m.scene(Role::Pods, 200.0 / 33.0);
+        let s = m.scene(Role::Pods.index(), 200.0 / 33.0);
         assert!(
             icons(&s).iter().any(|(n, ..)| *n == "package-plus"),
             "splash resumes after sweep"
         );
+    }
+
+    #[test]
+    fn cycling_screen_transitions_with_iris() {
+        let mut m = ready_model();
+        m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
+        for i in 0..=100 {
+            m.tick(i as f64 * 0.033);
+        }
+        // at 3.3 s: transition started at ~3.0, first half shows cpu shrinking
+        let s = m.scene(0, 3.15);
+        assert!(s.zoom < 1.0 && s.zoom > 0.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "cpu"));
+        let s = m.scene(0, 3.4);
+        assert!(
+            icons(&s).iter().any(|(n, ..)| *n == "memory-stick"),
+            "second half shows the incoming role"
+        );
+        // transition ends at ~3.53 s, then mem dwells; settled by 5.94 s
+        for i in 101..=180 {
+            m.tick(i as f64 * 0.033);
+        }
+        assert_eq!(m.current_role(0), Role::Mem);
+        assert!(m.screen(0).unwrap().transition(5.94).is_none());
+        assert_eq!(m.scene(0, 5.94).zoom, 1.0);
+        // the next cycle (3 s after ~3.53 s) wraps back to cpu
+        for i in 181..=200 {
+            m.tick(i as f64 * 0.033);
+        }
+        let tr = m
+            .screen(0)
+            .unwrap()
+            .transition(6.6)
+            .expect("second cycle started");
+        assert_eq!((tr.from, tr.to), (Role::Mem, Role::Cpu));
+        assert!(m.scene(0, 6.6).zoom < 1.0);
+    }
+
+    #[test]
+    fn new_roles_show_no_data_and_out_of_range_screen_connects() {
+        let mut m = ready_model();
+        m.set_screens(vec![vec![Role::Thermal]], vec![15.0]);
+        let s = m.scene(0, 1.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
+        assert_eq!(s.zoom, 1.0);
+        let s = m.scene(7, 1.0);
+        assert!(icons(&s).iter().any(|(n, ..)| *n == "plug-zap"));
     }
 
     #[test]

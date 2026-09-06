@@ -5,10 +5,13 @@ use std::collections::HashMap;
 use crate::anim::{Secs, Smooth};
 use crate::event::{Event, LinkTarget, Torrent};
 use crate::fx::Fx;
+use crate::screens::ScreenState;
 use crate::theme::Role;
 
 pub const SMOOTH_SECS: Secs = 0.8;
 const HOT_DEBOUNCE_SECS: Secs = 300.0;
+/// Dwell per role on a cycling screen when the caller gives none.
+pub const DEFAULT_CYCLE_SECS: Secs = 15.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Thresholds {
@@ -80,6 +83,8 @@ pub struct Model {
     night_override: Option<bool>,
     fx: Vec<FxRequest>,
     fx_state: Fx,
+    /// One entry per physical screen, top to bottom.
+    screens: Vec<ScreenState>,
     seen_api_up: bool,
     /// A `Boot` that arrived while the API link was down; it plays on first connect
     /// so the sweep is not aged out behind the connecting scene.
@@ -103,6 +108,10 @@ impl Model {
             night_override: None,
             fx: Vec::new(),
             fx_state: Fx::default(),
+            screens: [Role::Cpu, Role::Mem, Role::Pods, Role::Health]
+                .into_iter()
+                .map(|r| ScreenState::new(vec![r], DEFAULT_CYCLE_SECS))
+                .collect(),
             seen_api_up: false,
             boot_pending: false,
         }
@@ -140,12 +149,51 @@ impl Model {
         &self.fx_state
     }
 
-    /// Drain animation requests into the queues and advance them. Call once per frame.
+    /// Replace the per-screen role lists. `cycle_secs[i]` is the dwell for screen
+    /// `i`; missing entries use `DEFAULT_CYCLE_SECS`. An empty layout keeps one
+    /// CPU screen so `scene(0, ..)` always has something to show.
+    pub fn set_screens(&mut self, roles: Vec<Vec<Role>>, cycle_secs: Vec<Secs>) {
+        self.screens = roles
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                ScreenState::new(r, cycle_secs.get(i).copied().unwrap_or(DEFAULT_CYCLE_SECS))
+            })
+            .collect();
+        if self.screens.is_empty() {
+            self.screens
+                .push(ScreenState::new(vec![Role::Cpu], DEFAULT_CYCLE_SECS));
+        }
+    }
+    pub fn screen_count(&self) -> usize {
+        self.screens.len()
+    }
+    pub fn current_role(&self, screen: usize) -> Role {
+        self.screens
+            .get(screen)
+            .map(|s| s.current())
+            .unwrap_or(Role::Cpu)
+    }
+    pub fn screen(&self, screen: usize) -> Option<&ScreenState> {
+        self.screens.get(screen)
+    }
+
+    /// Drain animation requests into the queues and advance them, then advance
+    /// each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
         for req in std::mem::take(&mut self.fx) {
             self.fx_state.apply(req, now);
         }
-        self.fx_state.tick(now);
+        let screens = self.screens.len();
+        self.fx_state.tick(now, screens);
+        let sweep_active = self.fx_state.sweeps.active().is_some();
+        for s in &mut self.screens {
+            let busy = sweep_active
+                || self.fx_state.splashes[s.current().index()]
+                    .active()
+                    .is_some();
+            s.tick(now, busy);
+        }
     }
 
     pub fn all_healthy(&self) -> bool {
@@ -429,6 +477,32 @@ mod tests {
         m.tick(0.0);
         assert!(m.pending_fx().is_empty());
         assert!(m.fx().splashes[Role::Pods.index()].active().is_some());
+    }
+
+    #[test]
+    fn default_layout_is_four_static_screens() {
+        let m = Model::new(Thresholds::default());
+        assert_eq!(m.screen_count(), 4);
+        for (i, r) in [Role::Cpu, Role::Mem, Role::Pods, Role::Health]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(m.current_role(i), r);
+        }
+        assert_eq!(m.current_role(99), Role::Cpu, "out of range falls back");
+    }
+
+    #[test]
+    fn set_screens_replaces_layout_and_never_leaves_it_empty() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_screens(vec![vec![Role::Thermal, Role::Price], vec![]], vec![5.0]);
+        assert_eq!(m.screen_count(), 2);
+        assert_eq!(m.current_role(0), Role::Thermal);
+        assert_eq!(m.current_role(1), Role::Cpu, "empty list falls back to cpu");
+        m.set_screens(vec![], vec![]);
+        assert_eq!(m.screen_count(), 1);
+        assert!(m.screen(0).is_some());
+        assert!(m.screen(1).is_none());
     }
 
     #[test]
