@@ -120,6 +120,21 @@ pub fn window_bytes(x0: u16, y0: u16, x1: u16, y1: u16) -> ([u8; 4], [u8; 4]) {
     )
 }
 
+/// Where the kernel reports the live spidev transfer buffer size.
+pub const SPIDEV_BUFSIZ_PATH: &str = "/sys/module/spidev/parameters/bufsiz";
+/// The kernel default when the sysfs value is missing or unreadable.
+pub const DEFAULT_BUFSIZ: usize = 4096;
+
+/// The chunk size to really use: the requested one, clamped to the kernel's live
+/// `spidev.bufsiz` (writes larger than that fail with EMSGSIZE). A cmdline change only
+/// takes effect after a reboot, so the config value may run ahead of the kernel.
+pub fn effective_chunk(requested: usize, sysfs_value: Option<&str>) -> usize {
+    let bufsiz = sysfs_value
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_BUFSIZ);
+    requested.min(bufsiz)
+}
+
 pub struct Gc9a01 {
     spi: Spi,
     dc: OutputPin,
@@ -130,6 +145,15 @@ pub struct Gc9a01 {
 
 impl Gc9a01 {
     pub fn open(pins: Pins, chunk: usize, brightness: f32) -> Result<Self> {
+        let sysfs = std::fs::read_to_string(SPIDEV_BUFSIZ_PATH).ok();
+        let effective = effective_chunk(chunk, sysfs.as_deref());
+        if effective < chunk {
+            tracing::info!(
+                "spi_chunk {chunk} clamped to the kernel's spidev.bufsiz {effective} \
+                 (reboot after enabling SPI to use the larger value)"
+            );
+        }
+        let chunk = effective;
         let bus = match pins.bus {
             0 => Bus::Spi0,
             1 => Bus::Spi1,
@@ -252,6 +276,15 @@ mod tests {
         assert_eq!(r, [0, 0, 0, 0xEF]);
         let (c, _) = window_bytes(10, 5, 25, 9);
         assert_eq!(c, [0, 10, 0, 25]);
+    }
+
+    #[test]
+    fn effective_chunk_clamps_to_live_bufsiz() {
+        assert_eq!(effective_chunk(65536, Some("4096\n")), 4096);
+        assert_eq!(effective_chunk(4096, Some("65536")), 4096);
+        assert_eq!(effective_chunk(65536, None), 4096);
+        assert_eq!(effective_chunk(65536, Some("65536")), 65536);
+        assert_eq!(effective_chunk(65536, Some("garbage")), 4096);
     }
 
     #[test]
