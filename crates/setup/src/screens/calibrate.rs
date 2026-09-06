@@ -151,6 +151,22 @@ impl Calibrate {
             .map_err(|e| format!("{e:#}"))
     }
 
+    /// Build a screen without panels or a renderer (tests).
+    pub fn from_parts(cfg: Config, orient: Vec<Orientation>) -> Calibrate {
+        Calibrate {
+            cfg,
+            orient,
+            selected: 0,
+            panels: None,
+            renderer: None,
+            frames: Vec::new(),
+            scratch: new_pixmap(),
+            error: None,
+            service_was_active: false,
+            message: String::new(),
+        }
+    }
+
     fn close(&mut self) {
         if let Some(p) = self.panels.take() {
             p.shutdown();
@@ -172,6 +188,16 @@ impl Drop for Calibrate {
 impl Screen for Calibrate {
     fn handle(&mut self, key: KeyEvent, shared: &mut Shared, _now: Secs) -> Action {
         let n = self.orient.len();
+        // With `screens: []` in the config there is nothing to select or rotate; every
+        // arm below indexes or takes a modulus by `n`, so bail out before any of them.
+        if n == 0 {
+            return if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+                self.close();
+                Action::Back
+            } else {
+                Action::None
+            };
+        }
         match key.code {
             KeyCode::Char(c @ '1'..='4') => {
                 let i = (c as u8 - b'1') as usize;
@@ -315,6 +341,10 @@ impl Screen for Calibrate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
+    use crate::Ctx;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     #[test]
     fn mini_panel_follows_rotation_and_flip() {
@@ -334,5 +364,44 @@ mod tests {
         assert!(both[2].contains('←'), "right arrow mirrored becomes left");
         assert!(both[4].starts_with(" ●"));
         assert!(mini_panel(0, false, 1, false)[2].contains('^'));
+    }
+
+    #[test]
+    fn no_screens_does_not_panic() {
+        let mut sh = Shared {
+            ctx: Ctx {
+                config_path: "/etc/rackscreen/config.yaml".into(),
+                sim: true,
+                version: "0.2.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+        };
+        let mut screen = Calibrate::from_parts(Config::default(), Vec::new());
+        for code in [
+            KeyCode::Up,
+            KeyCode::Left,
+            KeyCode::Down,
+            KeyCode::Right,
+            KeyCode::Tab,
+            KeyCode::Char('1'),
+            KeyCode::Char('r'),
+            KeyCode::Char('R'),
+            KeyCode::Char('f'),
+            KeyCode::Char('a'),
+        ] {
+            assert!(matches!(
+                screen.handle(KeyEvent::from(code), &mut sh, 0.0),
+                Action::None
+            ));
+        }
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0),
+            Action::Back
+        ));
+        // Drawing with no screens must be safe too.
+        let mut term = Terminal::new(TestBackend::new(60, 14)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
     }
 }

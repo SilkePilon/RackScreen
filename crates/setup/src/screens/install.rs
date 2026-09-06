@@ -1,6 +1,6 @@
 //! Install screen: runs the installer on a worker thread and animates the step list.
 
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 
 use rackscreen_core::anim::Secs;
@@ -125,29 +125,51 @@ impl Screen for Install {
     }
 
     fn tick(&mut self, shared: &mut Shared, now: Secs) {
-        while let Ok(ev) = self.events.try_recv() {
-            match ev {
-                Event::Started(id) => self.steps[Self::idx(id)].state = StepState::Running,
-                Event::Finished(id, o) => self.steps[Self::idx(id)].state = state_of(o),
-                Event::AskBoot(changes) => self.phase = Phase::AskBoot(changes),
-                Event::Complete { reboot_needed } => {
-                    let ok = !self
-                        .steps
-                        .iter()
-                        .any(|s| matches!(s.state, StepState::Failed(_)));
-                    if reboot_needed {
-                        shared.banner = Some("reboot required to enable SPI".into());
+        loop {
+            match self.events.try_recv() {
+                Ok(ev) => {
+                    match ev {
+                        Event::Started(id) => self.steps[Self::idx(id)].state = StepState::Running,
+                        Event::Finished(id, o) => self.steps[Self::idx(id)].state = state_of(o),
+                        Event::AskBoot(changes) => self.phase = Phase::AskBoot(changes),
+                        Event::Complete { reboot_needed } => {
+                            let ok = !self
+                                .steps
+                                .iter()
+                                .any(|s| matches!(s.state, StepState::Failed(_)));
+                            if reboot_needed {
+                                shared.banner = Some("reboot required to enable SPI".into());
+                            }
+                            shared.service_active = Some(ok);
+                            self.phase = Phase::Finished {
+                                reboot: reboot_needed,
+                                ok,
+                            };
+                        }
                     }
-                    shared.service_active = Some(ok);
-                    self.phase = Phase::Finished {
-                        reboot: reboot_needed,
-                        ok,
-                    };
+                    let target = self.done_count() as f32 / self.steps.len() as f32;
+                    if (self.progress.target() - target).abs() > f32::EPSILON {
+                        self.progress = self.progress.to(target, now, 0.3);
+                    }
                 }
-            }
-            let target = self.done_count() as f32 / self.steps.len() as f32;
-            if (self.progress.target() - target).abs() > f32::EPSILON {
-                self.progress = self.progress.to(target, now, 0.3);
+                Err(TryRecvError::Empty) => break,
+                // The worker died without reporting: don't sit in Running forever.
+                Err(TryRecvError::Disconnected) => {
+                    if matches!(self.phase, Phase::Running | Phase::AskBoot(_)) {
+                        if let Some(s) = self
+                            .steps
+                            .iter_mut()
+                            .find(|s| matches!(s.state, StepState::Running))
+                        {
+                            s.state = StepState::Failed("worker stopped unexpectedly".into());
+                        }
+                        self.phase = Phase::Finished {
+                            reboot: false,
+                            ok: false,
+                        };
+                    }
+                    break;
+                }
             }
         }
     }
@@ -249,5 +271,39 @@ mod tests {
         assert!(text.contains("○  Write config"));
         assert!(text.contains("✗  Boot"));
         assert!(text.contains("no permission"));
+    }
+
+    #[test]
+    fn dead_worker_finishes_the_screen() {
+        let mut sh = Shared {
+            ctx: Ctx {
+                config_path: "/etc/rackscreen/config.yaml".into(),
+                sim: true,
+                version: "0.2.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+        };
+        // `preview` drops the sender, so the receiver is disconnected right away: the same
+        // state a panicking worker thread leaves behind.
+        let mut screen = Install::preview(vec![
+            StepView {
+                title: "Check platform".into(),
+                state: StepState::Done("Raspberry Pi".into()),
+            },
+            StepView {
+                title: "Install binary".into(),
+                state: StepState::Running,
+            },
+            StepView {
+                title: "Write config".into(),
+                state: StepState::Pending,
+            },
+        ]);
+        screen.tick(&mut sh, 0.0);
+        assert!(matches!(screen.phase, Phase::Finished { ok: false, .. }));
+        assert!(matches!(screen.steps[1].state, StepState::Failed(_)));
+        assert!(matches!(screen.steps[2].state, StepState::Pending));
     }
 }

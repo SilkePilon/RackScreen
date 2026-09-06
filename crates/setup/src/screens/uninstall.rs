@@ -1,6 +1,6 @@
 //! Uninstall screen: confirm, then run the uninstaller with the same step list look.
 
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 
 use rackscreen_core::anim::Secs;
@@ -63,6 +63,15 @@ impl Uninstall {
     fn idx(id: UStep) -> usize {
         UStep::ALL.iter().position(|s| *s == id).unwrap_or(0)
     }
+
+    /// Build a screen already running against a given receiver (tests).
+    pub fn with_receiver(rx: Receiver<UEvent>, steps: Vec<StepView>) -> Uninstall {
+        Uninstall {
+            steps,
+            phase: Phase::Running(rx),
+            progress: Slide::fixed(0.0),
+        }
+    }
 }
 
 impl Screen for Uninstall {
@@ -86,10 +95,10 @@ impl Screen for Uninstall {
     fn tick(&mut self, _shared: &mut Shared, now: Secs) {
         let mut finished = false;
         if let Phase::Running(rx) = &self.phase {
-            while let Ok(ev) = rx.try_recv() {
-                match ev {
-                    UEvent::Started(id) => self.steps[Self::idx(id)].state = StepState::Running,
-                    UEvent::Finished(id, o) => {
+            loop {
+                match rx.try_recv() {
+                    Ok(UEvent::Started(id)) => self.steps[Self::idx(id)].state = StepState::Running,
+                    Ok(UEvent::Finished(id, o)) => {
                         self.steps[Self::idx(id)].state = match o {
                             Outcome::Done(n) => StepState::Done(n),
                             Outcome::Skipped(n) => StepState::Skipped(n),
@@ -97,7 +106,22 @@ impl Screen for Uninstall {
                             Outcome::Failed(n) => StepState::Failed(n),
                         }
                     }
-                    UEvent::Complete => finished = true,
+                    Ok(UEvent::Complete) => finished = true,
+                    Err(TryRecvError::Empty) => break,
+                    // The worker died without reporting: don't sit in Running forever.
+                    Err(TryRecvError::Disconnected) => {
+                        if !finished {
+                            if let Some(s) = self
+                                .steps
+                                .iter_mut()
+                                .find(|s| matches!(s.state, StepState::Running))
+                            {
+                                s.state = StepState::Failed("worker stopped unexpectedly".into());
+                            }
+                            finished = true;
+                        }
+                        break;
+                    }
                 }
             }
             let done = self
@@ -196,5 +220,37 @@ mod tests {
         assert!(text.contains("Uninstall RackScreen?"));
         assert!(text.contains("/etc/rackscreen"));
         assert!(text.contains("left in place"));
+    }
+
+    #[test]
+    fn dead_worker_finishes_the_screen() {
+        let mut sh = Shared {
+            ctx: Ctx {
+                config_path: "/etc/rackscreen/config.yaml".into(),
+                sim: true,
+                version: "0.2.0",
+            },
+            theme: Theme::new(true),
+            service_active: Some(true),
+            banner: None,
+        };
+        let (tx, rx) = mpsc::channel();
+        drop(tx); // a worker that panicked before sending UEvent::Complete
+        let mut screen = Uninstall::with_receiver(
+            rx,
+            vec![
+                StepView {
+                    title: "Stop service".into(),
+                    state: StepState::Done("stopped".into()),
+                },
+                StepView {
+                    title: "Remove files".into(),
+                    state: StepState::Running,
+                },
+            ],
+        );
+        screen.tick(&mut sh, 0.0);
+        assert!(matches!(screen.phase, Phase::Done));
+        assert!(matches!(screen.steps[1].state, StepState::Failed(_)));
     }
 }
