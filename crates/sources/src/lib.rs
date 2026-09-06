@@ -4,8 +4,11 @@
 use rackscreen_core::event::Event;
 use tokio_util::sync::CancellationToken;
 
+pub mod electricity;
 pub mod fake;
+pub mod http;
 pub mod k8s;
+pub mod prices;
 pub mod prometheus;
 pub mod qbittorrent;
 pub mod tunnel;

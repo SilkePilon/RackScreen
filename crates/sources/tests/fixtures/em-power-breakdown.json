@@ -1,0 +1,5 @@
+{"zone":"NL","datetime":"2026-09-06T12:00:00.000Z","updatedAt":"2026-09-06T12:05:00.000Z","createdAt":"2026-09-06T09:00:00.000Z",
+ "powerConsumptionBreakdown":{"nuclear":120,"geothermal":0,"biomass":300,"coal":800,"wind":3100,"solar":9200,"hydro":30,"gas":2600,"oil":null,"unknown":40,"hydro discharge":90,"battery discharge":0},
+ "powerProductionBreakdown":{"nuclear":120,"geothermal":0,"biomass":300,"coal":800,"wind":3100,"solar":9200,"hydro":30,"gas":2600,"oil":null,"unknown":40,"hydro discharge":90,"battery discharge":0},
+ "powerImportBreakdown":{"BE":500},"powerExportBreakdown":{"DE":1200},
+ "fossilFreePercentage":73,"renewablePercentage":61,"powerConsumptionTotal":15600,"powerProductionTotal":16280,"powerImportTotal":500,"powerExportTotal":1200,"isEstimated":false,"estimationMethod":null}
