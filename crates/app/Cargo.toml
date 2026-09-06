@@ -19,6 +19,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tiny-skia.workspace = true
 chrono = "0.4"
 dirs = "7"
+nix = { version = "0.31", features = ["user"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -170,13 +170,33 @@ impl Default for Config {
     }
 }
 
-pub fn expand_home(p: &str) -> PathBuf {
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+/// `~/x` relative to `home`; anything else unchanged.
+pub fn expand_home_with(p: &str, home: &Path) -> PathBuf {
+    match p.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(p),
     }
-    PathBuf::from(p)
+}
+
+/// The user who ran `sudo`, when we are root because of it.
+fn sudo_user() -> Option<nix::unistd::User> {
+    if !nix::unistd::geteuid().is_root() {
+        return None;
+    }
+    let name = std::env::var("SUDO_USER").ok().filter(|n| !n.is_empty())?;
+    nix::unistd::User::from_name(&name).ok().flatten()
+}
+
+/// The home directory `~` stands for: under sudo the invoking user's, else ours.
+fn resolved_home() -> Option<PathBuf> {
+    sudo_user().map(|u| u.dir).or_else(dirs::home_dir)
+}
+
+pub fn expand_home(p: &str) -> PathBuf {
+    match resolved_home() {
+        Some(home) => expand_home_with(p, &home),
+        None => PathBuf::from(p),
+    }
 }
 
 pub const DEFAULT_PATH: &str = "/etc/rackscreen/config.yaml";
@@ -207,21 +227,26 @@ impl Config {
             );
             return Ok(Config::default());
         }
-        let cfg = Config::load_or_default(&path)?;
-        cfg.validate()?;
-        Ok(cfg)
+        Config::load_or_default(&path)
     }
 
-    /// Load from `path`; a missing file silently yields defaults (used by setup tools).
+    /// Load and validate from `path`; a missing file silently yields defaults (used by
+    /// setup tools). A file that parses but fails `validate` is an error too, so an
+    /// out-of-range `rotate` never reaches `Orient::new`.
     pub fn load_or_default(path: &Path) -> Result<Config> {
         if !path.exists() {
             return Ok(Config::default());
         }
         let text =
             std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        Config::from_yaml(&text).with_context(|| format!("parse {}", path.display()))
+        let cfg = Config::from_yaml(&text).with_context(|| format!("parse {}", path.display()))?;
+        cfg.validate()
+            .with_context(|| format!("invalid {}", path.display()))?;
+        Ok(cfg)
     }
 
+    /// Write atomically (temp file + rename) with mode 0640: the file may hold the
+    /// qBittorrent password, so it is not world-readable.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
@@ -230,7 +255,16 @@ impl Config {
             "# RackScreen configuration (written by rackscreen setup)\n{}",
             self.to_yaml()?
         );
-        std::fs::write(path, text).with_context(|| format!("write {}", path.display()))
+        let tmp = path.with_extension("yaml.tmp");
+        std::fs::write(&tmp, text).with_context(|| format!("write {}", tmp.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o640))
+                .with_context(|| format!("chmod {}", tmp.display()))?;
+        }
+        std::fs::rename(&tmp, path)
+            .with_context(|| format!("rename {} to {}", tmp.display(), path.display()))
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -311,6 +345,37 @@ mod tests {
     }
 
     #[test]
+    fn save_is_atomic_and_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        Config::default().save(&path).unwrap();
+        assert!(
+            !path.with_extension("yaml.tmp").exists(),
+            "temp file removed"
+        );
+        assert!(std::fs::read_to_string(&path).unwrap().contains("screens:"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o640, "mode {mode:o}");
+        }
+    }
+
+    #[test]
+    fn load_or_default_rejects_invalid_rotate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            "screens: [{ role: cpu, spi: 0, cs: 0, dc: 6, rst: 5, rotate: 45 }]\n",
+        )
+        .unwrap();
+        let err = format!("{:#}", Config::load_or_default(&path).unwrap_err());
+        assert!(err.contains("rotate"), "{err}");
+    }
+
+    #[test]
     fn bad_role_and_bad_rotate_rejected() {
         let s = ScreenCfg {
             role: "nope".into(),
@@ -333,5 +398,17 @@ mod tests {
     fn expand_home_works() {
         assert!(expand_home("/abs").starts_with("/abs"));
         assert!(!expand_home("~/x").to_string_lossy().starts_with('~'));
+    }
+
+    #[test]
+    fn expand_home_with_uses_given_home() {
+        let home = Path::new("/home/other");
+        assert_eq!(
+            expand_home_with("~/x", home),
+            PathBuf::from("/home/other/x")
+        );
+        assert_eq!(expand_home_with("/abs", home), PathBuf::from("/abs"));
+        assert_eq!(expand_home_with("rel", home), PathBuf::from("rel"));
+        assert_eq!(expand_home_with("~x", home), PathBuf::from("~x"));
     }
 }
