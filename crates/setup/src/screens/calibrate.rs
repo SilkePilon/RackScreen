@@ -158,7 +158,7 @@ impl Calibrate {
         let Some(h) = p.handles.get(i) else { return };
         let o = self.orient[i];
         let base = &mut self.frames[i];
-        r.render(&test_pattern(i, h.role), base);
+        r.render(&test_pattern(i, h.first_role()), base);
         // In the simulator the panel orientation is identity, so apply the candidate
         // orientation here; on real panels do the same (the handle's orient is only used by
         // the monitor, calibration always orients explicitly).

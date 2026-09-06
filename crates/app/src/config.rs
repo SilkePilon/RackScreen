@@ -21,6 +21,10 @@ pub struct Config {
     #[serde(default)]
     pub display: DisplayCfg,
     #[serde(default)]
+    pub electricity: ElectricityCfg,
+    #[serde(default)]
+    pub price: PriceCfg,
+    #[serde(default)]
     pub screens: Vec<ScreenCfg>,
 }
 
@@ -65,6 +69,7 @@ pub struct NightCfg {
 pub struct ThresholdsCfg {
     pub hot_cpu: f32,
     pub hot_mem: f32,
+    pub hot_temp: f32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -75,9 +80,37 @@ pub struct DisplayCfg {
     pub spi_chunk: usize,
 }
 
+/// Electricity Maps: grid mix, carbon intensity and renewable share.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct ElectricityCfg {
+    pub enabled: bool,
+    pub zone: String,
+    pub token: String,
+    pub poll_secs: u64,
+}
+
+/// Day-ahead electricity price.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct PriceCfg {
+    /// `energyzero`, `entsoe` or `none`.
+    pub source: String,
+    pub entsoe_token: String,
+    pub entsoe_zone: String,
+    pub include_vat: bool,
+    pub poll_secs: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ScreenCfg {
-    pub role: String,
+    /// Legacy single role; upgraded into `roles` by `Config::normalize`.
+    #[serde(default, skip_serializing)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    #[serde(default = "default_cycle")]
+    pub cycle_secs: u64,
     pub spi: u8,
     pub cs: u8,
     pub dc: u8,
@@ -94,15 +127,22 @@ fn default_hz() -> u32 {
     40_000_000
 }
 
+fn default_cycle() -> u64 {
+    15
+}
+
 impl ScreenCfg {
-    pub fn role(&self) -> Result<Role> {
-        Ok(match self.role.as_str() {
-            "cpu" => Role::Cpu,
-            "mem" => Role::Mem,
-            "pods" => Role::Pods,
-            "health" => Role::Health,
-            other => anyhow::bail!("unknown screen role '{other}'"),
-        })
+    /// Every configured role, in cycling order. At least one.
+    pub fn roles(&self) -> Result<Vec<Role>> {
+        anyhow::ensure!(!self.roles.is_empty(), "screen has no roles");
+        self.roles
+            .iter()
+            .map(|r| Role::parse(r).with_context(|| format!("unknown screen role '{r}'")))
+            .collect()
+    }
+    /// The role shown first, used where a single role identifies the screen.
+    pub fn first_role(&self) -> Result<Role> {
+        Ok(self.roles()?[0])
     }
 }
 
@@ -151,6 +191,28 @@ impl Default for ThresholdsCfg {
         Self {
             hot_cpu: 90.0,
             hot_mem: 90.0,
+            hot_temp: 70.0,
+        }
+    }
+}
+impl Default for ElectricityCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            zone: "NL".into(),
+            token: String::new(),
+            poll_secs: 300,
+        }
+    }
+}
+impl Default for PriceCfg {
+    fn default() -> Self {
+        Self {
+            source: "energyzero".into(),
+            entsoe_token: String::new(),
+            entsoe_zone: String::new(),
+            include_vat: true,
+            poll_secs: 900,
         }
     }
 }
@@ -207,8 +269,20 @@ impl Config {
     }
 
     pub fn from_yaml(text: &str) -> Result<Config> {
-        let cfg: Config = serde_yaml_ng::from_str(text).context("parse yaml")?;
+        let mut cfg: Config = serde_yaml_ng::from_str(text).context("parse yaml")?;
+        cfg.normalize();
         Ok(cfg)
+    }
+
+    /// Upgrade legacy fields in place.
+    pub fn normalize(&mut self) {
+        for s in &mut self.screens {
+            if let Some(r) = s.role.take() {
+                if s.roles.is_empty() {
+                    s.roles = vec![r];
+                }
+            }
+        }
     }
 
     pub fn to_yaml(&self) -> Result<String> {
@@ -273,14 +347,30 @@ impl Config {
             "config needs at least one [[screens]] entry"
         );
         for s in &self.screens {
-            s.role()?;
+            let roles = s.roles()?;
+            let name = roles[0].name();
             anyhow::ensure!(
                 matches!(s.rotate, 0 | 90 | 180 | 270),
                 "screen '{}': rotate must be 0, 90, 180 or 270 (got {})",
-                s.role,
+                name,
                 s.rotate
             );
+            anyhow::ensure!(
+                (3..=300).contains(&s.cycle_secs),
+                "screen '{}': cycle_secs must be between 3 and 300 (got {})",
+                name,
+                s.cycle_secs
+            );
         }
+        anyhow::ensure!(
+            matches!(self.price.source.as_str(), "energyzero" | "entsoe" | "none"),
+            "price.source must be energyzero, entsoe or none (got '{}')",
+            self.price.source
+        );
+        anyhow::ensure!(
+            !self.electricity.enabled || !self.electricity.zone.trim().is_empty(),
+            "electricity.zone must be set when electricity is enabled"
+        );
         Ok(())
     }
 }
@@ -293,7 +383,8 @@ mod tests {
     fn example_parses_with_four_screens() {
         let c = Config::default();
         assert_eq!(c.screens.len(), 4);
-        assert_eq!(c.screens[3].role().unwrap(), Role::Health);
+        assert_eq!(c.screens[3].first_role().unwrap(), Role::Health);
+        assert_eq!(c.screens[0].cycle_secs, 15);
         assert_eq!(c.screens[2].hz, 16_000_000);
         assert_eq!(c.prometheus.port, 9090);
         assert_eq!(
@@ -378,7 +469,9 @@ mod tests {
     #[test]
     fn bad_role_and_bad_rotate_rejected() {
         let s = ScreenCfg {
-            role: "nope".into(),
+            role: None,
+            roles: vec!["nope".into()],
+            cycle_secs: 15,
             spi: 0,
             cs: 0,
             dc: 0,
@@ -387,11 +480,97 @@ mod tests {
             hflip: false,
             hz: 1,
         };
-        assert!(s.role().is_err());
+        assert!(s.roles().is_err());
+        assert!(s.first_role().is_err());
         let mut c = Config::default();
         c.screens[0].rotate = 45;
         let err = c.validate().unwrap_err().to_string();
         assert!(err.contains("rotate") && err.contains("45"));
+    }
+
+    #[test]
+    fn legacy_role_key_upgrades_to_roles() {
+        let c = Config::from_yaml("screens:\n  - { role: cpu, spi: 0, cs: 0, dc: 6, rst: 5 }\n")
+            .unwrap();
+        assert_eq!(c.screens[0].roles, vec!["cpu".to_string()]);
+        assert_eq!(c.screens[0].role, None);
+        assert_eq!(c.screens[0].cycle_secs, 15);
+        c.validate().unwrap();
+        let text = c.to_yaml().unwrap();
+        assert!(
+            !text.contains("role:"),
+            "legacy key not written back: {text}"
+        );
+        assert!(text.contains("roles:"), "{text}");
+    }
+
+    #[test]
+    fn role_list_and_cycle_secs_round_trip() {
+        let c = Config::from_yaml(
+            "screens:\n  - { roles: [cpu, thermal], cycle_secs: 20, spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            c.screens[0].roles().unwrap(),
+            vec![Role::Cpu, Role::Thermal]
+        );
+        assert_eq!(c.screens[0].cycle_secs, 20);
+        c.validate().unwrap();
+        assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+    }
+
+    #[test]
+    fn unknown_role_in_list_rejected() {
+        let c =
+            Config::from_yaml("screens:\n  - { roles: [nope], spi: 0, cs: 0, dc: 6, rst: 5 }\n")
+                .unwrap();
+        let err = format!("{:#}", c.validate().unwrap_err());
+        assert!(err.contains("nope"), "{err}");
+    }
+
+    #[test]
+    fn empty_role_list_rejected() {
+        let c = Config::from_yaml("screens:\n  - { roles: [], spi: 0, cs: 0, dc: 6, rst: 5 }\n")
+            .unwrap();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn out_of_range_cycle_secs_rejected() {
+        for secs in [1u64, 301] {
+            let mut c = Config::default();
+            c.screens[0].cycle_secs = secs;
+            let err = c.validate().unwrap_err().to_string();
+            assert!(err.contains("cycle_secs"), "{err}");
+        }
+    }
+
+    #[test]
+    fn bad_price_source_and_zoneless_electricity_rejected() {
+        let mut c = Config::default();
+        c.price.source = "foo".into();
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("price.source") && err.contains("foo"), "{err}");
+
+        let mut c = Config::default();
+        c.electricity.enabled = true;
+        c.electricity.zone = "  ".into();
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("electricity.zone"), "{err}");
+        c.electricity.zone = "NL".into();
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn electricity_price_and_threshold_defaults() {
+        let c = Config::default();
+        assert!(!c.electricity.enabled);
+        assert_eq!(c.electricity.zone, "NL");
+        assert_eq!(c.electricity.poll_secs, 300);
+        assert_eq!(c.price.source, "energyzero");
+        assert!(c.price.include_vat);
+        assert_eq!(c.price.poll_secs, 900);
+        assert_eq!(c.thresholds.hot_temp, 70.0);
     }
 
     #[test]

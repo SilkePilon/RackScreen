@@ -27,14 +27,30 @@ night:
 thresholds:
   hot_cpu: 90
   hot_mem: 90
+  hot_temp: 70
+
+electricity:
+  enabled: false           # set true and add your free token from app.electricitymaps.com
+  zone: NL
+  token: ""
+  poll_secs: 300
+
+price:
+  source: energyzero       # energyzero (NL, no token) | entsoe (EU, token) | none
+  entsoe_token: ""
+  entsoe_zone: ""          # EIC code, e.g. 10YNL----------L; derived from zone when empty
+  include_vat: true
+  poll_secs: 900
 
 display:
   brightness: 1.0
   fps: 30
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
 
+# Each screen cycles through its `roles` list, `cycle_secs` seconds each.
+# Roles: cpu, mem, pods, health, thermal, storage, powermix, price, carbon, renewable
 screens:
-  - { role: cpu,    spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
-  - { role: mem,    spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
-  - { role: pods,   spi: 1, cs: 0, dc: 23, rst: 22, rotate: 270, hflip: true,  hz: 16000000 }
-  - { role: health, spi: 1, cs: 1, dc: 4,  rst: 27, rotate: 270, hflip: true,  hz: 16000000 }
+  - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
+  - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
+  - { roles: [pods],   cycle_secs: 15, spi: 1, cs: 0, dc: 23, rst: 22, rotate: 270, hflip: true,  hz: 16000000 }
+  - { roles: [health], cycle_secs: 15, spi: 1, cs: 1, dc: 4,  rst: 27, rotate: 270, hflip: true,  hz: 16000000 }

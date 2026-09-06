@@ -6,7 +6,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use rackscreen_core::model::{Thresholds, DEFAULT_CYCLE_SECS};
+use rackscreen_core::model::Thresholds;
 use rackscreen_core::night::parse_hhmm;
 use rackscreen_core::theme::Role;
 use rackscreen_sources::SourceCtx;
@@ -100,12 +100,12 @@ impl Monitor {
             .handles
             .iter()
             .enumerate()
-            .map(|(i, h)| ScreenSlot::new(i, h.role, h.orient.clone(), h.mailbox.clone()))
+            .map(|(i, h)| ScreenSlot::new(i, h.first_role(), h.orient.clone(), h.mailbox.clone()))
             .collect();
-        // Interim: one static role per screen from the panel handle. Task 2 feeds
-        // the config's role lists and cycle times here instead.
-        let screens_roles: Vec<Vec<Role>> = panels.handles.iter().map(|h| vec![h.role]).collect();
-        let cycle_secs = vec![DEFAULT_CYCLE_SECS; screens_roles.len()];
+        // Each screen cycles through its configured role list.
+        let screens_roles: Vec<Vec<Role>> =
+            panels.handles.iter().map(|h| h.roles.clone()).collect();
+        let cycle_secs: Vec<f64> = panels.handles.iter().map(|h| h.cycle_secs as f64).collect();
 
         // render loop
         let night = NightWindow {

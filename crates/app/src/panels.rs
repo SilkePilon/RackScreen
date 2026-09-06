@@ -26,10 +26,20 @@ use rackscreen_render::frame::Orient;
 use crate::config::Config;
 
 pub struct PanelHandle {
-    pub role: Role,
+    /// Every role this screen cycles through, in order; never empty.
+    pub roles: Vec<Role>,
+    /// Dwell per role before cycling to the next one.
+    pub cycle_secs: u64,
     pub index: usize,
     pub orient: Orient,
     pub mailbox: Mailbox,
+}
+
+impl PanelHandle {
+    /// The role shown first, used where a single role identifies the screen.
+    pub fn first_role(&self) -> Role {
+        self.roles.first().copied().unwrap_or(Role::Cpu)
+    }
 }
 
 pub struct Panels {
@@ -129,17 +139,19 @@ pub fn open_panels(
                 .recv()
                 .context("simulator window thread stopped before opening the window")??;
             for (i, (scr, panel)) in cfg.screens.iter().zip(sim_panels).enumerate() {
-                let role = scr.role()?;
+                let roles = scr.roles()?;
+                let name = roles[0].name().to_string();
                 let mb = Mailbox::new();
                 let p = building.get();
                 p.handles.push(PanelHandle {
-                    role,
+                    roles,
+                    cycle_secs: scr.cycle_secs,
                     index: i,
                     orient: Orient::identity(),
                     mailbox: mb.clone(),
                 });
                 p.threads
-                    .push(spawn_display_thread(scr.role.clone(), Box::new(panel), mb));
+                    .push(spawn_display_thread(name, Box::new(panel), mb));
             }
             if let Some(out) = key_tx {
                 std::thread::spawn(move || {
@@ -163,7 +175,8 @@ pub fn open_panels(
         {
             let _ = (sim_grid, key_tx);
             for (i, scr) in cfg.screens.iter().enumerate() {
-                let role = scr.role()?;
+                let roles = scr.roles()?;
+                let name = roles[0].name().to_string();
                 let pins = rackscreen_display::gc9a01::Pins {
                     bus: scr.spi,
                     cs: scr.cs,
@@ -176,19 +189,19 @@ pub fn open_panels(
                     cfg.display.spi_chunk,
                     cfg.display.brightness,
                 )
-                .with_context(|| format!("open display {}", scr.role))?;
+                .with_context(|| format!("open display {name}"))?;
                 let d: Box<dyn Display> = Box::new(dev);
                 let mb = Mailbox::new();
                 let p = building.get();
                 p.handles.push(PanelHandle {
-                    role,
+                    roles,
+                    cycle_secs: scr.cycle_secs,
                     index: i,
                     orient: Orient::new(scr.rotate, scr.hflip),
                     mailbox: mb.clone(),
                 });
-                p.threads
-                    .push(spawn_display_thread(scr.role.clone(), d, mb));
-                tracing::info!("{} display online", scr.role);
+                p.threads.push(spawn_display_thread(name.clone(), d, mb));
+                tracing::info!("{name} display online");
             }
         }
         #[cfg(not(feature = "pi"))]
@@ -212,7 +225,7 @@ mod tests {
     #[test]
     fn sim_failure_after_hub_up_stops_window_thread() {
         let mut cfg = Config::default();
-        cfg.screens[1].role = "nope".into();
+        cfg.screens[1].roles = vec!["nope".into()];
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let failed = match open_panels(&cfg, true, false, None) {
