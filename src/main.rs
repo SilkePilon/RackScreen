@@ -48,6 +48,36 @@ struct Cli {
     seed: u64,
 }
 
+/// Resolves on SIGINT, SIGTERM (systemd stop/restart) or when the render loop
+/// has already stopped on its own (renderer error or panic).
+async fn wait_for_shutdown(stop: &AtomicBool) {
+    let render_stopped = async {
+        while !stop.load(Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT, stopping"),
+        _ = sigterm() => tracing::info!("SIGTERM, stopping"),
+        _ = render_stopped => tracing::warn!("render loop stopped, shutting down"),
+    }
+}
+
+async fn sigterm() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+                return;
+            }
+            Err(e) => tracing::warn!("cannot install SIGTERM handler: {e}"),
+        }
+    }
+    std::future::pending::<()>().await
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -239,10 +269,7 @@ fn main() -> Result<()> {
         hub.run(stop.clone());
     }
     if !stop.load(Ordering::Relaxed) {
-        runtime.block_on(async {
-            let _ = tokio::signal::ctrl_c().await;
-        });
-        tracing::info!("stopping");
+        runtime.block_on(wait_for_shutdown(&stop));
         stop.store(true, Ordering::Relaxed);
     }
 

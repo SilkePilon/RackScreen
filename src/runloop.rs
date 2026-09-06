@@ -83,6 +83,30 @@ fn local_minutes() -> u32 {
     t.hour() * 60 + t.minute()
 }
 
+/// Sends `Quit` to every display thread and raises `stop` when dropped, so an
+/// early return (renderer setup failure) or a panic in the render loop never
+/// leaves display threads blocked in `Mailbox::take` or main waiting for a
+/// signal that will not come.
+pub struct ShutdownGuard {
+    mailboxes: Vec<Mailbox>,
+    stop: Arc<AtomicBool>,
+}
+
+impl ShutdownGuard {
+    pub fn new(mailboxes: Vec<Mailbox>, stop: Arc<AtomicBool>) -> Self {
+        Self { mailboxes, stop }
+    }
+}
+
+impl Drop for ShutdownGuard {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        for mb in &self.mailboxes {
+            mb.put(DisplayCmd::Quit);
+        }
+    }
+}
+
 pub struct RenderLoop {
     pub rx: Receiver<Event>,
     pub screens: Vec<ScreenSlot>,
@@ -94,6 +118,10 @@ pub struct RenderLoop {
 
 impl RenderLoop {
     pub fn run(mut self) -> Result<()> {
+        let _guard = ShutdownGuard::new(
+            self.screens.iter().map(|s| s.mailbox.clone()).collect(),
+            self.stop.clone(),
+        );
         let mut renderer = Renderer::new()?;
         let start = Instant::now();
         let mut model = Model::new(self.thresholds);
@@ -165,9 +193,7 @@ impl RenderLoop {
                 std::thread::sleep(tick - spent);
             }
         }
-        for s in &self.screens {
-            s.mailbox.put(DisplayCmd::Quit);
-        }
+        // `_guard` sends Quit to every mailbox and sets `stop` on drop.
         Ok(())
     }
 }
@@ -184,6 +210,19 @@ mod tests {
         assert_eq!(p.data()[0], 127);
         darken(&mut p, 0.0);
         assert_eq!(p.data()[0], 0);
+    }
+
+    #[test]
+    fn shutdown_guard_quits_mailboxes_and_sets_stop() {
+        let a = Mailbox::new();
+        let b = Mailbox::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let guard = ShutdownGuard::new(vec![a.clone(), b.clone()], stop.clone());
+        assert!(a.try_take().is_none());
+        drop(guard);
+        assert!(stop.load(Ordering::Relaxed));
+        assert!(matches!(a.take(), DisplayCmd::Quit));
+        assert!(matches!(b.take(), DisplayCmd::Quit));
     }
 
     #[test]
