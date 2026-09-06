@@ -25,6 +25,15 @@ struct Cli {
 enum Cmd {
     /// Run the monitor (what the systemd service runs)
     Run(RunArgs),
+    /// Interactive setup (default when run in a terminal)
+    Setup {
+        /// Desktop simulator window instead of SPI displays
+        #[arg(long)]
+        sim: bool,
+        /// Config file (default: /etc/rackscreen/config.yaml)
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -57,6 +66,15 @@ fn init_logging() {
         .init();
 }
 
+fn setup(start: rackscreen_setup::Start, sim: bool, config: Option<PathBuf>) -> Result<()> {
+    let ctx = rackscreen_setup::Ctx {
+        config_path: config.unwrap_or_else(Config::default_path),
+        sim,
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    rackscreen_setup::run(start, ctx)
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
@@ -75,10 +93,10 @@ fn main() -> Result<()> {
             };
             Monitor::start(&cfg, opts)?.run_blocking()
         }
+        Some(Cmd::Setup { sim, config }) => setup(rackscreen_setup::Start::Menu, sim, config),
         None => {
             if std::io::stdin().is_terminal() {
-                eprintln!("setup TUI arrives in a later task; use `rackscreen run --sim` for now");
-                Ok(())
+                setup(rackscreen_setup::Start::Menu, false, None)
             } else {
                 Cli::command().print_help()?;
                 std::process::exit(2);

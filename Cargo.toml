@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/render", "crates/display", "crates/sources", "crates/app"]
+members = ["crates/core", "crates/render", "crates/display", "crates/sources", "crates/app", "crates/setup"]
 resolver = "2"
 
 [workspace.package]
@@ -32,6 +32,7 @@ path = "src/main.rs"
 
 [dependencies]
 rackscreen-app = { path = "crates/app" }
+rackscreen-setup = { path = "crates/setup", default-features = false }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -39,8 +40,8 @@ clap = { version = "4", features = ["derive"] }
 
 [features]
 default = ["sim", "pi"]
-sim = ["rackscreen-app/sim"]
-pi = ["rackscreen-app/pi"]
+sim = ["rackscreen-app/sim", "rackscreen-setup/sim"]
+pi = ["rackscreen-app/pi", "rackscreen-setup/pi"]
 
 [profile.release]
 opt-level = 3
