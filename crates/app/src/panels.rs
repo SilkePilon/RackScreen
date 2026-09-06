@@ -2,7 +2,13 @@
 // With neither backend feature both branches bail, so everything below is unused.
 #![cfg_attr(
     not(any(feature = "sim", feature = "pi")),
-    allow(unused_imports, unused_variables, unused_mut, unreachable_code)
+    allow(
+        unused_imports,
+        unused_variables,
+        unused_mut,
+        unreachable_code,
+        dead_code
+    )
 )]
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,9 +55,33 @@ impl Panels {
     }
 }
 
+/// A `Panels` under construction: dropped without `finish` (any `?` in `open_panels`)
+/// it shuts down whatever was already started, so a failure part way through never
+/// leaves display threads blocked in `Mailbox::take` holding their GPIO lines, or the
+/// simulator window thread running.
+struct Building(Option<Panels>);
+
+impl Building {
+    fn get(&mut self) -> &mut Panels {
+        self.0.as_mut().expect("panels present until finished")
+    }
+    fn finish(mut self) -> Panels {
+        self.0.take().expect("panels present until finished")
+    }
+}
+
+impl Drop for Building {
+    fn drop(&mut self) {
+        if let Some(p) = self.0.take() {
+            p.shutdown();
+        }
+    }
+}
+
 /// Open one display per configured screen. In simulator mode the window loop runs on
 /// its own thread and `key_tx` (if given) receives the simulator's key presses.
 /// Orientation: identity in the simulator, per-config rotate/hflip on real panels.
+/// On error everything opened so far is shut down again before returning.
 pub fn open_panels(
     cfg: &Config,
     sim: bool,
@@ -59,15 +89,12 @@ pub fn open_panels(
     key_tx: Option<Sender<char>>,
 ) -> Result<Panels> {
     let stop = Arc::new(AtomicBool::new(false));
-    #[cfg_attr(not(any(feature = "sim", feature = "pi")), allow(unused_mut))]
-    let mut handles = Vec::new();
-    #[cfg_attr(not(any(feature = "sim", feature = "pi")), allow(unused_mut))]
-    let mut threads = Vec::new();
-    // Without `pi` the non-sim branch bails, so the initial None is never read;
-    // without `sim` the value is never reassigned.
-    #[cfg_attr(not(feature = "sim"), allow(unused_mut))]
-    #[cfg_attr(not(feature = "pi"), allow(unused_assignments))]
-    let mut hub_thread = None;
+    let mut building = Building(Some(Panels {
+        handles: Vec::new(),
+        threads: Vec::new(),
+        hub_thread: None,
+        stop: stop.clone(),
+    }));
 
     if sim {
         #[cfg(feature = "sim")]
@@ -96,18 +123,23 @@ pub fn open_panels(
                         }
                     },
                 )?;
+            // Registered before anything can fail so an error below stops and joins it.
+            building.get().hub_thread = Some(thread);
             let sim_panels = ready_rx
                 .recv()
                 .context("simulator window thread stopped before opening the window")??;
             for (i, (scr, panel)) in cfg.screens.iter().zip(sim_panels).enumerate() {
+                let role = scr.role()?;
                 let mb = Mailbox::new();
-                handles.push(PanelHandle {
-                    role: scr.role()?,
+                let p = building.get();
+                p.handles.push(PanelHandle {
+                    role,
                     index: i,
                     orient: Orient::identity(),
                     mailbox: mb.clone(),
                 });
-                threads.push(spawn_display_thread(scr.role.clone(), Box::new(panel), mb));
+                p.threads
+                    .push(spawn_display_thread(scr.role.clone(), Box::new(panel), mb));
             }
             if let Some(out) = key_tx {
                 std::thread::spawn(move || {
@@ -120,7 +152,6 @@ pub fn open_panels(
             } else {
                 drop(rx);
             }
-            hub_thread = Some(thread);
         }
         #[cfg(not(feature = "sim"))]
         {
@@ -132,6 +163,7 @@ pub fn open_panels(
         {
             let _ = (sim_grid, key_tx);
             for (i, scr) in cfg.screens.iter().enumerate() {
+                let role = scr.role()?;
                 let pins = rackscreen_display::gc9a01::Pins {
                     bus: scr.spi,
                     cs: scr.cs,
@@ -147,13 +179,15 @@ pub fn open_panels(
                 .with_context(|| format!("open display {}", scr.role))?;
                 let d: Box<dyn Display> = Box::new(dev);
                 let mb = Mailbox::new();
-                handles.push(PanelHandle {
-                    role: scr.role()?,
+                let p = building.get();
+                p.handles.push(PanelHandle {
+                    role,
                     index: i,
                     orient: Orient::new(scr.rotate, scr.hflip),
                     mailbox: mb.clone(),
                 });
-                threads.push(spawn_display_thread(scr.role.clone(), d, mb));
+                p.threads
+                    .push(spawn_display_thread(scr.role.clone(), d, mb));
                 tracing::info!("{} display online", scr.role);
             }
         }
@@ -163,10 +197,36 @@ pub fn open_panels(
             anyhow::bail!("built without the `pi` feature; use --sim");
         }
     }
-    Ok(Panels {
-        handles,
-        threads,
-        hub_thread,
-        stop,
-    })
+    Ok(building.finish())
+}
+
+#[cfg(all(test, feature = "sim"))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A bad role on the second screen fails `open_panels` after the simulator hub (and
+    /// the first display thread) are up; the call must still return promptly, which it
+    /// only does if the window thread was stopped and joined. Without a display server
+    /// the hub itself fails to open, which exercises the same early-error path.
+    #[test]
+    fn sim_failure_after_hub_up_stops_window_thread() {
+        let mut cfg = Config::default();
+        cfg.screens[1].role = "nope".into();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let failed = match open_panels(&cfg, true, false, None) {
+                Ok(p) => {
+                    p.shutdown();
+                    false
+                }
+                Err(_) => true,
+            };
+            let _ = tx.send(failed);
+        });
+        let failed = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("open_panels returned within 2 s");
+        assert!(failed, "unknown role must fail open_panels");
+    }
 }
