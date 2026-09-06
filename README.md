@@ -16,6 +16,8 @@ It downloads the latest release and opens the setup menu. **Install** copies the
 
 Later runs: just type `rackscreen` (it asks for sudo). The service runs `rackscreen run --config /etc/rackscreen/config.yaml`.
 
+Upgrading from v0.1: `~/.config/rackscreen/config.toml` is no longer read; re-enter your settings via Configure.
+
 Config is YAML (`/etc/rackscreen/config.yaml`, defaults in `config.example.yaml`). Kubeconfig defaults to `~/k8s-monitor.yaml` of the service user.
 
 ## Develop on the desktop

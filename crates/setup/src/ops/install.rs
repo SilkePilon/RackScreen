@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
 use crate::ops::boot::{self, BootChange};
-use crate::ops::config_file::{set_spi_chunk, Config};
+use crate::ops::config_file::{save_config, set_spi_chunk, Config};
 use crate::ops::paths::Paths;
 use crate::ops::shell::Shell;
 use crate::ops::systemd::{unit_text, Systemd};
@@ -84,9 +84,17 @@ impl Installer {
             let _ = events.send(Event::Started(id));
             let outcome = if id == StepId::Boot {
                 match self.boot_plan() {
-                    Ok(changes) if changes.is_empty() => {
-                        Ok(Outcome::Skipped("already enabled".into()))
-                    }
+                    // The cmdline token is already there (an upgrade, or a reboot after
+                    // an earlier install), so the config may use the large chunk too.
+                    Ok(changes) if changes.is_empty() => match self.ensure_spi_chunk() {
+                        Ok(true) => Ok(Outcome::Skipped(
+                            "already enabled; spi_chunk set to 65536".into(),
+                        )),
+                        Ok(false) => Ok(Outcome::Skipped("already enabled".into())),
+                        Err(e) => Ok(Outcome::Warn(format!(
+                            "already enabled; config not updated: {e:#}"
+                        ))),
+                    },
                     Ok(changes) => {
                         let _ = events.send(Event::AskBoot(changes));
                         let yes = replies.recv().unwrap_or(false);
@@ -120,6 +128,19 @@ impl Installer {
         let c = std::fs::read_to_string(&cfg).unwrap_or_default();
         let l = std::fs::read_to_string(&cmd).unwrap_or_default();
         Ok(boot::needed_changes(&c, &l))
+    }
+
+    /// Set `display.spi_chunk` to 65536 (the value `spidev.bufsiz=65536` allows) if it
+    /// is not already. Returns whether the config was changed.
+    fn ensure_spi_chunk(&self) -> Result<bool> {
+        let path = self.paths.config();
+        let mut cfg = Config::load_or_default(&path)?;
+        if cfg.display.spi_chunk == 65536 {
+            return Ok(false);
+        }
+        set_spi_chunk(&mut cfg, 65536);
+        save_config(&cfg, &path)?;
+        Ok(true)
     }
 
     /// One step. `answer` is only used by the Boot step.
@@ -168,7 +189,7 @@ impl Installer {
                 if path.exists() {
                     return Ok(Outcome::Skipped("kept existing config".into()));
                 }
-                Config::default().save(&path)?;
+                save_config(&Config::default(), &path)?;
                 Ok(Outcome::Done(path.display().to_string()))
             }
             StepId::Groups => {
@@ -196,7 +217,17 @@ impl Installer {
                     .with_context(|| format!("write {}", unit.display()))?;
                 let sd = Systemd::new(self.sh.as_ref(), &self.user);
                 sd.daemon_reload()?;
+                // `enable --now` leaves an already running (older) service untouched,
+                // so an upgrade has to restart it to pick up the new binary.
+                let was_active = sd.is_active()?;
                 sd.enable_now()?;
+                if was_active {
+                    sd.restart()?;
+                    return Ok(Outcome::Done(format!(
+                        "{} enabled and restarted",
+                        sd.unit()
+                    )));
+                }
                 Ok(Outcome::Done(format!("{} enabled and started", sd.unit())))
             }
             StepId::Boot => {
@@ -219,9 +250,7 @@ impl Installer {
                     boot::ensure_cmdline_token(&l, boot::CMDLINE_TOKEN).0,
                 )
                 .context("write cmdline.txt")?;
-                let mut cfg = Config::load_or_default(&self.paths.config())?;
-                set_spi_chunk(&mut cfg, 65536);
-                cfg.save(&self.paths.config())?;
+                self.ensure_spi_chunk()?;
                 Ok(Outcome::Done(
                     "SPI enabled, spi_chunk set to 65536; reboot required".into(),
                 ))
@@ -306,6 +335,61 @@ mod tests {
                 .spi_chunk,
             65536
         );
+    }
+
+    #[test]
+    fn boot_already_enabled_bumps_spi_chunk_in_config() {
+        let (dir, inst, _sh) = setup(true);
+        std::fs::write(
+            dir.path().join("boot/firmware/config.txt"),
+            "dtparam=spi=on\ndtoverlay=spi1-2cs\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("boot/firmware/cmdline.txt"),
+            "root=x rootwait spidev.bufsiz=65536\n",
+        )
+        .unwrap();
+        let (tx, rx) = mpsc::channel();
+        let (_rtx, rrx) = mpsc::channel();
+        inst.run(tx, rrx);
+        let events: Vec<Event> = rx.iter().collect();
+        assert!(!events.iter().any(|e| matches!(e, Event::AskBoot(_))));
+        assert!(events.iter().any(
+            |e| matches!(e, Event::Finished(StepId::Boot, Outcome::Skipped(m)) if m.contains("65536"))
+        ));
+        assert_eq!(
+            Config::load_or_default(&inst.paths.config())
+                .unwrap()
+                .display
+                .spi_chunk,
+            65536
+        );
+        assert!(matches!(
+            events.last(),
+            Some(Event::Complete {
+                reboot_needed: false
+            })
+        ));
+    }
+
+    #[test]
+    fn service_step_restarts_an_already_running_service() {
+        let (_dir, inst, sh) = setup(true);
+        // FakeShell answers every command with success, so `is-active` reports running.
+        let out = inst.step(StepId::Service, None).unwrap();
+        assert!(matches!(out, Outcome::Done(m) if m.contains("restarted")));
+        assert!(sh.called("systemctl enable --now rackscreen@silke"));
+        assert!(sh.called("systemctl restart rackscreen@silke"));
+    }
+
+    #[test]
+    fn service_step_does_not_restart_a_fresh_install() {
+        let (_dir, inst, sh) = setup(true);
+        sh.respond("systemctl is-active", Output::fail(3, ""));
+        let out = inst.step(StepId::Service, None).unwrap();
+        assert!(matches!(out, Outcome::Done(m) if m.contains("started")));
+        assert!(!sh.called("systemctl restart"));
     }
 
     #[test]
