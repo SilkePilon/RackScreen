@@ -134,7 +134,8 @@ impl Scene {
     }
 }
 
-fn icon(name: &'static str, cy: f32, size: f32, color: Color, alpha: f32) -> Drawable {
+/// A centred icon at `cy`.
+pub fn icon_at(name: &'static str, cy: f32, size: f32, color: Color, alpha: f32) -> Drawable {
     Drawable::Icon {
         name,
         cx: CX,
@@ -147,7 +148,8 @@ fn icon(name: &'static str, cy: f32, size: f32, color: Color, alpha: f32) -> Dra
     }
 }
 
-fn badge(cy: f32, stroke: Color, text: String) -> Drawable {
+/// The standard 64x26 badge.
+pub fn badge(cy: f32, stroke: Color, text: String) -> Drawable {
     Drawable::Badge {
         cx: CX,
         cy,
@@ -163,7 +165,8 @@ fn badge(cy: f32, stroke: Color, text: String) -> Drawable {
     }
 }
 
-fn ring(radius: f32, states: Vec<SegState>) -> Drawable {
+/// A full closed ring of `states.len()` segments.
+pub fn ring(radius: f32, states: Vec<SegState>) -> Drawable {
     let n = states.len();
     Drawable::Ring {
         cx: CX,
@@ -220,6 +223,33 @@ pub fn node_dots_badge(
             colors,
         },
     ]
+}
+
+/// A small badge that alternates between two texts every 5 s, fading the new
+/// text in over the first 0.25 s of each window (as the torrent badge does).
+pub fn badge_text_alternate(cy: f32, stroke: Color, a: String, b: String, now: Secs) -> Drawable {
+    let window = (now / 5.0).floor();
+    let frac = now - window * 5.0;
+    let text = if (window as i64).rem_euclid(2) == 0 {
+        a
+    } else {
+        b
+    };
+    let mut d = badge(cy, stroke, text);
+    if let Drawable::Badge {
+        w,
+        h,
+        text_px,
+        alpha,
+        ..
+    } = &mut d
+    {
+        *w = 48.0;
+        *h = 20.0;
+        *text_px = 12.0;
+        *alpha = ((frac / 0.25) as f32).min(1.0);
+    }
+    d
 }
 
 /// Segment count for a ring of the given radius (60 at r=102, fewer inside).
@@ -302,7 +332,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             let pct = model.smooth_cpu(now);
             let mut s = Scene::new();
             s.push(ring(RING_R, ring_states(pct, role.accent(), SEG_N, now)));
-            s.push(icon(
+            s.push(icon_at(
                 role.icon(),
                 ICON_CY,
                 ICON_SIZE,
@@ -316,7 +346,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             let pct = model.smooth_mem(now);
             let mut s = Scene::new();
             s.push(ring(RING_R, ring_states(pct, role.accent(), SEG_N, now)));
-            s.push(icon(role.icon(), ICON_CY, ICON_SIZE, WHITE, 1.0));
+            s.push(icon_at(role.icon(), ICON_CY, ICON_SIZE, WHITE, 1.0));
             s.push(badge(BADGE_CY, role.accent(), format!("{:.0}%", pct)));
             s
         }
@@ -328,7 +358,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
                 RING_R,
                 pod_segments(running, st.pods_pending, st.pods_failed, st.pods_total, now),
             ));
-            let mut ic = icon(role.icon(), ICON_CY, ICON_SIZE, WHITE, 1.0);
+            let mut ic = icon_at(role.icon(), ICON_CY, ICON_SIZE, WHITE, 1.0);
             if let Drawable::Icon { dy, .. } = &mut ic {
                 *dy = -3.0 * pulse(now, 2.6);
             }
@@ -368,7 +398,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             };
             s.push(ring(RING_R, states));
             let alert = !st.alerts.is_empty();
-            let mut heart = icon(
+            let mut heart = icon_at(
                 role.icon(),
                 ICON_CY,
                 ICON_SIZE,
@@ -403,8 +433,10 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             }
             s
         }
-        // Thermal, Storage, PowerMix, Price, Carbon, Renewable: scenes arrive with
-        // their data sources; until then they show the no-data ring.
+        Role::Thermal => crate::scene_thermal::thermal_scene(model, now),
+        Role::Storage => crate::scene_storage::storage_scene(model, now),
+        // PowerMix, Price, Carbon, Renewable: scenes arrive with their data
+        // sources; until then they show the no-data ring.
         _ => no_data_scene(now),
     }
 }
@@ -426,7 +458,7 @@ pub fn torrent_scene(torrents: &[Torrent], now: Secs) -> Scene {
             ring_states(t.progress, TORRENT_ACCENTS[i], seg_count(r), now),
         ));
     }
-    let mut ic = icon("download", TORRENT_ICON_CY, TORRENT_ICON_SIZE, WHITE, 1.0);
+    let mut ic = icon_at("download", TORRENT_ICON_CY, TORRENT_ICON_SIZE, WHITE, 1.0);
     if let Drawable::Icon { dy, .. } = &mut ic {
         *dy = -2.0 + 4.0 * pulse(now, 1.6);
     }
@@ -462,7 +494,13 @@ pub fn connecting_scene(now: Secs) -> Scene {
     }
     let mut s = Scene::new();
     s.push(ring(RING_R, states));
-    s.push(icon("plug-zap", CY, BIG_ICON_SIZE, GREY, breathe(now, 2.4)));
+    s.push(icon_at(
+        "plug-zap",
+        CY,
+        BIG_ICON_SIZE,
+        GREY,
+        breathe(now, 2.4),
+    ));
     s
 }
 
@@ -476,7 +514,7 @@ pub fn no_data_scene(now: Secs) -> Scene {
     }
     let mut s = Scene::new();
     s.push(ring(RING_R, states));
-    s.push(icon(
+    s.push(icon_at(
         "cloud-off",
         CY,
         BIG_ICON_SIZE,
@@ -491,6 +529,24 @@ mod tests {
     use super::*;
     use crate::event::{Event, LinkTarget};
     use crate::model::Thresholds;
+
+    #[test]
+    fn badge_text_alternate_swaps_every_five_seconds() {
+        let text = |now| match badge_text_alternate(180.0, GREEN, "a".into(), "b".into(), now) {
+            Drawable::Badge {
+                text, w, h, alpha, ..
+            } => (text, w, h, alpha),
+            _ => panic!("badge"),
+        };
+        let (t, w, h, alpha) = text(0.0);
+        assert_eq!(t, "a");
+        assert_eq!((w, h), (48.0, 20.0));
+        assert_eq!(alpha, 0.0, "fades in at the start of a window");
+        assert_eq!(text(4.9).0, "a");
+        assert_eq!(text(5.5).0, "b");
+        assert_eq!(text(5.5).3, 1.0);
+        assert_eq!(text(10.1).0, "a");
+    }
 
     #[test]
     fn node_dots_badge_widens_past_four_nodes() {

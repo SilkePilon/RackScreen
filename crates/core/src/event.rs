@@ -10,6 +10,26 @@ pub struct Torrent {
     pub speed_bps: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Robustness {
+    Healthy,
+    Degraded,
+    Faulted,
+    Unknown,
+}
+
+impl Robustness {
+    /// Longhorn's `longhorn_volume_robustness` value.
+    pub fn from_code(v: f64) -> Robustness {
+        match v as i64 {
+            1 => Robustness::Healthy,
+            2 => Robustness::Degraded,
+            3 => Robustness::Faulted,
+            _ => Robustness::Unknown,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -60,6 +80,24 @@ pub enum Event {
     AlertChanged {
         name: String,
         firing: bool,
+    },
+    /// Per-node temperature in degrees Celsius.
+    NodeTemps(Vec<(String, f32)>),
+    Storage {
+        volumes: Vec<(String, Robustness)>,
+        used_bytes: u64,
+        capacity_bytes: u64,
+    },
+    HotTemp {
+        node: String,
+        celsius: f32,
+    },
+    VolumeDegraded {
+        name: String,
+        robustness: Robustness,
+    },
+    VolumeHealthy {
+        name: String,
     },
     Torrents(Vec<Torrent>),
     TorrentAdded {

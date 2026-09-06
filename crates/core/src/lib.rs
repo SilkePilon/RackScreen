@@ -7,5 +7,7 @@ pub mod model;
 pub mod night;
 pub mod scene;
 pub mod scene_fx;
+pub mod scene_storage;
+pub mod scene_thermal;
 pub mod screens;
 pub mod theme;

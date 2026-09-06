@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::anim::{Secs, Smooth};
-use crate::event::{Event, LinkTarget, Torrent};
+use crate::event::{Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::screens::ScreenState;
 use crate::theme::Role;
@@ -17,6 +17,8 @@ pub const DEFAULT_CYCLE_SECS: Secs = 15.0;
 pub struct Thresholds {
     pub hot_cpu: f32,
     pub hot_mem: f32,
+    /// Node temperature in °C that raises a hot-temp splash.
+    pub hot_temp: f32,
 }
 
 impl Default for Thresholds {
@@ -24,6 +26,7 @@ impl Default for Thresholds {
         Self {
             hot_cpu: 90.0,
             hot_mem: 90.0,
+            hot_temp: 70.0,
         }
     }
 }
@@ -50,9 +53,16 @@ pub struct ClusterState {
     pub nodes_not_ready: Vec<String>,
     pub alerts: Vec<String>,
     pub torrents: Vec<Torrent>,
+    /// Per-node temperature in °C.
+    pub temps: Vec<(String, f32)>,
+    pub volumes: Vec<(String, Robustness)>,
+    pub storage_used: u64,
+    pub storage_capacity: u64,
     pub have_metrics: bool,
     pub have_pods: bool,
     pub have_nodes: bool,
+    pub have_temps: bool,
+    pub have_storage: bool,
 }
 
 /// What the fold wants the animation layer to do. Consumed by Task 5.
@@ -62,6 +72,9 @@ pub enum FxRequest {
     PodCrashed,
     PodGone,
     HotNode(Role),
+    HotTemp,
+    VolumeDegraded,
+    VolumeHealthy,
     TorrentAdded,
     TorrentDone,
     NodeNotReady,
@@ -79,7 +92,10 @@ pub struct Model {
     cpu: Smooth,
     mem: Smooth,
     pods: Smooth,
+    hot_temp: Smooth,
+    storage_pct: Smooth,
     hot_last: HashMap<(Role, String), Secs>,
+    hot_temp_last: HashMap<String, Secs>,
     night_override: Option<bool>,
     fx: Vec<FxRequest>,
     fx_state: Fx,
@@ -104,7 +120,10 @@ impl Model {
             cpu: Smooth::new(0.0, SMOOTH_SECS),
             mem: Smooth::new(0.0, SMOOTH_SECS),
             pods: Smooth::new(0.0, SMOOTH_SECS),
+            hot_temp: Smooth::new(0.0, SMOOTH_SECS),
+            storage_pct: Smooth::new(0.0, SMOOTH_SECS),
             hot_last: HashMap::new(),
+            hot_temp_last: HashMap::new(),
             night_override: None,
             fx: Vec::new(),
             fx_state: Fx::default(),
@@ -137,6 +156,12 @@ impl Model {
     }
     pub fn smooth_pods(&self, now: Secs) -> f32 {
         self.pods.value(now)
+    }
+    pub fn smooth_hot_temp(&self, now: Secs) -> f32 {
+        self.hot_temp.value(now)
+    }
+    pub fn smooth_storage_pct(&self, now: Secs) -> f32 {
+        self.storage_pct.value(now)
     }
     pub fn pending_fx(&self) -> &[FxRequest] {
         &self.fx
@@ -267,6 +292,44 @@ impl Model {
                     FxRequest::AlertResolved
                 });
             }
+            Event::NodeTemps(list) => {
+                let hottest = list.iter().map(|(_, c)| *c).fold(0.0_f32, f32::max);
+                self.hot_temp.set(hottest, now);
+                let th = self.thresholds.hot_temp;
+                for (node, c) in &list {
+                    if *c >= th {
+                        let recently = self
+                            .hot_temp_last
+                            .get(node)
+                            .is_some_and(|t| now - t < HOT_DEBOUNCE_SECS);
+                        if !recently {
+                            self.hot_temp_last.insert(node.clone(), now);
+                            self.fx.push(FxRequest::HotTemp);
+                        }
+                    }
+                }
+                self.state.temps = list;
+                self.state.have_temps = true;
+            }
+            Event::Storage {
+                volumes,
+                used_bytes,
+                capacity_bytes,
+            } => {
+                let pct = if capacity_bytes > 0 {
+                    used_bytes as f32 / capacity_bytes as f32 * 100.0
+                } else {
+                    0.0
+                };
+                self.storage_pct.set(pct, now);
+                self.state.volumes = volumes;
+                self.state.storage_used = used_bytes;
+                self.state.storage_capacity = capacity_bytes;
+                self.state.have_storage = true;
+            }
+            Event::HotTemp { .. } => self.fx.push(FxRequest::HotTemp),
+            Event::VolumeDegraded { .. } => self.fx.push(FxRequest::VolumeDegraded),
+            Event::VolumeHealthy { .. } => self.fx.push(FxRequest::VolumeHealthy),
             Event::Torrents(list) => self.state.torrents = list,
             Event::TorrentAdded { .. } => self.fx.push(FxRequest::TorrentAdded),
             Event::TorrentDone { .. } => self.fx.push(FxRequest::TorrentDone),
@@ -389,6 +452,85 @@ mod tests {
         assert_eq!(m.take_fx(), vec![FxRequest::HotNode(Role::Cpu)]);
         m.apply(metrics(50.0, Some(("n2", 50.0))), 302.0);
         assert!(m.take_fx().is_empty());
+    }
+
+    fn temps(list: &[(&str, f32)]) -> Event {
+        Event::NodeTemps(list.iter().map(|(n, c)| (n.to_string(), *c)).collect())
+    }
+
+    #[test]
+    fn node_temps_track_the_hottest_and_debounce_the_splash() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(temps(&[("n1", 41.0), ("n2", 58.0), ("n3", 47.0)]), 0.0);
+        assert!(m.state().have_temps);
+        assert_eq!(m.state().temps.len(), 3);
+        assert!((m.smooth_hot_temp(5.0) - 58.0).abs() < 1e-4);
+        assert!(m.take_fx().is_empty(), "58 is under the 70 threshold");
+        m.apply(temps(&[("n1", 41.0), ("n2", 72.0)]), 1.0);
+        assert_eq!(m.take_fx(), vec![FxRequest::HotTemp]);
+        m.apply(temps(&[("n1", 41.0), ("n2", 74.0)]), 60.0);
+        assert!(m.take_fx().is_empty(), "same node debounced for 5 min");
+        m.apply(temps(&[("n1", 41.0), ("n2", 74.0)]), 400.0);
+        assert_eq!(m.take_fx(), vec![FxRequest::HotTemp]);
+        m.apply(temps(&[("n1", 90.0), ("n2", 74.0)]), 401.0);
+        assert_eq!(m.take_fx(), vec![FxRequest::HotTemp], "a new node splashes");
+    }
+
+    #[test]
+    fn storage_fold_computes_used_percentage() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Storage {
+                volumes: vec![
+                    ("a".into(), Robustness::Healthy),
+                    ("b".into(), Robustness::Degraded),
+                ],
+                used_bytes: 64 << 30,
+                capacity_bytes: 128 << 30,
+            },
+            0.0,
+        );
+        assert!(m.state().have_storage);
+        assert_eq!(m.state().volumes.len(), 2);
+        assert_eq!(m.state().storage_capacity, 128 << 30);
+        assert!((m.smooth_storage_pct(5.0) - 50.0).abs() < 1e-4);
+        m.apply(
+            Event::Storage {
+                volumes: vec![],
+                used_bytes: 0,
+                capacity_bytes: 0,
+            },
+            6.0,
+        );
+        assert!(m.smooth_storage_pct(12.0) < 1e-4, "no capacity means 0%");
+    }
+
+    #[test]
+    fn volume_and_temp_events_request_splashes() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::HotTemp {
+                node: "n1".into(),
+                celsius: 80.0,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::VolumeDegraded {
+                name: "v".into(),
+                robustness: Robustness::Degraded,
+            },
+            0.0,
+        );
+        m.apply(Event::VolumeHealthy { name: "v".into() }, 0.0);
+        assert_eq!(
+            m.take_fx(),
+            vec![
+                FxRequest::HotTemp,
+                FxRequest::VolumeDegraded,
+                FxRequest::VolumeHealthy
+            ]
+        );
     }
 
     #[test]

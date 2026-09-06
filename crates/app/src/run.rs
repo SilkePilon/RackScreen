@@ -121,6 +121,7 @@ impl Monitor {
             thresholds: Thresholds {
                 hot_cpu: cfg.thresholds.hot_cpu,
                 hot_mem: cfg.thresholds.hot_mem,
+                hot_temp: cfg.thresholds.hot_temp,
             },
             night,
             fps,

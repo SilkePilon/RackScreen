@@ -49,6 +49,19 @@ pub const GREY: Color = Color::hex(0x888888);
 pub const DIM_GREY: Color = Color::hex(0x2a2a2a);
 pub const BLACK: Color = Color::hex(0x000000);
 
+pub fn lerp(a: Color, b: Color, t: f32) -> Color {
+    a.mix(b, t)
+}
+
+/// Node temperature colour: 35 °C blue, 55 °C amber, 70 °C red.
+pub fn temp_color(c: f32) -> Color {
+    if c <= 55.0 {
+        BLUE.mix(AMBER, ((c - 35.0) / 20.0).clamp(0.0, 1.0))
+    } else {
+        AMBER.mix(RED, ((c - 55.0) / 15.0).clamp(0.0, 1.0))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Role {
     Cpu,
@@ -180,6 +193,17 @@ mod tests {
     fn mix_midpoint() {
         let c = BLACK.mix(WHITE, 0.5);
         assert_eq!((c.r, c.g, c.b), (128, 128, 128));
+    }
+
+    #[test]
+    fn temp_color_ramps_blue_amber_red() {
+        assert_eq!(temp_color(35.0), BLUE);
+        assert_eq!(temp_color(20.0), BLUE);
+        assert_eq!(temp_color(55.0), AMBER);
+        assert_eq!(temp_color(80.0), RED);
+        let mid = temp_color(45.0);
+        assert!(mid.r > BLUE.r && mid.r < AMBER.r, "45 °C sits between");
+        assert_eq!(lerp(BLACK, WHITE, 0.5), BLACK.mix(WHITE, 0.5));
     }
 
     #[test]

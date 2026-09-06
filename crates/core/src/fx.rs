@@ -19,6 +19,9 @@ pub enum SplashKind {
     PodCrashed,
     PodGone,
     HotNode,
+    HotTemp,
+    VolumeDegraded,
+    VolumeHealthy,
     TorrentAdded,
 }
 
@@ -29,6 +32,9 @@ impl SplashKind {
             SplashKind::PodCrashed => "package-x",
             SplashKind::PodGone => "package-minus",
             SplashKind::HotNode => "flame",
+            SplashKind::HotTemp => "flame",
+            SplashKind::VolumeDegraded => "database-zap",
+            SplashKind::VolumeHealthy => "database",
             SplashKind::TorrentAdded => "download",
         }
     }
@@ -38,6 +44,9 @@ impl SplashKind {
             SplashKind::PodCrashed => RED,
             SplashKind::PodGone => BLUE.with_alpha(0.6),
             SplashKind::HotNode => AMBER,
+            SplashKind::HotTemp => RED,
+            SplashKind::VolumeDegraded => AMBER,
+            SplashKind::VolumeHealthy => GREEN,
             SplashKind::TorrentAdded => BLUE,
         }
     }
@@ -274,6 +283,9 @@ impl Fx {
             FxRequest::PodCrashed => splash(SplashKind::PodCrashed, Role::Pods),
             FxRequest::PodGone => splash(SplashKind::PodGone, Role::Pods),
             FxRequest::HotNode(role) => splash(SplashKind::HotNode, role),
+            FxRequest::HotTemp => splash(SplashKind::HotTemp, Role::Thermal),
+            FxRequest::VolumeDegraded => splash(SplashKind::VolumeDegraded, Role::Storage),
+            FxRequest::VolumeHealthy => splash(SplashKind::VolumeHealthy, Role::Storage),
             FxRequest::TorrentAdded => splash(SplashKind::TorrentAdded, Role::Health),
             FxRequest::TorrentDone => self.sweeps.push(SweepKind::TorrentDone),
             FxRequest::NodeNotReady => self.sweeps.push(SweepKind::NodeNotReady),
@@ -399,6 +411,24 @@ mod tests {
         assert_eq!(q.active().unwrap().kind, SweepKind::TorrentDone);
         q.tick(8.0, 4);
         assert!(q.active().is_none());
+    }
+
+    #[test]
+    fn fx_routes_thermal_and_storage_splashes() {
+        let mut fx = Fx::default();
+        fx.apply(FxRequest::HotTemp, 0.0);
+        fx.apply(FxRequest::VolumeDegraded, 0.0);
+        fx.tick(0.0, 4);
+        assert_eq!(
+            fx.splashes[Role::Thermal.index()].active().unwrap().kind,
+            SplashKind::HotTemp
+        );
+        assert_eq!(
+            fx.splashes[Role::Storage.index()].active().unwrap().kind,
+            SplashKind::VolumeDegraded
+        );
+        assert_eq!(SplashKind::HotTemp.color(), RED);
+        assert_eq!(SplashKind::VolumeHealthy.icon(), "database");
     }
 
     #[test]

@@ -152,13 +152,10 @@ impl crate::model::Model {
             Role::Cpu | Role::Mem => !(self.link().prom && st.have_metrics),
             Role::Pods => !st.have_pods,
             Role::Health => !st.have_nodes,
+            Role::Thermal => !st.have_temps,
+            Role::Storage => !st.have_storage,
             // Sources for these arrive later; until then they always show no-data.
-            Role::Thermal
-            | Role::Storage
-            | Role::PowerMix
-            | Role::Price
-            | Role::Carbon
-            | Role::Renewable => true,
+            Role::PowerMix | Role::Price | Role::Carbon | Role::Renewable => true,
         }
     }
 
@@ -461,6 +458,9 @@ mod tests {
             SplashKind::PodCrashed,
             SplashKind::PodGone,
             SplashKind::HotNode,
+            SplashKind::HotTemp,
+            SplashKind::VolumeDegraded,
+            SplashKind::VolumeHealthy,
             SplashKind::TorrentAdded,
         ] {
             assert!(!k.icon().is_empty());

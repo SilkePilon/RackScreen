@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use rackscreen_core::event::{Event, LinkTarget, Torrent};
+use rackscreen_core::event::{Event, LinkTarget, Robustness, Torrent};
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::theme::Role;
 use rackscreen_render::frame::new_pixmap;
@@ -208,6 +208,90 @@ fn torrent_mode() {
     let mut px = new_pixmap();
     r.render(&m.scene_for_role(Role::Health, 5.0), &mut px);
     check("torrent", &px);
+}
+
+fn temps_model() -> Model {
+    let mut m = ready_model();
+    m.apply(
+        Event::NodeTemps(
+            [
+                ("rack-1", 44.0),
+                ("rack-2", 51.0),
+                ("rack-3", 68.0),
+                ("rack-4", 39.0),
+                ("rack-5", 47.0),
+                ("rack-6", 55.0),
+                ("rack-7", 42.0),
+            ]
+            .iter()
+            .map(|(n, c)| (n.to_string(), *c))
+            .collect(),
+        ),
+        0.0,
+    );
+    m
+}
+
+fn storage_model(volumes: Vec<(String, Robustness)>) -> Model {
+    let mut m = ready_model();
+    m.apply(
+        Event::Storage {
+            volumes,
+            used_bytes: 49 * (1 << 30),
+            capacity_bytes: 128 * (1 << 30),
+        },
+        0.0,
+    );
+    m
+}
+
+fn volumes(n: usize, degraded: &[usize]) -> Vec<(String, Robustness)> {
+    (0..n)
+        .map(|i| {
+            let r = if degraded.contains(&i) {
+                Robustness::Degraded
+            } else {
+                Robustness::Healthy
+            };
+            (format!("pvc-{i}"), r)
+        })
+        .collect()
+}
+
+#[test]
+fn thermal_idle() {
+    let m = temps_model();
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    // 2.5 s, not 5.0: the temperature badge fades in over each 5 s window, so at
+    // exactly 5.0 it would be fully transparent.
+    r.render(&m.scene_for_role(Role::Thermal, 2.5), &mut px);
+    // 68 °C is deep in the amber-to-red half of the ramp
+    let (red, g, b) = pixel(&px, 120, 18);
+    assert!(
+        red > 200 && g < 160 && b < 100,
+        "segment 0 hot, got {red},{g},{b}"
+    );
+    check("thermal", &px);
+}
+
+#[test]
+fn storage_idle_and_degraded() {
+    let mut r = Renderer::new().unwrap();
+    let m = storage_model(volumes(21, &[]));
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Storage, 5.0), &mut px);
+    let (red, g, b) = pixel(&px, 120, 18);
+    assert!(
+        red > 130 && b > 200 && g < 180,
+        "segment 0 violet, got {red},{g},{b}"
+    );
+    check("storage", &px);
+
+    let m2 = storage_model(volumes(6, &[2]));
+    let mut px2 = new_pixmap();
+    r.render(&m2.scene_for_role(Role::Storage, 5.0), &mut px2);
+    check("storage_degraded", &px2);
 }
 
 #[test]
