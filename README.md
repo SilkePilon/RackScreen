@@ -6,24 +6,28 @@ Four screens, top to bottom: **CPU**, **MEM**, **PODS**, **HEALTH**. Icon-first 
 
 Design: `docs/superpowers/specs/2026-09-05-rackscreen-design.md`.
 
+## Install on the Pi
+
+One line, no clone:
+
+    curl -fsSL https://github.com/silkepilon/RackScreen/releases/latest/download/install.sh | bash
+
+It downloads the latest release and opens the setup menu. **Install** copies the binary to `/usr/local/bin`, writes `/etc/rackscreen/config.yaml`, installs the `rackscreen@<user>` service and offers to enable SPI in the boot files (reboot afterwards). **Calibrate screens** shows a test pattern on the panels; press `r`/`f` per screen until the arrow points up and the dot is top-right, then `s`. **Configure** edits the config in a form. **Status** shows the service and link states with logs. **Uninstall** removes everything except the boot file lines.
+
+Later runs: just type `rackscreen` (it asks for sudo). The service runs `rackscreen run --config /etc/rackscreen/config.yaml`.
+
+Config is YAML (`/etc/rackscreen/config.yaml`, defaults in `config.example.yaml`). Kubeconfig defaults to `~/k8s-monitor.yaml` of the service user.
+
 ## Develop on the desktop
 
-    cargo run -- run --sim             # fake data, keyboard drives events
-    cargo run -- run --sim --source k8s  # real cluster, simulator window
-
-`--source k8s` reads the kubeconfig path from the config file (`[k8s] kubeconfig`, default `~/k8s-monitor.yaml`). Use `--config <file>` to point at an alternative config; without it the binary reads `~/.config/rackscreen/config.toml`.
+    cargo run -- run --sim                       # fake data, keyboard drives events
+    cargo run -- run --sim --source k8s          # real cluster through the config's kubeconfig
+    cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
+    cargo run -- calibrate --sim --config /tmp/rs.yaml
 
 Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `t` torrent mode, `n` night cycle, `b` boot, `Esc` quit. `--sim-grid` shows 2x2.
 
 Tests: `cargo test --workspace`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
-
-## Pi setup
-
-1. `raspi-config` -> Interface Options -> SPI on. In `/boot/firmware/config.txt` add `dtoverlay=spi1-2cs`. In `/boot/firmware/cmdline.txt` append `spidev.bufsiz=65536`, then set `spi_chunk = 65536` in the config. Reboot.
-2. Copy your kubeconfig to `~/k8s-monitor.yaml`.
-3. Download the `rackscreen-aarch64` binary from the latest GitHub release.
-4. `git clone` this repo (for `deploy/` and `config.example.toml`) and run `deploy/install.sh ./rackscreen-aarch64`.
-5. Edit `~/.config/rackscreen/config.toml` (namespaces, pins, night window), then `sudo systemctl restart rackscreen@$USER`.
 
 Wiring (BCM numbers, from the config):
 
@@ -34,7 +38,7 @@ Wiring (BCM numbers, from the config):
 | PODS | 1 | 0 | 23 | 22 |
 | HEALTH | 1 | 1 | 4 | 27 |
 
-If a screen is rotated or mirrored, change `rotate` (0/90/180/270) and `hflip` for that `[[screens]]` entry.
+If a screen is rotated or mirrored, change `rotate` (0/90/180/270) and `hflip` for that screen in the config; **Calibrate screens** in the setup TUI writes those values for you.
 
 ## Build for the Pi yourself
 

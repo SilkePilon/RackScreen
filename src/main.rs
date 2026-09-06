@@ -75,7 +75,24 @@ fn init_logging() {
         .init();
 }
 
+/// Setup and calibrate change system files; re-run ourselves under sudo when not root.
+/// `--sim` runs (desktop testing) stay unprivileged.
+fn ensure_root(sim: bool) -> Result<()> {
+    if sim || nix::unistd::geteuid().is_root() {
+        return Ok(());
+    }
+    let exe = std::env::current_exe()?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    eprintln!("rackscreen setup needs root; re-running with sudo");
+    let status = std::process::Command::new("sudo")
+        .arg(exe)
+        .args(&args)
+        .status()?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
 fn setup(start: rackscreen_setup::Start, sim: bool, config: Option<PathBuf>) -> Result<()> {
+    ensure_root(sim)?;
     let ctx = rackscreen_setup::Ctx {
         config_path: config.unwrap_or_else(Config::default_path),
         sim,

@@ -3,7 +3,7 @@ members = ["crates/core", "crates/render", "crates/display", "crates/sources", "
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/silkepilon/RackScreen"
@@ -37,6 +37,7 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
+nix = { version = "0.31", features = ["user"] }
 
 [features]
 default = ["sim", "pi"]
