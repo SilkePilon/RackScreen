@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use rackscreen_app::logs::LogSink;
 use rackscreen_core::anim::Secs;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -55,6 +56,7 @@ pub struct Shared {
     pub theme: Theme,
     pub service_active: Option<bool>,
     pub banner: Option<String>,
+    pub log_sink: LogSink,
 }
 
 pub trait Screen {
@@ -78,12 +80,13 @@ struct App {
 }
 
 impl App {
-    fn new(start: Start, ctx: Ctx) -> App {
+    fn new(start: Start, ctx: Ctx, log_sink: LogSink) -> App {
         let shared = Shared {
             ctx,
             theme: Theme::detect(),
             service_active: None,
             banner: None,
+            log_sink,
         };
         let id = match start {
             Start::Menu => ScreenId::Menu,
@@ -176,8 +179,10 @@ impl App {
 /// Run the TUI. Installs a tracing subscriber that writes into the in-memory log sink so
 /// nothing is printed over the UI.
 pub fn run(start: Start, ctx: Ctx) -> Result<()> {
+    let sink = LogSink::new(500);
+    rackscreen_app::logs::install_sink_subscriber(&sink);
     let mut terminal = ratatui::init();
-    let result = App::new(start, ctx).run(&mut terminal);
+    let result = App::new(start, ctx, sink).run(&mut terminal);
     ratatui::restore();
     result
 }

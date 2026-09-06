@@ -2,7 +2,7 @@ pub mod calibrate;
 pub mod configure;
 pub mod install;
 pub mod menu;
-pub mod placeholder;
+pub mod run;
 pub mod status;
 pub mod uninstall;
 
@@ -14,8 +14,8 @@ pub fn make(id: ScreenId, shared: &Shared) -> Box<dyn Screen> {
         ScreenId::Install => Box::new(install::Install::new(shared)),
         ScreenId::Calibrate => Box::new(calibrate::Calibrate::new(shared)),
         ScreenId::Configure => Box::new(configure::Configure::new(shared)),
-        ScreenId::Uninstall => Box::new(uninstall::Uninstall::new(shared)),
         ScreenId::Status => Box::new(status::Status::new(shared)),
-        other => Box::new(placeholder::Placeholder::new(other)),
+        ScreenId::RunHere => Box::new(run::RunHere::new(shared)),
+        ScreenId::Uninstall => Box::new(uninstall::Uninstall::new(shared)),
     }
 }

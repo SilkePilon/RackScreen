@@ -310,6 +310,7 @@ mod tests {
     use crate::ops::shell::{FakeShell, Output};
     use crate::theme::Theme;
     use crate::Ctx;
+    use rackscreen_app::logs::LogSink;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -372,6 +373,7 @@ mod tests {
             theme: Theme::new(true),
             service_active: None,
             banner: None,
+            log_sink: LogSink::new(10),
         };
         let screen = Status::with_snapshot(snap);
         let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();

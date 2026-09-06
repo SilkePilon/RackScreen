@@ -229,6 +229,7 @@ mod tests {
     use super::*;
     use crate::theme::Theme;
     use crate::Ctx;
+    use rackscreen_app::logs::LogSink;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -243,6 +244,7 @@ mod tests {
             theme: Theme::new(true),
             service_active: None,
             banner: None,
+            log_sink: LogSink::new(10),
         };
         let steps = vec![
             StepView {
@@ -284,6 +286,7 @@ mod tests {
             theme: Theme::new(true),
             service_active: None,
             banner: None,
+            log_sink: LogSink::new(10),
         };
         // `preview` drops the sender, so the receiver is disconnected right away: the same
         // state a panicking worker thread leaves behind.
