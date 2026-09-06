@@ -74,7 +74,11 @@ impl Monitor {
         let key_tx = match source {
             SourceKind::Fake => {
                 let (cmd_tx, cmd_rx) = mpsc::channel();
-                runtime.spawn(rackscreen_sources::fake::run_fake(ctx, cmd_rx, opts.seed));
+                runtime.spawn(rackscreen_sources::fake::run_fake(
+                    ctx.clone(),
+                    cmd_rx,
+                    opts.seed,
+                ));
                 let (key_tx, key_rx) = mpsc::channel::<char>();
                 std::thread::spawn(move || {
                     for ch in key_rx {
@@ -88,10 +92,16 @@ impl Monitor {
                 Some(key_tx)
             }
             SourceKind::K8s => {
-                spawn_k8s_sources(&runtime, cfg, ctx);
+                spawn_k8s_sources(&runtime, cfg, ctx.clone());
                 None
             }
         };
+
+        // The fake source produces its own electricity and price events; every other
+        // source mode polls the real APIs.
+        if !matches!(source, SourceKind::Fake) {
+            spawn_energy_sources(&runtime, cfg, &ctx);
+        }
 
         // displays
         let panels = open_panels(cfg, opts.sim, opts.sim_grid, key_tx)?;
@@ -126,6 +136,8 @@ impl Monitor {
             night,
             fps,
             stop: stop.clone(),
+            token_present: matches!(source, SourceKind::Fake)
+                || (cfg.electricity.enabled && !cfg.electricity.token.is_empty()),
         };
         let render_thread = std::thread::Builder::new()
             .name("render".into())
@@ -182,6 +194,71 @@ impl Drop for Monitor {
         if let Some(p) = self.panels.take() {
             p.shutdown();
         }
+    }
+}
+
+/// Electricity Maps and day-ahead prices. Both are independent of the cluster,
+/// so they run whenever the source is not the fake one.
+fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
+    if cfg.electricity.enabled && !cfg.electricity.token.is_empty() {
+        let ecfg = rackscreen_sources::electricity::ElectricityConfig {
+            zone: cfg.electricity.zone.clone(),
+            token: cfg.electricity.token.clone(),
+            poll_secs: cfg.electricity.poll_secs,
+        };
+        runtime.spawn(rackscreen_sources::electricity::run_electricity(
+            ecfg,
+            ctx.clone(),
+        ));
+    } else if cfg.electricity.enabled {
+        tracing::warn!("electricity enabled but no token set; electricity screens stay on no-data");
+    }
+    if let Some(source) = price_source(cfg) {
+        let pcfg = rackscreen_sources::prices::PriceConfig {
+            source,
+            poll_secs: cfg.price.poll_secs,
+            tz: local_tz(),
+        };
+        runtime.spawn(rackscreen_sources::prices::run_prices(pcfg, ctx.clone()));
+    }
+}
+
+/// `$TZ` when it names a zone we know, else the rack's home zone.
+fn local_tz() -> chrono_tz::Tz {
+    std::env::var("TZ")
+        .ok()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or(chrono_tz::Europe::Amsterdam)
+}
+
+/// `None` when prices are off, or when ENTSO-E is picked without a token or a
+/// resolvable bidding zone (warns in that case).
+fn price_source(cfg: &Config) -> Option<rackscreen_sources::prices::PriceSource> {
+    match cfg.price.source.as_str() {
+        "energyzero" => Some(rackscreen_sources::prices::PriceSource::EnergyZero {
+            include_vat: cfg.price.include_vat,
+        }),
+        "entsoe" => {
+            let zone = if cfg.price.entsoe_zone.is_empty() {
+                rackscreen_sources::prices::entsoe_zone_for(&cfg.electricity.zone)
+                    .map(str::to_string)
+            } else {
+                Some(cfg.price.entsoe_zone.clone())
+            };
+            match (zone, cfg.price.entsoe_token.is_empty()) {
+                (Some(zone), false) => Some(rackscreen_sources::prices::PriceSource::Entsoe {
+                    token: cfg.price.entsoe_token.clone(),
+                    zone,
+                }),
+                _ => {
+                    tracing::warn!(
+                        "price source entsoe needs entsoe_token and a known zone; prices disabled"
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
     }
 }
 

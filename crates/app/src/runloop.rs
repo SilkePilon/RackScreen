@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use chrono::Timelike;
 use rackscreen_core::anim::Secs;
 use rackscreen_core::event::Event;
 use rackscreen_core::model::{Model, Thresholds};
@@ -82,10 +83,10 @@ pub fn darken(px: &mut Pixmap, k: f32) {
     }
 }
 
-fn local_minutes() -> u32 {
-    use chrono::Timelike;
+/// Local wall clock as `(hour, minutes since midnight)`; one clock read per tick.
+fn local_hour_and_minutes() -> (u32, u32) {
     let t = chrono::Local::now();
-    t.hour() * 60 + t.minute()
+    (t.hour(), t.hour() * 60 + t.minute())
 }
 
 /// Sends `Quit` to every display thread and raises `stop` when dropped, so an
@@ -123,6 +124,9 @@ pub struct RenderLoop {
     pub night: NightWindow,
     pub fps: u32,
     pub stop: Arc<AtomicBool>,
+    /// Whether an Electricity Maps token is configured; without one the
+    /// electricity screens show "no token" instead of "waiting for data".
+    pub token_present: bool,
 }
 
 impl RenderLoop {
@@ -135,6 +139,7 @@ impl RenderLoop {
         let start = Instant::now();
         let mut model = Model::new(self.thresholds);
         model.set_screens(self.screens_roles.clone(), self.cycle_secs.clone());
+        model.set_token_present(self.token_present);
         model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
@@ -146,13 +151,15 @@ impl RenderLoop {
             while let Ok(ev) = self.rx.try_recv() {
                 model.apply(ev, now);
             }
+            let (hour, minutes) = local_hour_and_minutes();
+            model.set_local_hour(hour);
             model.tick(now);
 
             let night = match model.night_override() {
                 Some(v) => v,
                 None => {
                     self.night.enabled
-                        && is_night(local_minutes(), self.night.start_min, self.night.end_min)
+                        && is_night(minutes, self.night.start_min, self.night.end_min)
                 }
             };
 
