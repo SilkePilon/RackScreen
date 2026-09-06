@@ -81,6 +81,9 @@ pub struct Model {
     fx: Vec<FxRequest>,
     fx_state: Fx,
     seen_api_up: bool,
+    /// A `Boot` that arrived while the API link was down; it plays on first connect
+    /// so the sweep is not aged out behind the connecting scene.
+    boot_pending: bool,
 }
 
 impl Model {
@@ -101,6 +104,7 @@ impl Model {
             fx: Vec::new(),
             fx_state: Fx::default(),
             seen_api_up: false,
+            boot_pending: false,
         }
     }
 
@@ -222,8 +226,13 @@ impl Model {
                 LinkTarget::K8sApi => {
                     let was = self.link.api;
                     self.link.api = up;
-                    if up && !was && self.seen_api_up {
-                        self.fx.push(FxRequest::LinkUp);
+                    if up && !was {
+                        if self.boot_pending {
+                            self.boot_pending = false;
+                            self.fx.push(FxRequest::Boot);
+                        } else if self.seen_api_up {
+                            self.fx.push(FxRequest::LinkUp);
+                        }
                     }
                     if up {
                         self.seen_api_up = true;
@@ -232,7 +241,13 @@ impl Model {
                 LinkTarget::Prometheus => self.link.prom = up,
                 LinkTarget::QBittorrent => self.link.qbit = up,
             },
-            Event::Boot => self.fx.push(FxRequest::Boot),
+            Event::Boot => {
+                if self.link.api {
+                    self.fx.push(FxRequest::Boot);
+                } else {
+                    self.boot_pending = true;
+                }
+            }
             Event::ForceNight(v) => self.night_override = v,
         }
     }
@@ -355,6 +370,50 @@ mod tests {
         );
         assert_eq!(m.take_fx(), vec![FxRequest::LinkUp]);
         assert!(m.link().api);
+    }
+
+    fn api_link(up: bool) -> Event {
+        Event::Link {
+            target: LinkTarget::K8sApi,
+            up,
+        }
+    }
+
+    #[test]
+    fn boot_is_deferred_until_api_link_comes_up() {
+        use crate::fx::SweepKind;
+        let mut m = Model::new(Thresholds::default());
+        m.apply(Event::Boot, 0.0);
+        m.tick(0.0);
+        assert!(
+            m.fx().sweeps.active().is_none(),
+            "no sweep while the API link is down"
+        );
+        m.tick(5.0);
+        m.apply(api_link(true), 5.0);
+        m.tick(5.0);
+        let sw = m.fx().sweeps.active().expect("boot sweep plays on connect");
+        assert_eq!(sw.kind, SweepKind::Boot);
+        // first connect plays only Boot, not LinkUp as well
+        assert!(m.pending_fx().is_empty());
+        m.apply(api_link(false), 20.0);
+        m.apply(api_link(true), 21.0);
+        assert_eq!(
+            m.take_fx(),
+            vec![FxRequest::LinkUp],
+            "recovery plays LinkUp only"
+        );
+    }
+
+    #[test]
+    fn boot_with_api_up_queues_immediately() {
+        use crate::fx::SweepKind;
+        let mut m = Model::new(Thresholds::default());
+        m.apply(api_link(true), 0.0);
+        m.apply(Event::Boot, 0.0);
+        assert_eq!(m.pending_fx(), &[FxRequest::Boot]);
+        m.tick(0.0);
+        assert_eq!(m.fx().sweeps.active().unwrap().kind, SweepKind::Boot);
     }
 
     #[test]
