@@ -203,14 +203,25 @@ impl Config {
             std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let cfg: Config =
             toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(
-            !cfg.screens.is_empty(),
+            !self.screens.is_empty(),
             "config needs at least one [[screens]] entry"
         );
-        for s in &cfg.screens {
+        for s in &self.screens {
             s.role()?;
+            anyhow::ensure!(
+                matches!(s.rotate, 0 | 90 | 180 | 270),
+                "screen '{}': rotate must be 0, 90, 180 or 270 (got {})",
+                s.role,
+                s.rotate
+            );
         }
-        Ok(cfg)
+        Ok(())
     }
 }
 
@@ -252,6 +263,25 @@ mod tests {
             hz: 1,
         };
         assert!(s.role().is_err());
+    }
+
+    #[test]
+    fn invalid_rotate_rejected() {
+        let toml = |rot: u32| {
+            format!(
+                "[[screens]]\nrole = \"cpu\"\nspi = 0\ncs = 0\ndc = 6\nrst = 5\nrotate = {rot}\n"
+            )
+        };
+        for ok in [0, 90, 180, 270] {
+            let c: Config = toml::from_str(&toml(ok)).unwrap();
+            c.validate().unwrap();
+        }
+        let c: Config = toml::from_str(&toml(45)).unwrap();
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("rotate") && err.contains("45"), "{err}");
+        assert!(Config::default().validate().is_ok());
+        let empty: Config = toml::from_str("").unwrap();
+        assert!(empty.validate().is_err(), "no screens is rejected");
     }
 
     #[test]

@@ -122,6 +122,10 @@ pub async fn find_pod_for_service(
         .as_ref()
         .and_then(|s| s.selector.as_ref())
         .context("service has no selector")?;
+    anyhow::ensure!(
+        !selector.is_empty(),
+        "service {svc_name} has an empty selector; refusing to match every pod in {ns}"
+    );
     let label = selector
         .iter()
         .map(|(k, v)| format!("{k}={v}"))
