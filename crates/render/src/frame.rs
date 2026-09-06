@@ -13,7 +13,12 @@ pub struct Rect {
 
 impl Rect {
     pub fn full() -> Rect {
-        Rect { x: 0, y: 0, w: SIZE, h: SIZE }
+        Rect {
+            x: 0,
+            y: 0,
+            w: SIZE,
+            h: SIZE,
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.w == 0 || self.h == 0
@@ -29,7 +34,12 @@ impl Rect {
         let y0 = self.y.min(o.y);
         let x1 = (self.x + self.w).max(o.x + o.w);
         let y1 = (self.y + self.h).max(o.y + o.h);
-        Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+        Rect {
+            x: x0,
+            y: y0,
+            w: x1 - x0,
+            h: y1 - y0,
+        }
     }
 }
 
@@ -116,7 +126,12 @@ pub fn dirty_rect(prev: &Pixmap, next: &Pixmap) -> Option<Rect> {
     if y0 == usize::MAX {
         return None;
     }
-    Some(Rect { x: x0 as u32, y: y0 as u32, w: (x1 - x0 + 1) as u32, h: (y1 - y0 + 1) as u32 })
+    Some(Rect {
+        x: x0 as u32,
+        y: y0 as u32,
+        w: (x1 - x0 + 1) as u32,
+        h: (y1 - y0 + 1) as u32,
+    })
 }
 
 /// Pack the given rectangle as big-endian RGB565 with a brightness multiplier.
@@ -208,7 +223,15 @@ mod tests {
         assert_eq!(dirty_rect(&a, &b), None);
         px(&mut b, 10, 20, (1, 2, 3));
         px(&mut b, 15, 25, (4, 5, 6));
-        assert_eq!(dirty_rect(&a, &b), Some(Rect { x: 10, y: 20, w: 6, h: 6 }));
+        assert_eq!(
+            dirty_rect(&a, &b),
+            Some(Rect {
+                x: 10,
+                y: 20,
+                w: 6,
+                h: 6
+            })
+        );
     }
 
     #[test]
@@ -218,18 +241,63 @@ mod tests {
         px(&mut p, 1, 0, (0, 255, 0));
         px(&mut p, 0, 1, (0, 0, 255));
         px(&mut p, 1, 1, (255, 255, 255));
-        let out = pack_rgb565(&p, Rect { x: 0, y: 0, w: 2, h: 2 }, 1.0);
+        let out = pack_rgb565(
+            &p,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+            1.0,
+        );
         assert_eq!(out, vec![0xF8, 0x00, 0x07, 0xE0, 0x00, 0x1F, 0xFF, 0xFF]);
-        let half = pack_rgb565(&p, Rect { x: 0, y: 0, w: 1, h: 1 }, 0.5);
+        let half = pack_rgb565(
+            &p,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            },
+            0.5,
+        );
         assert_eq!(half, vec![0x78, 0x00]);
-        let sub = pack_rgb565(&p, Rect { x: 1, y: 1, w: 1, h: 1 }, 1.0);
+        let sub = pack_rgb565(
+            &p,
+            Rect {
+                x: 1,
+                y: 1,
+                w: 1,
+                h: 1,
+            },
+            1.0,
+        );
         assert_eq!(sub, vec![0xFF, 0xFF]);
     }
 
     #[test]
     fn rect_union() {
-        let a = Rect { x: 0, y: 0, w: 2, h: 2 };
-        let b = Rect { x: 5, y: 5, w: 1, h: 1 };
-        assert_eq!(a.union(b), Rect { x: 0, y: 0, w: 6, h: 6 });
+        let a = Rect {
+            x: 0,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+        let b = Rect {
+            x: 5,
+            y: 5,
+            w: 1,
+            h: 1,
+        };
+        assert_eq!(
+            a.union(b),
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 6
+            }
+        );
     }
 }

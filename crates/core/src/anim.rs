@@ -48,7 +48,13 @@ pub struct Tween {
 
 impl Tween {
     pub fn new(from: f32, to: f32, start: Secs, duration: Secs, easing: Easing) -> Self {
-        Self { from, to, start, duration, easing }
+        Self {
+            from,
+            to,
+            start,
+            duration,
+            easing,
+        }
     }
     pub fn progress(&self, now: Secs) -> f32 {
         if self.duration <= 0.0 {
@@ -76,7 +82,12 @@ pub struct Smooth {
 
 impl Smooth {
     pub fn new(initial: f32, duration: Secs) -> Self {
-        Self { current: initial, target: initial, tween: None, duration }
+        Self {
+            current: initial,
+            target: initial,
+            tween: None,
+            duration,
+        }
     }
     pub fn set(&mut self, target: f32, now: Secs) {
         if (target - self.target).abs() < f32::EPSILON {
@@ -85,7 +96,13 @@ impl Smooth {
         let from = self.value(now);
         self.current = from;
         self.target = target;
-        self.tween = Some(Tween::new(from, target, now, self.duration, Easing::OutCubic));
+        self.tween = Some(Tween::new(
+            from,
+            target,
+            now,
+            self.duration,
+            Easing::OutCubic,
+        ));
     }
     pub fn value(&self, now: Secs) -> f32 {
         match self.tween {

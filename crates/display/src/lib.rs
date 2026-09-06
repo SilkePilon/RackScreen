@@ -48,7 +48,9 @@ impl Default for Mailbox {
 
 impl Mailbox {
     pub fn new() -> Self {
-        Self { inner: Arc::new((Mutex::new(None), Condvar::new())) }
+        Self {
+            inner: Arc::new((Mutex::new(None), Condvar::new())),
+        }
     }
 
     pub fn put(&self, cmd: DisplayCmd) {
@@ -77,7 +79,11 @@ impl Mailbox {
     }
 }
 
-pub fn spawn_display_thread(name: String, mut display: Box<dyn Display>, mailbox: Mailbox) -> JoinHandle<()> {
+pub fn spawn_display_thread(
+    name: String,
+    mut display: Box<dyn Display>,
+    mailbox: Mailbox,
+) -> JoinHandle<()> {
     std::thread::Builder::new()
         .name(format!("display-{name}"))
         .spawn(move || loop {
@@ -105,7 +111,15 @@ mod tests {
     fn frame(tag: u8) -> DisplayCmd {
         let mut p = Pixmap::new(2, 2).unwrap();
         p.data_mut()[0] = tag;
-        DisplayCmd::Frame(p, Rect { x: 0, y: 0, w: 2, h: 2 })
+        DisplayCmd::Frame(
+            p,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+        )
     }
 
     #[test]

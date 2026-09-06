@@ -17,14 +17,24 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Result<Self> {
-        Ok(Self { segs: SegmentCache::new(), icons: IconCache::new()?, text: TextRenderer::new()? })
+        Ok(Self {
+            segs: SegmentCache::new(),
+            icons: IconCache::new()?,
+            text: TextRenderer::new()?,
+        })
     }
 
     pub fn render(&mut self, scene: &Scene, px: &mut Pixmap) {
         for d in &scene.items {
             match d {
                 Drawable::Clear(c) => px.fill(skia_color(*c, 1.0)),
-                Drawable::Ring { cx, cy, radius, n, states } => {
+                Drawable::Ring {
+                    cx,
+                    cy,
+                    radius,
+                    n,
+                    states,
+                } => {
                     let segs = self.segs.segments(*cx, *cy, *radius, *n);
                     for (path, st) in segs.iter().zip(states) {
                         match st {
@@ -38,23 +48,59 @@ impl Renderer {
                         }
                     }
                 }
-                Drawable::Icon { name, cx, cy, size, color, alpha, scale, dy } => {
-                    self.icons.draw(px, name, *cx, *cy, *size, *color, *alpha, *scale, *dy);
+                Drawable::Icon {
+                    name,
+                    cx,
+                    cy,
+                    size,
+                    color,
+                    alpha,
+                    scale,
+                    dy,
+                } => {
+                    self.icons
+                        .draw(px, name, *cx, *cy, *size, *color, *alpha, *scale, *dy);
                 }
-                Drawable::Badge { cx, cy, w, h, radius, stroke, fill: fill_c, text, text_px, text_color, alpha } => {
+                Drawable::Badge {
+                    cx,
+                    cy,
+                    w,
+                    h,
+                    radius,
+                    stroke,
+                    fill: fill_c,
+                    text,
+                    text_px,
+                    text_color,
+                    alpha,
+                } => {
                     let rr = rounded_rect(cx - w / 2.0, cy - h / 2.0, *w, *h, *radius);
                     fill(px, &rr, *fill_c, *alpha);
                     if let Some(border) = outline(&rr, 2.0) {
                         fill(px, &border, *stroke, *alpha);
                     }
-                    self.text.draw_centered(px, text, *text_px, *cx, *cy, *text_color, *alpha);
+                    self.text
+                        .draw_centered(px, text, *text_px, *cx, *cy, *text_color, *alpha);
                 }
-                Drawable::Ripple { cx, cy, r, thickness, color, alpha } => {
+                Drawable::Ripple {
+                    cx,
+                    cy,
+                    r,
+                    thickness,
+                    color,
+                    alpha,
+                } => {
                     if let Some(ring) = circle_stroke(*cx, *cy, *r, *thickness) {
                         fill(px, &ring, *color, *alpha);
                     }
                 }
-                Drawable::Dots { cx, cy, spacing, r, colors } => {
+                Drawable::Dots {
+                    cx,
+                    cy,
+                    spacing,
+                    r,
+                    colors,
+                } => {
                     let n = colors.len();
                     if n == 0 {
                         continue;

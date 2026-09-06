@@ -83,12 +83,23 @@ impl FakeState {
     }
 
     fn pod_snapshot(&self) -> Event {
-        Event::PodSnapshot { running: self.running, pending: self.pending, failed: self.failed, total: self.total() }
+        Event::PodSnapshot {
+            running: self.running,
+            pending: self.pending,
+            failed: self.failed,
+            total: self.total(),
+        }
     }
 
     fn node_snapshot(&self) -> Event {
-        let not_ready = (self.nodes_ready..self.nodes_total).map(|i| format!("node-{}", i + 1)).collect();
-        Event::NodeSnapshot { ready: self.nodes_ready, total: self.nodes_total, not_ready }
+        let not_ready = (self.nodes_ready..self.nodes_total)
+            .map(|i| format!("node-{}", i + 1))
+            .collect();
+        Event::NodeSnapshot {
+            ready: self.nodes_ready,
+            total: self.nodes_total,
+            not_ready,
+        }
     }
 
     fn metrics(&self) -> Event {
@@ -104,13 +115,24 @@ impl FakeState {
 
     pub fn initial(&self) -> Vec<Event> {
         vec![
-            Event::Link { target: LinkTarget::K8sApi, up: true },
-            Event::Link { target: LinkTarget::Prometheus, up: true },
-            Event::Link { target: LinkTarget::QBittorrent, up: true },
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            Event::Link {
+                target: LinkTarget::Prometheus,
+                up: true,
+            },
+            Event::Link {
+                target: LinkTarget::QBittorrent,
+                up: true,
+            },
             self.metrics(),
             self.pod_snapshot(),
             self.node_snapshot(),
-            Event::AlertSnapshot { firing: self.alerts.clone() },
+            Event::AlertSnapshot {
+                firing: self.alerts.clone(),
+            },
             Event::Torrents(self.torrents.clone()),
         ]
     }
@@ -127,7 +149,10 @@ impl FakeState {
         if self.pending > 0 && self.rng.f32() < 0.5 {
             self.pending -= 1;
             self.running += 1;
-            out.push(Event::PodStarted { ns: "fake".into(), name: format!("pod-{}", self.ticks) });
+            out.push(Event::PodStarted {
+                ns: "fake".into(),
+                name: format!("pod-{}", self.ticks),
+            });
             out.push(self.pod_snapshot());
         } else if self.ticks.is_multiple_of(20) {
             self.pending += 1;
@@ -142,7 +167,9 @@ impl FakeState {
         }
         if self.ticks.is_multiple_of(5) {
             out.push(self.node_snapshot());
-            out.push(Event::AlertSnapshot { firing: self.alerts.clone() });
+            out.push(Event::AlertSnapshot {
+                firing: self.alerts.clone(),
+            });
         }
         out
     }
@@ -154,12 +181,24 @@ impl FakeState {
                     self.failed -= 1;
                 }
                 self.running += 1;
-                vec![Event::PodStarted { ns: "fake".into(), name: "manual".into() }, self.pod_snapshot()]
+                vec![
+                    Event::PodStarted {
+                        ns: "fake".into(),
+                        name: "manual".into(),
+                    },
+                    self.pod_snapshot(),
+                ]
             }
             FakeCmd::PodCrashed => {
                 self.running = self.running.saturating_sub(1);
                 self.failed += 1;
-                vec![Event::PodCrashed { ns: "fake".into(), name: "manual".into() }, self.pod_snapshot()]
+                vec![
+                    Event::PodCrashed {
+                        ns: "fake".into(),
+                        name: "manual".into(),
+                    },
+                    self.pod_snapshot(),
+                ]
             }
             FakeCmd::NodeDown => {
                 if self.nodes_ready == 0 {
@@ -167,7 +206,10 @@ impl FakeState {
                 }
                 self.nodes_ready -= 1;
                 let name = format!("node-{}", self.nodes_ready + 1);
-                vec![Event::NodeReady { name, ready: false }, self.node_snapshot()]
+                vec![
+                    Event::NodeReady { name, ready: false },
+                    self.node_snapshot(),
+                ]
             }
             FakeCmd::NodeUp => {
                 if self.nodes_ready == self.nodes_total {
@@ -180,10 +222,24 @@ impl FakeState {
             FakeCmd::AlertToggle => {
                 if self.alerts.is_empty() {
                     self.alerts.push("HighLoad".into());
-                    vec![Event::AlertChanged { name: "HighLoad".into(), firing: true }, Event::AlertSnapshot { firing: self.alerts.clone() }]
+                    vec![
+                        Event::AlertChanged {
+                            name: "HighLoad".into(),
+                            firing: true,
+                        },
+                        Event::AlertSnapshot {
+                            firing: self.alerts.clone(),
+                        },
+                    ]
                 } else {
                     self.alerts.clear();
-                    vec![Event::AlertChanged { name: "HighLoad".into(), firing: false }, Event::AlertSnapshot { firing: vec![] }]
+                    vec![
+                        Event::AlertChanged {
+                            name: "HighLoad".into(),
+                            firing: false,
+                        },
+                        Event::AlertSnapshot { firing: vec![] },
+                    ]
                 }
             }
             FakeCmd::TorrentDone => {
@@ -194,25 +250,54 @@ impl FakeState {
                 if self.torrents.is_empty() {
                     self.torrents_on = false;
                 }
-                vec![Event::TorrentDone { name: done.name }, Event::Torrents(self.torrents.clone())]
+                vec![
+                    Event::TorrentDone { name: done.name },
+                    Event::Torrents(self.torrents.clone()),
+                ]
             }
             FakeCmd::LinkDown => {
                 self.link_up = false;
-                vec![Event::Link { target: LinkTarget::K8sApi, up: false }]
+                vec![Event::Link {
+                    target: LinkTarget::K8sApi,
+                    up: false,
+                }]
             }
             FakeCmd::LinkUp => {
                 self.link_up = true;
-                vec![Event::Link { target: LinkTarget::K8sApi, up: true }]
+                vec![Event::Link {
+                    target: LinkTarget::K8sApi,
+                    up: true,
+                }]
             }
             FakeCmd::ToggleTorrent => {
                 self.torrents_on = !self.torrents_on;
                 if self.torrents_on {
                     self.torrents = vec![
-                        Torrent { name: "ubuntu-24.04.iso".into(), progress: 78.0, eta_secs: 900, speed_bps: 9_000_000 },
-                        Torrent { name: "debian-13.iso".into(), progress: 41.0, eta_secs: 3000, speed_bps: 3_000_000 },
-                        Torrent { name: "fedora-44.iso".into(), progress: 12.0, eta_secs: 9000, speed_bps: 1_000_000 },
+                        Torrent {
+                            name: "ubuntu-24.04.iso".into(),
+                            progress: 78.0,
+                            eta_secs: 900,
+                            speed_bps: 9_000_000,
+                        },
+                        Torrent {
+                            name: "debian-13.iso".into(),
+                            progress: 41.0,
+                            eta_secs: 3000,
+                            speed_bps: 3_000_000,
+                        },
+                        Torrent {
+                            name: "fedora-44.iso".into(),
+                            progress: 12.0,
+                            eta_secs: 9000,
+                            speed_bps: 1_000_000,
+                        },
                     ];
-                    vec![Event::TorrentAdded { name: "ubuntu-24.04.iso".into() }, Event::Torrents(self.torrents.clone())]
+                    vec![
+                        Event::TorrentAdded {
+                            name: "ubuntu-24.04.iso".into(),
+                        },
+                        Event::Torrents(self.torrents.clone()),
+                    ]
                 } else {
                     self.torrents.clear();
                     vec![Event::Torrents(vec![])]
@@ -264,8 +349,16 @@ mod tests {
     fn initial_brings_links_up() {
         let s = FakeState::new(1);
         let evs = s.initial();
-        assert!(evs.iter().any(|e| matches!(e, Event::Link { target: LinkTarget::K8sApi, up: true })));
-        assert!(evs.iter().any(|e| matches!(e, Event::PodSnapshot { running: 53, .. })));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true
+            }
+        )));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::PodSnapshot { running: 53, .. })));
     }
 
     #[test]
@@ -283,9 +376,23 @@ mod tests {
         let mut s = FakeState::new(1);
         let evs = s.command(FakeCmd::PodCrashed);
         assert!(matches!(evs[0], Event::PodCrashed { .. }));
-        assert!(matches!(evs[1], Event::PodSnapshot { failed: 1, running: 52, .. }));
+        assert!(matches!(
+            evs[1],
+            Event::PodSnapshot {
+                failed: 1,
+                running: 52,
+                ..
+            }
+        ));
         let evs = s.command(FakeCmd::PodStarted);
-        assert!(matches!(evs[1], Event::PodSnapshot { failed: 0, running: 53, .. }));
+        assert!(matches!(
+            evs[1],
+            Event::PodSnapshot {
+                failed: 0,
+                running: 53,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -294,7 +401,14 @@ mod tests {
         assert!(s.command(FakeCmd::NodeUp).is_empty());
         let evs = s.command(FakeCmd::NodeDown);
         assert!(matches!(&evs[0], Event::NodeReady { ready: false, .. }));
-        assert!(matches!(&evs[1], Event::NodeSnapshot { ready: 3, total: 4, .. }));
+        assert!(matches!(
+            &evs[1],
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 4,
+                ..
+            }
+        ));
         let evs = s.command(FakeCmd::NodeUp);
         assert!(matches!(&evs[1], Event::NodeSnapshot { ready: 4, .. }));
     }
@@ -323,8 +437,17 @@ mod tests {
     #[test]
     fn night_cycles() {
         let mut s = FakeState::new(1);
-        assert_eq!(s.command(FakeCmd::ToggleNight), vec![Event::ForceNight(Some(true))]);
-        assert_eq!(s.command(FakeCmd::ToggleNight), vec![Event::ForceNight(Some(false))]);
-        assert_eq!(s.command(FakeCmd::ToggleNight), vec![Event::ForceNight(None)]);
+        assert_eq!(
+            s.command(FakeCmd::ToggleNight),
+            vec![Event::ForceNight(Some(true))]
+        );
+        assert_eq!(
+            s.command(FakeCmd::ToggleNight),
+            vec![Event::ForceNight(Some(false))]
+        );
+        assert_eq!(
+            s.command(FakeCmd::ToggleNight),
+            vec![Event::ForceNight(None)]
+        );
     }
 }

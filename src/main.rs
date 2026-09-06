@@ -50,25 +50,41 @@ struct Cli {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
         .init();
     let cli = Cli::parse();
     let cfg = Config::load(cli.config.as_deref())?;
-    let source = cli.source.unwrap_or(if cli.sim { SourceKind::Fake } else { SourceKind::K8s });
+    let source = cli.source.unwrap_or(if cli.sim {
+        SourceKind::Fake
+    } else {
+        SourceKind::K8s
+    });
     let fps = cli.fps.unwrap_or(cfg.display.fps);
 
     let (tx, rx) = mpsc::channel();
     let shutdown = CancellationToken::new();
     let stop = Arc::new(AtomicBool::new(false));
-    let ctx = SourceCtx { tx, shutdown: shutdown.clone() };
+    let ctx = SourceCtx {
+        tx,
+        shutdown: shutdown.clone(),
+    };
 
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()?;
 
     // ---- sources ----
     let fake_cmds: Option<mpsc::Sender<rackscreen_sources::fake::FakeCmd>> = match source {
         SourceKind::Fake => {
             let (cmd_tx, cmd_rx) = mpsc::channel();
-            runtime.spawn(rackscreen_sources::fake::run_fake(ctx.clone(), cmd_rx, cli.seed));
+            runtime.spawn(rackscreen_sources::fake::run_fake(
+                ctx.clone(),
+                cmd_rx,
+                cli.seed,
+            ));
             Some(cmd_tx)
         }
         SourceKind::K8s => {
@@ -83,15 +99,25 @@ fn main() -> Result<()> {
                         return;
                     }
                 };
-                tokio::spawn(rackscreen_sources::k8s::run_pod_watch(client.clone(), ctx2.clone()));
-                tokio::spawn(rackscreen_sources::k8s::run_node_watch(client.clone(), ctx2.clone()));
+                tokio::spawn(rackscreen_sources::k8s::run_pod_watch(
+                    client.clone(),
+                    ctx2.clone(),
+                ));
+                tokio::spawn(rackscreen_sources::k8s::run_node_watch(
+                    client.clone(),
+                    ctx2.clone(),
+                ));
                 let prom = rackscreen_sources::prometheus::PromConfig {
                     namespace: cfg2.prometheus.namespace.clone(),
                     service: cfg2.prometheus.service.clone(),
                     port: cfg2.prometheus.port,
                     poll_secs: cfg2.prometheus.poll_secs,
                 };
-                tokio::spawn(rackscreen_sources::prometheus::run_prometheus(client.clone(), prom, ctx2.clone()));
+                tokio::spawn(rackscreen_sources::prometheus::run_prometheus(
+                    client.clone(),
+                    prom,
+                    ctx2.clone(),
+                ));
                 if cfg2.qbittorrent.enabled {
                     let q = rackscreen_sources::qbittorrent::QbitConfig {
                         namespace: cfg2.qbittorrent.namespace.clone(),
@@ -101,7 +127,9 @@ fn main() -> Result<()> {
                         pass: cfg2.qbittorrent.pass.clone(),
                         poll_secs: cfg2.qbittorrent.poll_secs,
                     };
-                    tokio::spawn(rackscreen_sources::qbittorrent::run_qbittorrent(client, q, ctx2));
+                    tokio::spawn(rackscreen_sources::qbittorrent::run_qbittorrent(
+                        client, q, ctx2,
+                    ));
                 }
             });
             None
@@ -118,7 +146,8 @@ fn main() -> Result<()> {
         #[cfg(feature = "sim")]
         {
             let (key_tx, key_rx) = mpsc::channel::<char>();
-            let (hub, panels) = rackscreen_display::sim::SimHub::new(cfg.screens.len(), cli.sim_grid, key_tx)?;
+            let (hub, panels) =
+                rackscreen_display::sim::SimHub::new(cfg.screens.len(), cli.sim_grid, key_tx)?;
             for (scr, panel) in cfg.screens.iter().zip(panels) {
                 let mb = Mailbox::new();
                 slots.push(ScreenSlot::new(scr.role()?, Orient::identity(), mb.clone()));
@@ -144,12 +173,26 @@ fn main() -> Result<()> {
         {
             let _ = &fake_cmds;
             for scr in &cfg.screens {
-                let pins = rackscreen_display::gc9a01::Pins { bus: scr.spi, cs: scr.cs, dc: scr.dc, rst: scr.rst, hz: scr.hz };
-                let dev = rackscreen_display::gc9a01::Gc9a01::open(pins, cfg.display.spi_chunk, cfg.display.brightness)
-                    .with_context(|| format!("open display {}", scr.role))?;
+                let pins = rackscreen_display::gc9a01::Pins {
+                    bus: scr.spi,
+                    cs: scr.cs,
+                    dc: scr.dc,
+                    rst: scr.rst,
+                    hz: scr.hz,
+                };
+                let dev = rackscreen_display::gc9a01::Gc9a01::open(
+                    pins,
+                    cfg.display.spi_chunk,
+                    cfg.display.brightness,
+                )
+                .with_context(|| format!("open display {}", scr.role))?;
                 let d: Box<dyn Display> = Box::new(dev);
                 let mb = Mailbox::new();
-                slots.push(ScreenSlot::new(scr.role()?, Orient::new(scr.rotate, scr.hflip), mb.clone()));
+                slots.push(ScreenSlot::new(
+                    scr.role()?,
+                    Orient::new(scr.rotate, scr.hflip),
+                    mb.clone(),
+                ));
                 display_threads.push(spawn_display_thread(scr.role.clone(), d, mb));
                 tracing::info!("{} display online", scr.role);
             }
@@ -167,17 +210,27 @@ fn main() -> Result<()> {
     let render = RenderLoop {
         rx,
         screens: slots,
-        thresholds: Thresholds { hot_cpu: cfg.thresholds.hot_cpu, hot_mem: cfg.thresholds.hot_mem },
+        thresholds: Thresholds {
+            hot_cpu: cfg.thresholds.hot_cpu,
+            hot_mem: cfg.thresholds.hot_mem,
+        },
         night,
         fps,
         stop: stop.clone(),
     };
-    let render_thread = std::thread::Builder::new().name("render".into()).spawn(move || {
-        if let Err(e) = render.run() {
-            tracing::error!("render loop: {e:#}");
-        }
-    })?;
-    tracing::info!("running ({} screens, {} fps, source {:?})", cfg.screens.len(), fps, source);
+    let render_thread = std::thread::Builder::new()
+        .name("render".into())
+        .spawn(move || {
+            if let Err(e) = render.run() {
+                tracing::error!("render loop: {e:#}");
+            }
+        })?;
+    tracing::info!(
+        "running ({} screens, {} fps, source {:?})",
+        cfg.screens.len(),
+        fps,
+        source
+    );
 
     // ---- block main thread ----
     #[cfg(feature = "sim")]

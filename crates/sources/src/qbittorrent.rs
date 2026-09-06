@@ -277,7 +277,10 @@ mod tests {
     #[test]
     fn session_cookie_matches_sid_and_qbt_sid() {
         let mut h = hyper::HeaderMap::new();
-        h.append("set-cookie", "QBT_SID_8080=abc123; HttpOnly; path=/".parse().unwrap());
+        h.append(
+            "set-cookie",
+            "QBT_SID_8080=abc123; HttpOnly; path=/".parse().unwrap(),
+        );
         assert_eq!(session_cookie(&h).as_deref(), Some("QBT_SID_8080=abc123"));
         let mut h = hyper::HeaderMap::new();
         h.append("set-cookie", "SID=xyz; path=/".parse().unwrap());

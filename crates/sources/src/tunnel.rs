@@ -152,10 +152,17 @@ mod tests {
 
     #[test]
     fn request_line_is_origin_form() {
-        let r = build("GET", "/api/v2/torrents/info?filter=downloading", &[("referer", "http://localhost:8080")])
-            .body(Full::new(Bytes::new()))
-            .unwrap();
-        assert_eq!(r.uri().to_string(), "/api/v2/torrents/info?filter=downloading");
+        let r = build(
+            "GET",
+            "/api/v2/torrents/info?filter=downloading",
+            &[("referer", "http://localhost:8080")],
+        )
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+        assert_eq!(
+            r.uri().to_string(),
+            "/api/v2/torrents/info?filter=downloading"
+        );
         assert_eq!(r.headers()["host"], "localhost");
         assert_eq!(r.headers()["referer"], "http://localhost:8080");
     }

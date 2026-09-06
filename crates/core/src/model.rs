@@ -18,7 +18,10 @@ pub struct Thresholds {
 
 impl Default for Thresholds {
     fn default() -> Self {
-        Self { hot_cpu: 90.0, hot_mem: 90.0 }
+        Self {
+            hot_cpu: 90.0,
+            hot_mem: 90.0,
+        }
     }
 }
 
@@ -84,7 +87,11 @@ impl Model {
     pub fn new(thresholds: Thresholds) -> Self {
         Self {
             state: ClusterState::default(),
-            link: LinkState { api: false, prom: false, qbit: false },
+            link: LinkState {
+                api: false,
+                prom: false,
+                qbit: false,
+            },
             thresholds,
             cpu: Smooth::new(0.0, SMOOTH_SECS),
             mem: Smooth::new(0.0, SMOOTH_SECS),
@@ -148,7 +155,14 @@ impl Model {
 
     pub fn apply(&mut self, ev: Event, now: Secs) {
         match ev {
-            Event::Metrics { cpu_pct, mem_pct, mem_used_gb, mem_total_gb, hot_cpu, hot_mem } => {
+            Event::Metrics {
+                cpu_pct,
+                mem_pct,
+                mem_used_gb,
+                mem_total_gb,
+                hot_cpu,
+                hot_mem,
+            } => {
                 self.state.cpu_pct = cpu_pct;
                 self.state.mem_pct = mem_pct;
                 self.state.mem_used_gb = mem_used_gb;
@@ -160,7 +174,12 @@ impl Model {
                 self.check_hot(Role::Cpu, hot_cpu, th.hot_cpu, now);
                 self.check_hot(Role::Mem, hot_mem, th.hot_mem, now);
             }
-            Event::PodSnapshot { running, pending, failed, total } => {
+            Event::PodSnapshot {
+                running,
+                pending,
+                failed,
+                total,
+            } => {
                 self.state.pods_running = running;
                 self.state.pods_pending = pending;
                 self.state.pods_failed = failed;
@@ -171,18 +190,30 @@ impl Model {
             Event::PodStarted { .. } => self.fx.push(FxRequest::PodStarted),
             Event::PodCrashed { .. } => self.fx.push(FxRequest::PodCrashed),
             Event::PodGone { .. } => self.fx.push(FxRequest::PodGone),
-            Event::NodeSnapshot { ready, total, not_ready } => {
+            Event::NodeSnapshot {
+                ready,
+                total,
+                not_ready,
+            } => {
                 self.state.nodes_ready = ready;
                 self.state.nodes_total = total;
                 self.state.nodes_not_ready = not_ready;
                 self.state.have_nodes = true;
             }
             Event::NodeReady { ready, .. } => {
-                self.fx.push(if ready { FxRequest::NodeReady } else { FxRequest::NodeNotReady });
+                self.fx.push(if ready {
+                    FxRequest::NodeReady
+                } else {
+                    FxRequest::NodeNotReady
+                });
             }
             Event::AlertSnapshot { firing } => self.state.alerts = firing,
             Event::AlertChanged { firing, .. } => {
-                self.fx.push(if firing { FxRequest::AlertFiring } else { FxRequest::AlertResolved });
+                self.fx.push(if firing {
+                    FxRequest::AlertFiring
+                } else {
+                    FxRequest::AlertResolved
+                });
             }
             Event::Torrents(list) => self.state.torrents = list,
             Event::TorrentAdded { .. } => self.fx.push(FxRequest::TorrentAdded),
@@ -212,7 +243,10 @@ impl Model {
             return;
         }
         let key = (role, node);
-        let recently = self.hot_last.get(&key).is_some_and(|t| now - t < HOT_DEBOUNCE_SECS);
+        let recently = self
+            .hot_last
+            .get(&key)
+            .is_some_and(|t| now - t < HOT_DEBOUNCE_SECS);
         if !recently {
             self.hot_last.insert(key, now);
             self.fx.push(FxRequest::HotNode(role));
@@ -248,16 +282,37 @@ mod tests {
     #[test]
     fn pod_events_request_fx() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 0.0);
-        m.apply(Event::PodCrashed { ns: "a".into(), name: "b".into() }, 0.0);
-        assert_eq!(m.take_fx(), vec![FxRequest::PodStarted, FxRequest::PodCrashed]);
+        m.apply(
+            Event::PodStarted {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            0.0,
+        );
+        m.apply(
+            Event::PodCrashed {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            0.0,
+        );
+        assert_eq!(
+            m.take_fx(),
+            vec![FxRequest::PodStarted, FxRequest::PodCrashed]
+        );
         assert!(m.pending_fx().is_empty());
     }
 
     #[test]
     fn node_flip_requests_sweep() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::NodeReady { name: "n1".into(), ready: false }, 0.0);
+        m.apply(
+            Event::NodeReady {
+                name: "n1".into(),
+                ready: false,
+            },
+            0.0,
+        );
         assert_eq!(m.take_fx(), vec![FxRequest::NodeNotReady]);
     }
 
@@ -276,10 +331,28 @@ mod tests {
     #[test]
     fn link_up_sweep_only_after_a_previous_up() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            0.0,
+        );
         assert!(m.take_fx().is_empty(), "first connect is not a recovery");
-        m.apply(Event::Link { target: LinkTarget::K8sApi, up: false }, 1.0);
-        m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 2.0);
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: false,
+            },
+            1.0,
+        );
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            2.0,
+        );
         assert_eq!(m.take_fx(), vec![FxRequest::LinkUp]);
         assert!(m.link().api);
     }
@@ -287,7 +360,13 @@ mod tests {
     #[test]
     fn tick_moves_requests_into_queues() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 0.0);
+        m.apply(
+            Event::PodStarted {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            0.0,
+        );
         m.tick(0.0);
         assert!(m.pending_fx().is_empty());
         assert!(m.fx().splashes[Role::Pods.index()].active().is_some());
@@ -297,16 +376,39 @@ mod tests {
     fn healthy_and_torrent_mode() {
         let mut m = Model::new(Thresholds::default());
         assert!(!m.all_healthy());
-        m.apply(Event::NodeSnapshot { ready: 3, total: 3, not_ready: vec![] }, 0.0);
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 3,
+                not_ready: vec![],
+            },
+            0.0,
+        );
         assert!(m.all_healthy());
         assert!(!m.torrent_mode());
-        m.apply(Event::Link { target: LinkTarget::QBittorrent, up: true }, 0.0);
         m.apply(
-            Event::Torrents(vec![Torrent { name: "x".into(), progress: 10.0, eta_secs: 100, speed_bps: 1000 }]),
+            Event::Link {
+                target: LinkTarget::QBittorrent,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Torrents(vec![Torrent {
+                name: "x".into(),
+                progress: 10.0,
+                eta_secs: 100,
+                speed_bps: 1000,
+            }]),
             0.0,
         );
         assert!(m.torrent_mode());
-        m.apply(Event::AlertSnapshot { firing: vec!["Down".into()] }, 0.0);
+        m.apply(
+            Event::AlertSnapshot {
+                firing: vec!["Down".into()],
+            },
+            0.0,
+        );
         assert!(!m.all_healthy());
         assert!(!m.torrent_mode());
     }

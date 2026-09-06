@@ -14,8 +14,11 @@ use rackscreen_core::event::{Event, LinkTarget};
 use crate::SourceCtx;
 
 pub async fn make_client(kubeconfig: &Path) -> Result<Client> {
-    let kc = Kubeconfig::read_from(kubeconfig).with_context(|| format!("read {}", kubeconfig.display()))?;
-    let cfg = Config::from_custom_kubeconfig(kc, &KubeConfigOptions::default()).await.context("kubeconfig")?;
+    let kc = Kubeconfig::read_from(kubeconfig)
+        .with_context(|| format!("read {}", kubeconfig.display()))?;
+    let cfg = Config::from_custom_kubeconfig(kc, &KubeConfigOptions::default())
+        .await
+        .context("kubeconfig")?;
     Client::try_from(cfg).context("client")
 }
 
@@ -37,7 +40,11 @@ pub struct PodInfo {
 
 pub fn pod_key(pod: &Pod) -> String {
     pod.metadata.uid.clone().unwrap_or_else(|| {
-        format!("{}/{}", pod.metadata.namespace.as_deref().unwrap_or(""), pod.metadata.name.as_deref().unwrap_or(""))
+        format!(
+            "{}/{}",
+            pod.metadata.namespace.as_deref().unwrap_or(""),
+            pod.metadata.name.as_deref().unwrap_or("")
+        )
     })
 }
 
@@ -55,13 +62,21 @@ pub fn pod_info(pod: &Pod) -> PodInfo {
     if let Some(cs) = status.and_then(|s| s.container_statuses.as_ref()) {
         for c in cs {
             restarts += c.restart_count;
-            let waiting = c.state.as_ref().and_then(|s| s.waiting.as_ref()).and_then(|w| w.reason.as_deref());
+            let waiting = c
+                .state
+                .as_ref()
+                .and_then(|s| s.waiting.as_ref())
+                .and_then(|w| w.reason.as_deref());
             if waiting == Some("CrashLoopBackOff") {
                 crashloop = true;
             }
         }
     }
-    PodInfo { phase, restarts, crashloop }
+    PodInfo {
+        phase,
+        restarts,
+        crashloop,
+    }
 }
 
 #[derive(Default)]
@@ -98,7 +113,12 @@ impl PodTracker {
                 pending += 1;
             }
         }
-        Event::PodSnapshot { running, pending, failed, total: self.pods.len() as u32 }
+        Event::PodSnapshot {
+            running,
+            pending,
+            failed,
+            total: self.pods.len() as u32,
+        }
     }
 
     pub fn apply(&mut self, pod: &Pod) -> Vec<Event> {
@@ -111,13 +131,24 @@ impl PodTracker {
         let ns = pod.metadata.namespace.clone().unwrap_or_default();
         let name = pod.metadata.name.clone().unwrap_or_default();
         let mut out = Vec::new();
-        let became_running = new.phase == Phase::Running && !new.crashloop && old.as_ref().is_none_or(|o| o.phase != Phase::Running || o.crashloop);
+        let became_running = new.phase == Phase::Running
+            && !new.crashloop
+            && old
+                .as_ref()
+                .is_none_or(|o| o.phase != Phase::Running || o.crashloop);
         let crashed = match &old {
-            Some(o) => new.restarts > o.restarts || (new.crashloop && !o.crashloop) || (new.phase == Phase::Failed && o.phase != Phase::Failed),
+            Some(o) => {
+                new.restarts > o.restarts
+                    || (new.crashloop && !o.crashloop)
+                    || (new.phase == Phase::Failed && o.phase != Phase::Failed)
+            }
             None => new.crashloop || new.phase == Phase::Failed,
         };
         if became_running {
-            out.push(Event::PodStarted { ns: ns.clone(), name: name.clone() });
+            out.push(Event::PodStarted {
+                ns: ns.clone(),
+                name: name.clone(),
+            });
         }
         if crashed {
             out.push(Event::PodCrashed { ns, name });
@@ -173,7 +204,12 @@ impl NodeTracker {
     }
 
     pub fn snapshot(&self) -> Event {
-        let mut not_ready: Vec<String> = self.nodes.iter().filter(|(_, r)| !**r).map(|(n, _)| n.clone()).collect();
+        let mut not_ready: Vec<String> = self
+            .nodes
+            .iter()
+            .filter(|(_, r)| !**r)
+            .map(|(n, _)| n.clone())
+            .collect();
         not_ready.sort();
         Event::NodeSnapshot {
             ready: self.nodes.values().filter(|r| **r).count() as u32,
@@ -210,7 +246,9 @@ impl NodeTracker {
 
 pub async fn run_pod_watch(client: Client, ctx: SourceCtx) {
     let api: Api<Pod> = Api::all(client);
-    let mut stream = watcher(api, watcher::Config::default().any_semantic()).default_backoff().boxed();
+    let mut stream = watcher(api, watcher::Config::default().any_semantic())
+        .default_backoff()
+        .boxed();
     let mut tracker = PodTracker::new();
     let mut link_up = false;
     loop {
@@ -230,7 +268,10 @@ pub async fn run_pod_watch(client: Client, ctx: SourceCtx) {
                     watcher::Event::InitDone => {
                         if !link_up {
                             link_up = true;
-                            ctx.emit(Event::Link { target: LinkTarget::K8sApi, up: true });
+                            ctx.emit(Event::Link {
+                                target: LinkTarget::K8sApi,
+                                up: true,
+                            });
                         }
                         tracker.init_done()
                     }
@@ -243,7 +284,10 @@ pub async fn run_pod_watch(client: Client, ctx: SourceCtx) {
                 tracing::warn!("pod watch: {e}");
                 if link_up {
                     link_up = false;
-                    ctx.emit(Event::Link { target: LinkTarget::K8sApi, up: false });
+                    ctx.emit(Event::Link {
+                        target: LinkTarget::K8sApi,
+                        up: false,
+                    });
                 }
             }
         }
@@ -252,7 +296,9 @@ pub async fn run_pod_watch(client: Client, ctx: SourceCtx) {
 
 pub async fn run_node_watch(client: Client, ctx: SourceCtx) {
     let api: Api<Node> = Api::all(client);
-    let mut stream = watcher(api, watcher::Config::default().any_semantic()).default_backoff().boxed();
+    let mut stream = watcher(api, watcher::Config::default().any_semantic())
+        .default_backoff()
+        .boxed();
     let mut tracker = NodeTracker::new();
     loop {
         let item = tokio::select! {
@@ -274,18 +320,29 @@ pub async fn run_node_watch(client: Client, ctx: SourceCtx) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k8s_openapi::api::core::v1::{ContainerState, ContainerStateWaiting, ContainerStatus, NodeCondition, NodeStatus, PodStatus};
+    use k8s_openapi::api::core::v1::{
+        ContainerState, ContainerStateWaiting, ContainerStatus, NodeCondition, NodeStatus,
+        PodStatus,
+    };
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
     fn pod(name: &str, phase: &str, restarts: i32, waiting: Option<&str>) -> Pod {
         Pod {
-            metadata: ObjectMeta { name: Some(name.into()), namespace: Some("ns".into()), uid: Some(format!("uid-{name}")), ..Default::default() },
+            metadata: ObjectMeta {
+                name: Some(name.into()),
+                namespace: Some("ns".into()),
+                uid: Some(format!("uid-{name}")),
+                ..Default::default()
+            },
             status: Some(PodStatus {
                 phase: Some(phase.into()),
                 container_statuses: Some(vec![ContainerStatus {
                     restart_count: restarts,
                     state: Some(ContainerState {
-                        waiting: waiting.map(|r| ContainerStateWaiting { reason: Some(r.into()), ..Default::default() }),
+                        waiting: waiting.map(|r| ContainerStateWaiting {
+                            reason: Some(r.into()),
+                            ..Default::default()
+                        }),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -298,9 +355,16 @@ mod tests {
 
     fn node(name: &str, ready: bool) -> Node {
         Node {
-            metadata: ObjectMeta { name: Some(name.into()), ..Default::default() },
+            metadata: ObjectMeta {
+                name: Some(name.into()),
+                ..Default::default()
+            },
             status: Some(NodeStatus {
-                conditions: Some(vec![NodeCondition { type_: "Ready".into(), status: if ready { "True" } else { "False" }.into(), ..Default::default() }]),
+                conditions: Some(vec![NodeCondition {
+                    type_: "Ready".into(),
+                    status: if ready { "True" } else { "False" }.into(),
+                    ..Default::default()
+                }]),
                 ..Default::default()
             }),
             ..Default::default()
@@ -310,7 +374,14 @@ mod tests {
     #[test]
     fn pod_info_reads_phase_restarts_crashloop() {
         let i = pod_info(&pod("a", "Running", 3, Some("CrashLoopBackOff")));
-        assert_eq!(i, PodInfo { phase: Phase::Running, restarts: 3, crashloop: true });
+        assert_eq!(
+            i,
+            PodInfo {
+                phase: Phase::Running,
+                restarts: 3,
+                crashloop: true
+            }
+        );
         assert_eq!(pod_info(&pod("a", "Weird", 0, None)).phase, Phase::Unknown);
     }
 
@@ -321,7 +392,15 @@ mod tests {
         assert!(t.apply(&pod("a", "Running", 0, None)).is_empty());
         assert!(t.apply(&pod("b", "Pending", 0, None)).is_empty());
         let evs = t.init_done();
-        assert_eq!(evs, vec![Event::PodSnapshot { running: 1, pending: 1, failed: 0, total: 2 }]);
+        assert_eq!(
+            evs,
+            vec![Event::PodSnapshot {
+                running: 1,
+                pending: 1,
+                failed: 0,
+                total: 2
+            }]
+        );
     }
 
     #[test]
@@ -330,18 +409,70 @@ mod tests {
         t.begin_init();
         t.init_done();
         let evs = t.apply(&pod("a", "Pending", 0, None));
-        assert_eq!(evs, vec![Event::PodSnapshot { running: 0, pending: 1, failed: 0, total: 1 }]);
+        assert_eq!(
+            evs,
+            vec![Event::PodSnapshot {
+                running: 0,
+                pending: 1,
+                failed: 0,
+                total: 1
+            }]
+        );
         let evs = t.apply(&pod("a", "Running", 0, None));
-        assert_eq!(evs[0], Event::PodStarted { ns: "ns".into(), name: "a".into() });
+        assert_eq!(
+            evs[0],
+            Event::PodStarted {
+                ns: "ns".into(),
+                name: "a".into()
+            }
+        );
         let evs = t.apply(&pod("a", "Running", 1, None));
-        assert_eq!(evs[0], Event::PodCrashed { ns: "ns".into(), name: "a".into() });
+        assert_eq!(
+            evs[0],
+            Event::PodCrashed {
+                ns: "ns".into(),
+                name: "a".into()
+            }
+        );
         let evs = t.apply(&pod("a", "Running", 1, Some("CrashLoopBackOff")));
-        assert_eq!(evs[0], Event::PodCrashed { ns: "ns".into(), name: "a".into() });
-        assert_eq!(evs[1], Event::PodSnapshot { running: 0, pending: 0, failed: 1, total: 1 });
-        assert!(t.apply(&pod("a", "Running", 1, Some("CrashLoopBackOff"))).is_empty(), "no change, no events");
+        assert_eq!(
+            evs[0],
+            Event::PodCrashed {
+                ns: "ns".into(),
+                name: "a".into()
+            }
+        );
+        assert_eq!(
+            evs[1],
+            Event::PodSnapshot {
+                running: 0,
+                pending: 0,
+                failed: 1,
+                total: 1
+            }
+        );
+        assert!(
+            t.apply(&pod("a", "Running", 1, Some("CrashLoopBackOff")))
+                .is_empty(),
+            "no change, no events"
+        );
         let evs = t.delete(&pod("a", "Running", 1, None));
-        assert_eq!(evs[0], Event::PodGone { ns: "ns".into(), name: "a".into() });
-        assert_eq!(evs[1], Event::PodSnapshot { running: 0, pending: 0, failed: 0, total: 0 });
+        assert_eq!(
+            evs[0],
+            Event::PodGone {
+                ns: "ns".into(),
+                name: "a".into()
+            }
+        );
+        assert_eq!(
+            evs[1],
+            Event::PodSnapshot {
+                running: 0,
+                pending: 0,
+                failed: 0,
+                total: 0
+            }
+        );
         assert!(t.delete(&pod("zzz", "Running", 0, None)).is_empty());
     }
 
@@ -360,12 +491,38 @@ mod tests {
         t.begin_init();
         t.apply(&node("n1", true));
         t.apply(&node("n2", true));
-        assert_eq!(t.init_done(), vec![Event::NodeSnapshot { ready: 2, total: 2, not_ready: vec![] }]);
+        assert_eq!(
+            t.init_done(),
+            vec![Event::NodeSnapshot {
+                ready: 2,
+                total: 2,
+                not_ready: vec![]
+            }]
+        );
         let evs = t.apply(&node("n2", false));
-        assert_eq!(evs[0], Event::NodeReady { name: "n2".into(), ready: false });
-        assert_eq!(evs[1], Event::NodeSnapshot { ready: 1, total: 2, not_ready: vec!["n2".into()] });
+        assert_eq!(
+            evs[0],
+            Event::NodeReady {
+                name: "n2".into(),
+                ready: false
+            }
+        );
+        assert_eq!(
+            evs[1],
+            Event::NodeSnapshot {
+                ready: 1,
+                total: 2,
+                not_ready: vec!["n2".into()]
+            }
+        );
         assert!(t.apply(&node("n2", false)).is_empty());
         let evs = t.apply(&node("n2", true));
-        assert_eq!(evs[0], Event::NodeReady { name: "n2".into(), ready: true });
+        assert_eq!(
+            evs[0],
+            Event::NodeReady {
+                name: "n2".into(),
+                ready: true
+            }
+        );
     }
 }

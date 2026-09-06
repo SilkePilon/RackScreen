@@ -81,7 +81,12 @@ impl SplashQueue {
                 return;
             }
         }
-        let s = Splash { kind, role, started: now, count: 1 };
+        let s = Splash {
+            kind,
+            role,
+            started: now,
+            count: 1,
+        };
         if self.active.is_none() {
             self.active = Some(s);
         } else {
@@ -321,7 +326,10 @@ mod tests {
 
     #[test]
     fn sweep_phases_follow_direction() {
-        let s = Sweep { kind: SweepKind::NodeNotReady, started: 0.0 };
+        let s = Sweep {
+            kind: SweepKind::NodeNotReady,
+            started: 0.0,
+        };
         assert_eq!(Sweep::order_index(Direction::Up, Role::Health), 0);
         assert_eq!(Sweep::order_index(Direction::Up, Role::Cpu), 3);
         assert!(matches!(s.phase(Role::Health, 0.1), SweepPhase::WipeIn(_)));
@@ -330,8 +338,14 @@ mod tests {
         assert!(matches!(s.phase(Role::Health, 1.5), SweepPhase::Hold(_)));
         assert!(matches!(s.phase(Role::Cpu, 1.5), SweepPhase::Hold(_)));
         let hold_end = 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS + SWEEP_HOLD_SECS;
-        assert!(matches!(s.phase(Role::Health, hold_end + 0.1), SweepPhase::WipeOut(_)));
-        assert!(matches!(s.phase(Role::Cpu, hold_end + 0.1), SweepPhase::Hold(_)));
+        assert!(matches!(
+            s.phase(Role::Health, hold_end + 0.1),
+            SweepPhase::WipeOut(_)
+        ));
+        assert!(matches!(
+            s.phase(Role::Cpu, hold_end + 0.1),
+            SweepPhase::Hold(_)
+        ));
         assert!(!s.done(hold_end + 0.5));
         assert!(s.done(hold_end + 3.0 * SWEEP_STAGGER_SECS + SWEEP_WIPE_SECS));
         assert_eq!(s.phase(Role::Cpu, 10.0), SweepPhase::Idle);
@@ -359,7 +373,10 @@ mod tests {
         fx.apply(FxRequest::HotNode(Role::Mem), 0.0);
         fx.apply(FxRequest::NodeNotReady, 0.0);
         fx.tick(0.0);
-        assert_eq!(fx.splashes[Role::Mem.index()].active().unwrap().kind, SplashKind::HotNode);
+        assert_eq!(
+            fx.splashes[Role::Mem.index()].active().unwrap().kind,
+            SplashKind::HotNode
+        );
         assert_eq!(fx.sweeps.active().unwrap().kind, SweepKind::NodeNotReady);
     }
 }

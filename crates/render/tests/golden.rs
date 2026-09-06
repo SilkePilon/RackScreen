@@ -8,7 +8,9 @@ use rackscreen_render::renderer::Renderer;
 use tiny_skia::Pixmap;
 
 fn golden_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/goldens").join(format!("{name}.png"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/goldens")
+        .join(format!("{name}.png"))
 }
 
 /// Compare against the stored golden. Writes it when missing or when UPDATE_GOLDENS is set.
@@ -26,10 +28,17 @@ fn check(name: &str, px: &Pixmap) {
         .data()
         .chunks(4)
         .zip(px.data().chunks(4))
-        .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| (*x as i32 - *y as i32).abs() > 8))
+        .filter(|(a, b)| {
+            a.iter()
+                .zip(b.iter())
+                .any(|(x, y)| (*x as i32 - *y as i32).abs() > 8)
+        })
         .count();
     let total = (px.width() * px.height()) as usize;
-    assert!(bad * 200 < total, "{name}: {bad} of {total} pixels differ (run with UPDATE_GOLDENS=1 to accept)");
+    assert!(
+        bad * 200 < total,
+        "{name}: {bad} of {total} pixels differ (run with UPDATE_GOLDENS=1 to accept)"
+    );
 }
 
 fn pixel(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
@@ -39,14 +48,48 @@ fn pixel(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
 
 fn ready_model() -> Model {
     let mut m = Model::new(Thresholds::default());
-    m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
-    m.apply(Event::Link { target: LinkTarget::Prometheus, up: true }, 0.0);
     m.apply(
-        Event::Metrics { cpu_pct: 42.0, mem_pct: 67.0, mem_used_gb: 10.7, mem_total_gb: 16.0, hot_cpu: None, hot_mem: None },
+        Event::Link {
+            target: LinkTarget::K8sApi,
+            up: true,
+        },
         0.0,
     );
-    m.apply(Event::PodSnapshot { running: 53, pending: 2, failed: 0, total: 55 }, 0.0);
-    m.apply(Event::NodeSnapshot { ready: 4, total: 4, not_ready: vec![] }, 0.0);
+    m.apply(
+        Event::Link {
+            target: LinkTarget::Prometheus,
+            up: true,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Metrics {
+            cpu_pct: 42.0,
+            mem_pct: 67.0,
+            mem_used_gb: 10.7,
+            mem_total_gb: 16.0,
+            hot_cpu: None,
+            hot_mem: None,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::PodSnapshot {
+            running: 53,
+            pending: 2,
+            failed: 0,
+            total: 55,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::NodeSnapshot {
+            ready: 4,
+            total: 4,
+            not_ready: vec![],
+        },
+        0.0,
+    );
     m
 }
 
@@ -57,7 +100,10 @@ fn cpu_idle() {
     let mut px = new_pixmap();
     r.render(&m.scene(Role::Cpu, 5.0), &mut px);
     let (red, g, b) = pixel(&px, 120, 18);
-    assert!(red > 200 && g > 140 && b < 80, "segment 0 amber, got {red},{g},{b}");
+    assert!(
+        red > 200 && g > 140 && b < 80,
+        "segment 0 amber, got {red},{g},{b}"
+    );
     let (o, ..) = pixel(&px, 120, 222);
     assert!((20..=40).contains(&o), "segment 30 is off, got {o}");
     assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
@@ -83,7 +129,13 @@ fn connecting_and_no_data() {
     r.render(&m.scene(Role::Cpu, 0.0), &mut px);
     check("connecting", &px);
     let mut m2 = Model::new(Thresholds::default());
-    m2.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
+    m2.apply(
+        Event::Link {
+            target: LinkTarget::K8sApi,
+            up: true,
+        },
+        0.0,
+    );
     let mut px2 = new_pixmap();
     r.render(&m2.scene(Role::Cpu, 0.5), &mut px2);
     check("no_data", &px2);
@@ -92,7 +144,13 @@ fn connecting_and_no_data() {
 #[test]
 fn pod_crash_splash_mid_swap() {
     let mut m = ready_model();
-    m.apply(Event::PodCrashed { ns: "a".into(), name: "b".into() }, 5.0);
+    m.apply(
+        Event::PodCrashed {
+            ns: "a".into(),
+            name: "b".into(),
+        },
+        5.0,
+    );
     m.tick(5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
@@ -103,12 +161,33 @@ fn pod_crash_splash_mid_swap() {
 #[test]
 fn torrent_mode() {
     let mut m = ready_model();
-    m.apply(Event::Link { target: LinkTarget::QBittorrent, up: true }, 0.0);
+    m.apply(
+        Event::Link {
+            target: LinkTarget::QBittorrent,
+            up: true,
+        },
+        0.0,
+    );
     m.apply(
         Event::Torrents(vec![
-            Torrent { name: "a".into(), progress: 78.0, eta_secs: 900, speed_bps: 9_000_000 },
-            Torrent { name: "b".into(), progress: 41.0, eta_secs: 3000, speed_bps: 3_000_000 },
-            Torrent { name: "c".into(), progress: 12.0, eta_secs: 9000, speed_bps: 1_000_000 },
+            Torrent {
+                name: "a".into(),
+                progress: 78.0,
+                eta_secs: 900,
+                speed_bps: 9_000_000,
+            },
+            Torrent {
+                name: "b".into(),
+                progress: 41.0,
+                eta_secs: 3000,
+                speed_bps: 3_000_000,
+            },
+            Torrent {
+                name: "c".into(),
+                progress: 12.0,
+                eta_secs: 9000,
+                speed_bps: 1_000_000,
+            },
         ]),
         0.0,
     );
@@ -121,12 +200,21 @@ fn torrent_mode() {
 #[test]
 fn sweep_hold() {
     let mut m = ready_model();
-    m.apply(Event::NodeReady { name: "n".into(), ready: false }, 5.0);
+    m.apply(
+        Event::NodeReady {
+            name: "n".into(),
+            ready: false,
+        },
+        5.0,
+    );
     m.tick(5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
     r.render(&m.scene(Role::Health, 6.0), &mut px);
     let (red, g, b) = pixel(&px, 120, 18);
-    assert!(red > 140 && g < 120 && b < 120, "red ring at 60% pulse alpha, got {red},{g},{b}");
+    assert!(
+        red > 140 && g < 120 && b < 120,
+        "red ring at 60% pulse alpha, got {red},{g},{b}"
+    );
     check("sweep_hold", &px);
 }

@@ -44,7 +44,13 @@ pub fn splash_overlay(mut base: Scene, splash: &Splash, now: Secs) -> Scene {
     let back = unit((e - FADE_BACK_START) / (SPLASH_SECS as f32 - FADE_BACK_START));
     let role_alpha = (1.0 - swap).max(back);
     let (icx, icy, isize) = match base.main_icon_mut() {
-        Some(Drawable::Icon { alpha, cx, cy, size, .. }) => {
+        Some(Drawable::Icon {
+            alpha,
+            cx,
+            cy,
+            size,
+            ..
+        }) => {
             *alpha *= role_alpha;
             (*cx, *cy, *size)
         }
@@ -55,7 +61,16 @@ pub fn splash_overlay(mut base: Scene, splash: &Splash, now: Secs) -> Scene {
     if swap > 0.0 {
         let scale = Easing::Spring.apply(swap);
         let alpha = swap.min(1.0 - back);
-        base.push(Drawable::Icon { name: splash.kind.icon(), cx: icx, cy: icy, size: isize, color, alpha, scale, dy: 0.0 });
+        base.push(Drawable::Icon {
+            name: splash.kind.icon(),
+            cx: icx,
+            cy: icy,
+            size: isize,
+            color,
+            alpha,
+            scale,
+            dy: 0.0,
+        });
     }
 
     // 4. ripple
@@ -94,15 +109,33 @@ pub fn sweep_scene(sweep: &Sweep, role: Role, phase: SweepPhase, now: Secs) -> S
         SweepPhase::Hold(_) => (n, 0.6 + 0.4 * pulse(now, 1.2), 1.0),
         SweepPhase::WipeOut(p) => (((1.0 - p) * n as f32).round() as usize, 1.0, 1.0 - p),
     };
-    let states = (0..n).map(|i| if i < lit { SegState::On(color, ring_alpha) } else { SegState::Off }).collect();
+    let states = (0..n)
+        .map(|i| {
+            if i < lit {
+                SegState::On(color, ring_alpha)
+            } else {
+                SegState::Off
+            }
+        })
+        .collect();
     let mut s = Scene::new();
-    s.push(Drawable::Ring { cx: CX, cy: CY, radius: RING_R, n, states });
+    s.push(Drawable::Ring {
+        cx: CX,
+        cy: CY,
+        radius: RING_R,
+        n,
+        states,
+    });
     s.push(Drawable::Icon {
         name: sweep.kind.icon(role),
         cx: CX,
         cy: CY,
         size: BIG_ICON_SIZE,
-        color: if matches!(sweep.kind, crate::fx::SweepKind::Boot) { WHITE } else { color },
+        color: if matches!(sweep.kind, crate::fx::SweepKind::Boot) {
+            WHITE
+        } else {
+            color
+        },
         alpha: icon_alpha,
         scale: 1.0,
         dy: 0.0,
@@ -132,7 +165,11 @@ impl crate::model::Model {
                 ph => return sweep_scene(sw, role, ph, now),
             }
         }
-        let base = if self.needs_data(role) { no_data_scene(now) } else { role_scene(self, role, now) };
+        let base = if self.needs_data(role) {
+            no_data_scene(now)
+        } else {
+            role_scene(self, role, now)
+        };
         if sweep.is_some() {
             return base;
         }
@@ -152,14 +189,48 @@ mod tests {
 
     fn ready_model() -> Model {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
-        m.apply(Event::Link { target: LinkTarget::Prometheus, up: true }, 0.0);
         m.apply(
-            Event::Metrics { cpu_pct: 42.0, mem_pct: 60.0, mem_used_gb: 1.0, mem_total_gb: 8.0, hot_cpu: None, hot_mem: None },
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
             0.0,
         );
-        m.apply(Event::PodSnapshot { running: 10, pending: 0, failed: 0, total: 10 }, 0.0);
-        m.apply(Event::NodeSnapshot { ready: 2, total: 2, not_ready: vec![] }, 0.0);
+        m.apply(
+            Event::Link {
+                target: LinkTarget::Prometheus,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Metrics {
+                cpu_pct: 42.0,
+                mem_pct: 60.0,
+                mem_used_gb: 1.0,
+                mem_total_gb: 8.0,
+                hot_cpu: None,
+                hot_mem: None,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::PodSnapshot {
+                running: 10,
+                pending: 0,
+                failed: 0,
+                total: 10,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 2,
+                total: 2,
+                not_ready: vec![],
+            },
+            0.0,
+        );
         m
     }
 
@@ -167,7 +238,9 @@ mod tests {
         s.items
             .iter()
             .filter_map(|d| match d {
-                Drawable::Icon { name, alpha, scale, .. } => Some((*name, *alpha, *scale)),
+                Drawable::Icon {
+                    name, alpha, scale, ..
+                } => Some((*name, *alpha, *scale)),
                 _ => None,
             })
             .collect()
@@ -183,7 +256,13 @@ mod tests {
     #[test]
     fn no_data_until_metrics_arrive() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::Link { target: LinkTarget::K8sApi, up: true }, 0.0);
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            0.0,
+        );
         let s = m.scene(Role::Cpu, 0.0);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
         let s = m.scene(Role::Pods, 0.0);
@@ -193,7 +272,13 @@ mod tests {
     #[test]
     fn splash_swaps_icon_with_overshoot_and_ripple() {
         let mut m = ready_model();
-        m.apply(Event::PodCrashed { ns: "a".into(), name: "b".into() }, 1.0);
+        m.apply(
+            Event::PodCrashed {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            1.0,
+        );
         m.tick(1.0);
         let s = m.scene(Role::Pods, 1.15);
         assert!(s.items.iter().any(|d| matches!(d, Drawable::Ripple { .. })));
@@ -212,7 +297,13 @@ mod tests {
     fn splash_counter_in_badge() {
         let mut m = ready_model();
         for _ in 0..3 {
-            m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 1.0);
+            m.apply(
+                Event::PodStarted {
+                    ns: "a".into(),
+                    name: "b".into(),
+                },
+                1.0,
+            );
         }
         m.tick(1.0);
         let s = m.scene(Role::Pods, 1.5);
@@ -226,14 +317,29 @@ mod tests {
     #[test]
     fn sweep_takes_over_all_screens_and_suppresses_splash() {
         let mut m = ready_model();
-        m.apply(Event::PodStarted { ns: "a".into(), name: "b".into() }, 1.0);
-        m.apply(Event::NodeReady { name: "n".into(), ready: false }, 1.0);
+        m.apply(
+            Event::PodStarted {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            1.0,
+        );
+        m.apply(
+            Event::NodeReady {
+                name: "n".into(),
+                ready: false,
+            },
+            1.0,
+        );
         m.tick(1.0);
         let s = m.scene(Role::Health, 1.1);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
         assert!(s.lit_count() > 0 && s.lit_count() < 60);
         let s = m.scene(Role::Cpu, 1.1);
-        assert!(icons(&s).iter().all(|(n, ..)| *n == "cpu"), "cpu not yet reached, shows role, no splash");
+        assert!(
+            icons(&s).iter().all(|(n, ..)| *n == "cpu"),
+            "cpu not yet reached, shows role, no splash"
+        );
         let s = m.scene(Role::Cpu, 2.0);
         assert_eq!(s.lit_count(), 60);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
@@ -244,14 +350,22 @@ mod tests {
             m.tick(i as f64 / 33.0);
         }
         let s = m.scene(Role::Pods, 200.0 / 33.0);
-        assert!(icons(&s).iter().any(|(n, ..)| *n == "package-plus"), "splash resumes after sweep");
+        assert!(
+            icons(&s).iter().any(|(n, ..)| *n == "package-plus"),
+            "splash resumes after sweep"
+        );
     }
 
     #[test]
     fn boot_uses_role_colours() {
-        let sw = Sweep { kind: SweepKind::Boot, started: 0.0 };
+        let sw = Sweep {
+            kind: SweepKind::Boot,
+            started: 0.0,
+        };
         let s = sweep_scene(&sw, Role::Mem, SweepPhase::Hold(0.5), 0.0);
-        if let Some(Drawable::Ring { states, .. }) = s.items.iter().find(|d| matches!(d, Drawable::Ring { .. })) {
+        if let Some(Drawable::Ring { states, .. }) =
+            s.items.iter().find(|d| matches!(d, Drawable::Ring { .. }))
+        {
             assert!(matches!(states[0], SegState::On(c, _) if c == Role::Mem.accent()));
         }
         assert!(icons(&s).iter().any(|(n, ..)| *n == "memory-stick"));
@@ -259,7 +373,13 @@ mod tests {
 
     #[test]
     fn splash_kinds_have_icons() {
-        for k in [SplashKind::PodStarted, SplashKind::PodCrashed, SplashKind::PodGone, SplashKind::HotNode, SplashKind::TorrentAdded] {
+        for k in [
+            SplashKind::PodStarted,
+            SplashKind::PodCrashed,
+            SplashKind::PodGone,
+            SplashKind::HotNode,
+            SplashKind::TorrentAdded,
+        ] {
             assert!(!k.icon().is_empty());
         }
     }

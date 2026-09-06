@@ -21,17 +21,35 @@ pub fn fill(px: &mut Pixmap, path: &Path, c: Color, alpha: f32) {
     if alpha <= 0.0 {
         return;
     }
-    px.fill_path(path, &paint(c, alpha), FillRule::Winding, Transform::identity(), None);
+    px.fill_path(
+        path,
+        &paint(c, alpha),
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
 }
 
 /// Stroke a path into a fillable outline.
 pub fn outline(path: &Path, width: f32) -> Option<Path> {
-    let stroke = Stroke { width, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
+    let stroke = Stroke {
+        width,
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        ..Stroke::default()
+    };
     path.stroke(&stroke, 1.0)
 }
 
 /// One ring segment: a radial tick centred on `radius`, at `angle_deg` clockwise from 12 o'clock.
-pub fn segment_outline(cx: f32, cy: f32, radius: f32, angle_deg: f32, len: f32, width: f32) -> Path {
+pub fn segment_outline(
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    angle_deg: f32,
+    len: f32,
+    width: f32,
+) -> Path {
     let a = angle_deg.to_radians();
     let (s, c) = (a.sin(), a.cos());
     let r0 = radius - len / 2.0;
@@ -49,17 +67,26 @@ pub struct SegmentCache {
 
 impl SegmentCache {
     pub fn new() -> Self {
-        Self { map: HashMap::new() }
+        Self {
+            map: HashMap::new(),
+        }
     }
 
     pub fn segments(&mut self, cx: f32, cy: f32, radius: f32, n: usize) -> &[Path] {
         use rackscreen_core::theme::layout::{SEG_LEN, SEG_W};
-        let key = ((cx * 10.0) as u32, (cy * 10.0) as u32, (radius * 10.0) as u32, n);
+        let key = (
+            (cx * 10.0) as u32,
+            (cy * 10.0) as u32,
+            (radius * 10.0) as u32,
+            n,
+        );
         self.map
             .entry(key)
             .or_insert_with(|| {
                 (0..n)
-                    .map(|i| segment_outline(cx, cy, radius, i as f32 * 360.0 / n as f32, SEG_LEN, SEG_W))
+                    .map(|i| {
+                        segment_outline(cx, cy, radius, i as f32 * 360.0 / n as f32, SEG_LEN, SEG_W)
+                    })
                     .collect()
             })
             .as_slice()

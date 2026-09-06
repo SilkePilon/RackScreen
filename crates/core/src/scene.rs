@@ -5,7 +5,9 @@ use crate::event::Torrent;
 use crate::format::{fmt_eta, fmt_speed};
 use crate::model::Model;
 use crate::theme::layout::*;
-use crate::theme::{Color, Role, BADGE_FILL, BLACK, BLUE, DIM_GREY, GREEN, GREY, RED, VIOLET, WHITE};
+use crate::theme::{
+    Color, Role, BADGE_FILL, BLACK, BLUE, DIM_GREY, GREEN, GREY, RED, VIOLET, WHITE,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SegState {
@@ -16,8 +18,23 @@ pub enum SegState {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Drawable {
     Clear(Color),
-    Ring { cx: f32, cy: f32, radius: f32, n: usize, states: Vec<SegState> },
-    Icon { name: &'static str, cx: f32, cy: f32, size: f32, color: Color, alpha: f32, scale: f32, dy: f32 },
+    Ring {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        n: usize,
+        states: Vec<SegState>,
+    },
+    Icon {
+        name: &'static str,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        color: Color,
+        alpha: f32,
+        scale: f32,
+        dy: f32,
+    },
     Badge {
         cx: f32,
         cy: f32,
@@ -31,8 +48,21 @@ pub enum Drawable {
         text_color: Color,
         alpha: f32,
     },
-    Ripple { cx: f32, cy: f32, r: f32, thickness: f32, color: Color, alpha: f32 },
-    Dots { cx: f32, cy: f32, spacing: f32, r: f32, colors: Vec<Color> },
+    Ripple {
+        cx: f32,
+        cy: f32,
+        r: f32,
+        thickness: f32,
+        color: Color,
+        alpha: f32,
+    },
+    Dots {
+        cx: f32,
+        cy: f32,
+        spacing: f32,
+        r: f32,
+        colors: Vec<Color>,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -42,29 +72,51 @@ pub struct Scene {
 
 impl Scene {
     pub fn new() -> Self {
-        Self { items: vec![Drawable::Clear(BLACK)] }
+        Self {
+            items: vec![Drawable::Clear(BLACK)],
+        }
     }
     pub fn push(&mut self, d: Drawable) {
         self.items.push(d);
     }
     /// The outermost ring (first Ring pushed).
     pub fn ring_mut(&mut self) -> Option<&mut Drawable> {
-        self.items.iter_mut().find(|d| matches!(d, Drawable::Ring { .. }))
+        self.items
+            .iter_mut()
+            .find(|d| matches!(d, Drawable::Ring { .. }))
     }
     /// The role icon (first Icon pushed).
     pub fn main_icon_mut(&mut self) -> Option<&mut Drawable> {
-        self.items.iter_mut().find(|d| matches!(d, Drawable::Icon { .. }))
+        self.items
+            .iter_mut()
+            .find(|d| matches!(d, Drawable::Icon { .. }))
     }
     pub fn lit_count(&self) -> usize {
-        match self.items.iter().find(|d| matches!(d, Drawable::Ring { .. })) {
-            Some(Drawable::Ring { states, .. }) => states.iter().filter(|s| matches!(s, SegState::On(..))).count(),
+        match self
+            .items
+            .iter()
+            .find(|d| matches!(d, Drawable::Ring { .. }))
+        {
+            Some(Drawable::Ring { states, .. }) => states
+                .iter()
+                .filter(|s| matches!(s, SegState::On(..)))
+                .count(),
             _ => 0,
         }
     }
 }
 
 fn icon(name: &'static str, cy: f32, size: f32, color: Color, alpha: f32) -> Drawable {
-    Drawable::Icon { name, cx: CX, cy, size, color, alpha, scale: 1.0, dy: 0.0 }
+    Drawable::Icon {
+        name,
+        cx: CX,
+        cy,
+        size,
+        color,
+        alpha,
+        scale: 1.0,
+        dy: 0.0,
+    }
 }
 
 fn badge(cy: f32, stroke: Color, text: String) -> Drawable {
@@ -85,7 +137,13 @@ fn badge(cy: f32, stroke: Color, text: String) -> Drawable {
 
 fn ring(radius: f32, states: Vec<SegState>) -> Drawable {
     let n = states.len();
-    Drawable::Ring { cx: CX, cy: CY, radius, n, states }
+    Drawable::Ring {
+        cx: CX,
+        cy: CY,
+        radius,
+        n,
+        states,
+    }
 }
 
 /// Segment count for a ring of the given radius (60 at r=102, fewer inside).
@@ -110,12 +168,22 @@ pub fn ring_states(pct: f32, accent: Color, n: usize, now: Secs) -> Vec<SegState
 }
 
 /// Segments for the PODS ring: running (blue), pending (pulsing dim blue), failed (red).
-pub fn pod_segments(running: f32, pending: u32, failed: u32, total: u32, now: Secs) -> Vec<SegState> {
+pub fn pod_segments(
+    running: f32,
+    pending: u32,
+    failed: u32,
+    total: u32,
+    now: Secs,
+) -> Vec<SegState> {
     let n = SEG_N;
     if total == 0 {
         return vec![SegState::Off; n];
     }
-    let scale = if total as usize <= n { 1.0 } else { n as f32 / total as f32 };
+    let scale = if total as usize <= n {
+        1.0
+    } else {
+        n as f32 / total as f32
+    };
     let run = (running.max(0.0) * scale).round() as usize;
     let pend = ((pending as f32) * scale).round() as usize;
     let mut fail = ((failed as f32) * scale).round() as usize;
@@ -158,7 +226,13 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             let pct = model.smooth_cpu(now);
             let mut s = Scene::new();
             s.push(ring(RING_R, ring_states(pct, role.accent(), SEG_N, now)));
-            s.push(icon(role.icon(), ICON_CY, ICON_SIZE, WHITE, 0.6 + 0.4 * pulse(now, 3.5)));
+            s.push(icon(
+                role.icon(),
+                ICON_CY,
+                ICON_SIZE,
+                WHITE,
+                0.6 + 0.4 * pulse(now, 3.5),
+            ));
             s.push(badge(BADGE_CY, role.accent(), format!("{:.0}%", pct)));
             s
         }
@@ -174,15 +248,28 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             let st = model.state();
             let running = model.smooth_pods(now);
             let mut s = Scene::new();
-            s.push(ring(RING_R, pod_segments(running, st.pods_pending, st.pods_failed, st.pods_total, now)));
+            s.push(ring(
+                RING_R,
+                pod_segments(running, st.pods_pending, st.pods_failed, st.pods_total, now),
+            ));
             let mut ic = icon(role.icon(), ICON_CY, ICON_SIZE, WHITE, 1.0);
             if let Drawable::Icon { dy, .. } = &mut ic {
                 *dy = -3.0 * pulse(now, 2.6);
             }
             s.push(ic);
-            s.push(badge(BADGE_CY, role.accent(), format!("{}", running.round() as u32)));
+            s.push(badge(
+                BADGE_CY,
+                role.accent(),
+                format!("{}", running.round() as u32),
+            ));
             if st.pods_failed > 0 {
-                s.push(Drawable::Dots { cx: CX, cy: MARKER_CY, spacing: 0.0, r: 3.0, colors: vec![RED.with_alpha(breathe(now, 2.4))] });
+                s.push(Drawable::Dots {
+                    cx: CX,
+                    cy: MARKER_CY,
+                    spacing: 0.0,
+                    r: 3.0,
+                    colors: vec![RED.with_alpha(breathe(now, 2.4))],
+                });
             }
             s
         }
@@ -205,20 +292,44 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
             };
             s.push(ring(RING_R, states));
             let alert = !st.alerts.is_empty();
-            let mut heart = icon(role.icon(), ICON_CY, ICON_SIZE, if alert { RED } else { WHITE }, 1.0);
+            let mut heart = icon(
+                role.icon(),
+                ICON_CY,
+                ICON_SIZE,
+                if alert { RED } else { WHITE },
+                1.0,
+            );
             if let Drawable::Icon { scale, .. } = &mut heart {
                 *scale = 1.0 + 0.12 * heartbeat(now);
             }
             s.push(heart);
-            s.push(badge(BADGE_CY, if alert { RED } else { GREEN }, String::new()));
+            s.push(badge(
+                BADGE_CY,
+                if alert { RED } else { GREEN },
+                String::new(),
+            ));
             let total = st.nodes_total as usize;
             if total > 0 {
                 let ready = st.nodes_ready as usize;
-                let colors = (0..total).map(|i| if i < ready { GREEN } else { RED }).collect();
-                s.push(Drawable::Dots { cx: CX, cy: BADGE_CY, spacing: DOT_SPACING, r: DOT_R, colors });
+                let colors = (0..total)
+                    .map(|i| if i < ready { GREEN } else { RED })
+                    .collect();
+                s.push(Drawable::Dots {
+                    cx: CX,
+                    cy: BADGE_CY,
+                    spacing: DOT_SPACING,
+                    r: DOT_R,
+                    colors,
+                });
             }
             if alert {
-                s.push(Drawable::Dots { cx: CX, cy: MARKER_CY, spacing: 0.0, r: 3.0, colors: vec![RED.with_alpha(breathe(now, 2.4))] });
+                s.push(Drawable::Dots {
+                    cx: CX,
+                    cy: MARKER_CY,
+                    spacing: 0.0,
+                    r: 3.0,
+                    colors: vec![RED.with_alpha(breathe(now, 2.4))],
+                });
             }
             s
         }
@@ -229,11 +340,18 @@ const TORRENT_ACCENTS: [Color; 3] = [GREEN, BLUE, VIOLET];
 
 pub fn torrent_scene(torrents: &[Torrent], now: Secs) -> Scene {
     let mut sorted: Vec<&Torrent> = torrents.iter().collect();
-    sorted.sort_by(|a, b| b.progress.partial_cmp(&a.progress).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        b.progress
+            .partial_cmp(&a.progress)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut s = Scene::new();
     for (i, t) in sorted.iter().take(3).enumerate() {
         let r = TORRENT_RADII[i];
-        s.push(ring(r, ring_states(t.progress, TORRENT_ACCENTS[i], seg_count(r), now)));
+        s.push(ring(
+            r,
+            ring_states(t.progress, TORRENT_ACCENTS[i], seg_count(r), now),
+        ));
     }
     let mut ic = icon("download", TORRENT_ICON_CY, TORRENT_ICON_SIZE, WHITE, 1.0);
     if let Drawable::Icon { dy, .. } = &mut ic {
@@ -245,7 +363,11 @@ pub fn torrent_scene(torrents: &[Torrent], now: Secs) -> Scene {
     let text = if (window as i64) % 2 == 0 {
         fmt_speed(sorted.iter().map(|t| t.speed_bps).sum())
     } else {
-        let eta = sorted.iter().map(|t| t.eta_secs).filter(|e| (0..864_000).contains(e)).min();
+        let eta = sorted
+            .iter()
+            .map(|t| t.eta_secs)
+            .filter(|e| (0..864_000).contains(e))
+            .min();
         fmt_eta(eta.unwrap_or(-1))
     };
     let mut b = badge(TORRENT_BADGE_CY, GREEN, text);
@@ -281,7 +403,13 @@ pub fn no_data_scene(now: Secs) -> Scene {
     }
     let mut s = Scene::new();
     s.push(ring(RING_R, states));
-    s.push(icon("cloud-off", CY, BIG_ICON_SIZE, Color::hex(0x666666), 1.0));
+    s.push(icon(
+        "cloud-off",
+        CY,
+        BIG_ICON_SIZE,
+        Color::hex(0x666666),
+        1.0,
+    ));
     s
 }
 
@@ -294,7 +422,14 @@ mod tests {
     fn model_with_cpu(pct: f32) -> Model {
         let mut m = Model::new(Thresholds::default());
         m.apply(
-            Event::Metrics { cpu_pct: pct, mem_pct: 10.0, mem_used_gb: 1.0, mem_total_gb: 8.0, hot_cpu: None, hot_mem: None },
+            Event::Metrics {
+                cpu_pct: pct,
+                mem_pct: 10.0,
+                mem_used_gb: 1.0,
+                mem_total_gb: 8.0,
+                hot_cpu: None,
+                hot_mem: None,
+            },
             0.0,
         );
         m
@@ -303,10 +438,22 @@ mod tests {
     #[test]
     fn ring_states_lights_rounded_share() {
         let v = ring_states(42.0, BLUE, 60, 0.0);
-        assert_eq!(v.iter().filter(|s| matches!(s, SegState::On(..))).count(), 25);
-        assert!(matches!(v[24], SegState::On(_, a) if a < 1.0), "last lit breathes");
+        assert_eq!(
+            v.iter().filter(|s| matches!(s, SegState::On(..))).count(),
+            25
+        );
+        assert!(
+            matches!(v[24], SegState::On(_, a) if a < 1.0),
+            "last lit breathes"
+        );
         assert!(matches!(v[0], SegState::On(_, a) if a == 1.0));
-        assert_eq!(ring_states(0.0, BLUE, 60, 0.0).iter().filter(|s| matches!(s, SegState::On(..))).count(), 0);
+        assert_eq!(
+            ring_states(0.0, BLUE, 60, 0.0)
+                .iter()
+                .filter(|s| matches!(s, SegState::On(..)))
+                .count(),
+            0
+        );
         assert_eq!(ring_states(100.0, BLUE, 60, 0.0).len(), 60);
     }
 
@@ -314,7 +461,10 @@ mod tests {
     fn pod_segments_order_and_colours() {
         let v = pod_segments(50.0, 2, 1, 53, 0.0);
         assert!(matches!(v[0], SegState::On(c, _) if c == BLUE));
-        assert!(matches!(v[50], SegState::On(c, a) if c == BLUE && a < 1.0), "pending dim");
+        assert!(
+            matches!(v[50], SegState::On(c, a) if c == BLUE && a < 1.0),
+            "pending dim"
+        );
         assert!(matches!(v[52], SegState::On(c, _) if c == RED));
         assert_eq!(v[53], SegState::Off);
     }
@@ -343,21 +493,52 @@ mod tests {
     #[test]
     fn health_scene_switches_to_torrent_mode() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::NodeSnapshot { ready: 2, total: 2, not_ready: vec![] }, 0.0);
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 2,
+                total: 2,
+                not_ready: vec![],
+            },
+            0.0,
+        );
         let s = role_scene(&m, Role::Health, 0.0);
         assert_eq!(s.lit_count(), 60);
-        let dots = s.items.iter().filter(|d| matches!(d, Drawable::Dots { .. })).count();
+        let dots = s
+            .items
+            .iter()
+            .filter(|d| matches!(d, Drawable::Dots { .. }))
+            .count();
         assert_eq!(dots, 1);
-        m.apply(Event::Link { target: LinkTarget::QBittorrent, up: true }, 0.0);
+        m.apply(
+            Event::Link {
+                target: LinkTarget::QBittorrent,
+                up: true,
+            },
+            0.0,
+        );
         m.apply(
             Event::Torrents(vec![
-                Torrent { name: "a".into(), progress: 50.0, eta_secs: 60, speed_bps: 2_097_152 },
-                Torrent { name: "b".into(), progress: 90.0, eta_secs: 30, speed_bps: 1_048_576 },
+                Torrent {
+                    name: "a".into(),
+                    progress: 50.0,
+                    eta_secs: 60,
+                    speed_bps: 2_097_152,
+                },
+                Torrent {
+                    name: "b".into(),
+                    progress: 90.0,
+                    eta_secs: 30,
+                    speed_bps: 1_048_576,
+                },
             ]),
             0.0,
         );
         let s = role_scene(&m, Role::Health, 0.0);
-        let rings: Vec<_> = s.items.iter().filter(|d| matches!(d, Drawable::Ring { .. })).collect();
+        let rings: Vec<_> = s
+            .items
+            .iter()
+            .filter(|d| matches!(d, Drawable::Ring { .. }))
+            .collect();
         assert_eq!(rings.len(), 2);
         if let Drawable::Ring { radius, .. } = rings[0] {
             assert_eq!(*radius, 102.0);
@@ -379,10 +560,19 @@ mod tests {
     #[test]
     fn health_not_ready_shows_red_tail() {
         let mut m = Model::new(Thresholds::default());
-        m.apply(Event::NodeSnapshot { ready: 3, total: 4, not_ready: vec!["n4".into()] }, 0.0);
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 4,
+                not_ready: vec!["n4".into()],
+            },
+            0.0,
+        );
         let s = role_scene(&m, Role::Health, 0.0);
         assert_eq!(s.lit_count(), 60);
-        if let Some(Drawable::Ring { states, .. }) = s.items.iter().find(|d| matches!(d, Drawable::Ring { .. })) {
+        if let Some(Drawable::Ring { states, .. }) =
+            s.items.iter().find(|d| matches!(d, Drawable::Ring { .. }))
+        {
             assert!(matches!(states[59], SegState::On(c, _) if c == RED));
             assert!(matches!(states[0], SegState::On(c, _) if c == GREEN));
         }
@@ -392,7 +582,9 @@ mod tests {
     fn connecting_has_comet_and_big_icon() {
         let s = connecting_scene(0.0);
         assert_eq!(s.lit_count(), 4);
-        assert!(matches!(s.items[2], Drawable::Icon { name: "plug-zap", size, .. } if size == BIG_ICON_SIZE));
+        assert!(
+            matches!(s.items[2], Drawable::Icon { name: "plug-zap", size, .. } if size == BIG_ICON_SIZE)
+        );
         let s2 = connecting_scene(0.6);
         assert_eq!(s2.lit_count(), 4);
         assert_ne!(s, s2);
@@ -402,6 +594,12 @@ mod tests {
     fn no_data_is_dim_full_ring() {
         let s = no_data_scene(2.0);
         assert_eq!(s.lit_count(), 60);
-        assert!(matches!(s.items[2], Drawable::Icon { name: "cloud-off", .. }));
+        assert!(matches!(
+            s.items[2],
+            Drawable::Icon {
+                name: "cloud-off",
+                ..
+            }
+        ));
     }
 }

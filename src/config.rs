@@ -107,37 +107,64 @@ impl ScreenCfg {
 
 impl Default for K8sCfg {
     fn default() -> Self {
-        Self { kubeconfig: "~/k8s-monitor.yaml".into() }
+        Self {
+            kubeconfig: "~/k8s-monitor.yaml".into(),
+        }
     }
 }
 impl Default for PromCfg {
     fn default() -> Self {
-        Self { namespace: "monitoring".into(), service: "auto".into(), port: 9090, poll_secs: 5 }
+        Self {
+            namespace: "monitoring".into(),
+            service: "auto".into(),
+            port: 9090,
+            poll_secs: 5,
+        }
     }
 }
 impl Default for QbitCfg {
     fn default() -> Self {
-        Self { enabled: true, namespace: "arr-stack".into(), service: "qbittorrent".into(), port: 8080, user: String::new(), pass: String::new(), poll_secs: 3 }
+        Self {
+            enabled: true,
+            namespace: "arr-stack".into(),
+            service: "qbittorrent".into(),
+            port: 8080,
+            user: String::new(),
+            pass: String::new(),
+            poll_secs: 3,
+        }
     }
 }
 impl Default for NightCfg {
     fn default() -> Self {
-        Self { enabled: true, start: "23:00".into(), end: "07:00".into() }
+        Self {
+            enabled: true,
+            start: "23:00".into(),
+            end: "07:00".into(),
+        }
     }
 }
 impl Default for ThresholdsCfg {
     fn default() -> Self {
-        Self { hot_cpu: 90.0, hot_mem: 90.0 }
+        Self {
+            hot_cpu: 90.0,
+            hot_mem: 90.0,
+        }
     }
 }
 impl Default for DisplayCfg {
     fn default() -> Self {
-        Self { brightness: 1.0, fps: 30, spi_chunk: 4096 }
+        Self {
+            brightness: 1.0,
+            fps: 30,
+            spi_chunk: 4096,
+        }
     }
 }
 impl Default for Config {
     fn default() -> Self {
-        toml::from_str(include_str!("../config.example.toml")).expect("config.example.toml is valid")
+        toml::from_str(include_str!("../config.example.toml"))
+            .expect("config.example.toml is valid")
     }
 }
 
@@ -152,18 +179,30 @@ pub fn expand_home(p: &str) -> PathBuf {
 
 impl Config {
     pub fn default_path() -> PathBuf {
-        dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("rackscreen/config.toml")
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("rackscreen/config.toml")
     }
 
     pub fn load(path: Option<&Path>) -> Result<Config> {
-        let path = path.map(Path::to_path_buf).unwrap_or_else(Config::default_path);
+        let path = path
+            .map(Path::to_path_buf)
+            .unwrap_or_else(Config::default_path);
         if !path.exists() {
-            tracing::warn!("config {} not found, using built-in defaults", path.display());
+            tracing::warn!(
+                "config {} not found, using built-in defaults",
+                path.display()
+            );
             return Ok(Config::default());
         }
-        let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        let cfg: Config = toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
-        anyhow::ensure!(!cfg.screens.is_empty(), "config needs at least one [[screens]] entry");
+        let text =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let cfg: Config =
+            toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+        anyhow::ensure!(
+            !cfg.screens.is_empty(),
+            "config needs at least one [[screens]] entry"
+        );
         for s in &cfg.screens {
             s.role()?;
         }
@@ -196,7 +235,16 @@ mod tests {
 
     #[test]
     fn bad_role_rejected() {
-        let s = ScreenCfg { role: "nope".into(), spi: 0, cs: 0, dc: 0, rst: 0, rotate: 0, hflip: false, hz: 1 };
+        let s = ScreenCfg {
+            role: "nope".into(),
+            spi: 0,
+            cs: 0,
+            dc: 0,
+            rst: 0,
+            rotate: 0,
+            hflip: false,
+            hz: 1,
+        };
         assert!(s.role().is_err());
     }
 

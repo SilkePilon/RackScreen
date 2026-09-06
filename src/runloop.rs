@@ -31,16 +31,29 @@ pub struct ScreenSlot {
 
 impl ScreenSlot {
     pub fn new(role: Role, orient: Orient, mailbox: Mailbox) -> Self {
-        Self { role, orient, mailbox, cur: new_pixmap(), oriented: new_pixmap(), prev: new_pixmap(), first: true }
+        Self {
+            role,
+            orient,
+            mailbox,
+            cur: new_pixmap(),
+            oriented: new_pixmap(),
+            prev: new_pixmap(),
+            first: true,
+        }
     }
 
     /// Orient the freshly rendered frame, diff, push. Returns the dirty rect pushed.
     fn flush(&mut self) -> Option<Rect> {
         self.orient.apply(&self.cur, &mut self.oriented);
-        let rect = if self.first { Some(Rect::full()) } else { dirty_rect(&self.prev, &self.oriented) };
+        let rect = if self.first {
+            Some(Rect::full())
+        } else {
+            dirty_rect(&self.prev, &self.oriented)
+        };
         self.first = false;
         if let Some(r) = rect {
-            self.mailbox.put(DisplayCmd::Frame(self.oriented.clone(), r));
+            self.mailbox
+                .put(DisplayCmd::Frame(self.oriented.clone(), r));
         }
         std::mem::swap(&mut self.prev, &mut self.oriented);
         rect
@@ -99,7 +112,10 @@ impl RenderLoop {
 
             let night = match model.night_override() {
                 Some(v) => v,
-                None => self.night.enabled && is_night(local_minutes(), self.night.start_min, self.night.end_min),
+                None => {
+                    self.night.enabled
+                        && is_night(local_minutes(), self.night.start_min, self.night.end_min)
+                }
             };
 
             if night && asleep {
@@ -178,6 +194,14 @@ mod tests {
         assert!(matches!(mb.take(), DisplayCmd::Frame(_, r) if r == Rect::full()));
         assert_eq!(slot.flush(), None, "identical frame pushes nothing");
         slot.cur.data_mut()[(10 * 240 + 10) * 4] = 200;
-        assert_eq!(slot.flush(), Some(Rect { x: 10, y: 10, w: 1, h: 1 }));
+        assert_eq!(
+            slot.flush(),
+            Some(Rect {
+                x: 10,
+                y: 10,
+                w: 1,
+                h: 1
+            })
+        );
     }
 }

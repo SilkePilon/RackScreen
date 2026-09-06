@@ -40,7 +40,9 @@ fn layout(n: usize, grid: bool) -> (usize, usize, Vec<(usize, usize)>) {
     if grid {
         let cols = 2;
         let rows = n.div_ceil(cols);
-        let origins = (0..n).map(|i| (PAD + (i % cols) * CELL, PAD + (i / cols) * CELL)).collect();
+        let origins = (0..n)
+            .map(|i| (PAD + (i % cols) * CELL, PAD + (i / cols) * CELL))
+            .collect();
         (PAD + cols * CELL, PAD + rows * CELL, origins)
     } else {
         let origins = (0..n).map(|i| (PAD, PAD + i * CELL)).collect();
@@ -53,7 +55,15 @@ fn draw_bezel(buf: &mut [u32], stride: usize, ox: usize, oy: usize) {
     for y in 0..PANEL {
         for x in 0..PANEL {
             let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
-            let v = if d <= 120.0 { 0 } else if d <= 125.0 { BEZEL_A } else if d <= 127.0 { BEZEL_B } else { continue };
+            let v = if d <= 120.0 {
+                0
+            } else if d <= 125.0 {
+                BEZEL_A
+            } else if d <= 127.0 {
+                BEZEL_B
+            } else {
+                continue;
+            };
             buf[(oy + y) * stride + ox + x] = v;
         }
     }
@@ -67,12 +77,28 @@ impl SimHub {
             draw_bezel(&mut init, w, ox, oy);
         }
         let buf = Arc::new(Mutex::new(init));
-        let window = Window::new("RackScreen sim", w, h, WindowOptions::default()).context("open window")?;
+        let window =
+            Window::new("RackScreen sim", w, h, WindowOptions::default()).context("open window")?;
         let panels = origins
             .iter()
-            .map(|&(ox, oy)| SimPanel { buf: buf.clone(), stride: w, ox, oy, asleep: false })
+            .map(|&(ox, oy)| SimPanel {
+                buf: buf.clone(),
+                stride: w,
+                ox,
+                oy,
+                asleep: false,
+            })
             .collect();
-        Ok((SimHub { window, buf, w, h, key_tx }, panels))
+        Ok((
+            SimHub {
+                window,
+                buf,
+                w,
+                h,
+                key_tx,
+            },
+            panels,
+        ))
     }
 
     /// Blocks on the window loop until the window closes, Escape is pressed, or `stop` is set.
@@ -80,7 +106,10 @@ impl SimHub {
         self.window.set_target_fps(60);
         let mut frames = 0u32;
         let mut last = Instant::now();
-        while self.window.is_open() && !self.window.is_key_down(Key::Escape) && !stop.load(Ordering::Relaxed) {
+        while self.window.is_open()
+            && !self.window.is_key_down(Key::Escape)
+            && !stop.load(Ordering::Relaxed)
+        {
             for key in self.window.get_keys_pressed(KeyRepeat::No) {
                 let ch = match key {
                     Key::Key1 => '1',
@@ -99,7 +128,11 @@ impl SimHub {
                 let _ = self.key_tx.send(ch);
             }
             let snapshot = self.buf.lock().unwrap().clone();
-            if self.window.update_with_buffer(&snapshot, self.w, self.h).is_err() {
+            if self
+                .window
+                .update_with_buffer(&snapshot, self.w, self.h)
+                .is_err()
+            {
                 break;
             }
             frames += 1;
@@ -116,7 +149,13 @@ impl SimHub {
 impl SimPanel {
     /// For tests: a panel drawing into a caller-provided buffer.
     pub fn with_buffer(buf: Arc<Mutex<Vec<u32>>>, stride: usize, ox: usize, oy: usize) -> Self {
-        Self { buf, stride, ox, oy, asleep: false }
+        Self {
+            buf,
+            stride,
+            ox,
+            oy,
+            asleep: false,
+        }
     }
 
     fn blit(&self, frame: &Pixmap, dirty: Rect) {
@@ -188,14 +227,29 @@ mod tests {
         panel.push(&white, Rect::full()).unwrap();
         {
             let b = buf.lock().unwrap();
-            assert_eq!(b[(20 + 120) * stride + 20 + 120], 0xffffff, "centre is white");
-            assert_eq!(b[(20) * stride + 20], BG, "corner outside circle keeps bezel background");
+            assert_eq!(
+                b[(20 + 120) * stride + 20 + 120],
+                0xffffff,
+                "centre is white"
+            );
+            assert_eq!(
+                b[(20) * stride + 20],
+                BG,
+                "corner outside circle keeps bezel background"
+            );
         }
         panel.sleep().unwrap();
         panel.push(&white, Rect::full()).unwrap();
-        assert_eq!(buf.lock().unwrap()[(20 + 120) * stride + 20 + 120], 0, "asleep panel ignores frames");
+        assert_eq!(
+            buf.lock().unwrap()[(20 + 120) * stride + 20 + 120],
+            0,
+            "asleep panel ignores frames"
+        );
         panel.wake().unwrap();
         panel.push(&white, Rect::full()).unwrap();
-        assert_eq!(buf.lock().unwrap()[(20 + 120) * stride + 20 + 120], 0xffffff);
+        assert_eq!(
+            buf.lock().unwrap()[(20 + 120) * stride + 20 + 120],
+            0xffffff
+        );
     }
 }

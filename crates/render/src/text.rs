@@ -26,7 +26,10 @@ impl TextRenderer {
         let font = Font::from_bytes(FONT_BOLD, FontSettings::default())
             .map_err(|e| anyhow::anyhow!("font: {e}"))
             .context("load embedded font")?;
-        Ok(Self { font, cache: HashMap::new() })
+        Ok(Self {
+            font,
+            cache: HashMap::new(),
+        })
     }
 
     fn glyph(&mut self, ch: char, px: f32) -> (Metrics, Vec<u8>) {
@@ -53,7 +56,12 @@ impl TextRenderer {
                 top = top.min(gtop);
                 bottom = bottom.max(gtop + m.height as i32);
             }
-            glyphs.push(Glyph { x: gx, top: gtop, metrics: m, bitmap });
+            glyphs.push(Glyph {
+                x: gx,
+                top: gtop,
+                metrics: m,
+                bitmap,
+            });
             x += m.advance_width;
         }
         if top == i32::MAX {
@@ -69,7 +77,16 @@ impl TextRenderer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn draw_centered(&mut self, pix: &mut Pixmap, text: &str, px: f32, cx: f32, cy: f32, color: Color, alpha: f32) {
+    pub fn draw_centered(
+        &mut self,
+        pix: &mut Pixmap,
+        text: &str,
+        px: f32,
+        cx: f32,
+        cy: f32,
+        color: Color,
+        alpha: f32,
+    ) {
         if alpha <= 0.0 || text.is_empty() {
             return;
         }

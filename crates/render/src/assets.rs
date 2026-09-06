@@ -15,10 +15,23 @@ macro_rules! icons {
 }
 
 icons!(
-    "cpu", "memory-stick", "box", "heart-pulse", "download",
-    "package-plus", "package-x", "package-minus", "flame", "circle-check",
-    "server-off", "server", "triangle-alert", "shield-check",
-    "plug-zap", "plug", "cloud-off",
+    "cpu",
+    "memory-stick",
+    "box",
+    "heart-pulse",
+    "download",
+    "package-plus",
+    "package-x",
+    "package-minus",
+    "flame",
+    "circle-check",
+    "server-off",
+    "server",
+    "triangle-alert",
+    "shield-check",
+    "plug-zap",
+    "plug",
+    "cloud-off",
 );
 
 #[cfg(test)]

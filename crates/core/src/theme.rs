@@ -13,15 +13,27 @@ impl Color {
         Self { r, g, b, a: 255 }
     }
     pub const fn hex(v: u32) -> Self {
-        Self::rgb(((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8)
+        Self::rgb(
+            ((v >> 16) & 0xff) as u8,
+            ((v >> 8) & 0xff) as u8,
+            (v & 0xff) as u8,
+        )
     }
     pub fn with_alpha(self, a: f32) -> Self {
-        Self { a: (a.clamp(0.0, 1.0) * 255.0).round() as u8, ..self }
+        Self {
+            a: (a.clamp(0.0, 1.0) * 255.0).round() as u8,
+            ..self
+        }
     }
     pub fn mix(self, other: Color, t: f32) -> Self {
         let t = t.clamp(0.0, 1.0);
         let l = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-        Self { r: l(self.r, other.r), g: l(self.g, other.g), b: l(self.b, other.b), a: l(self.a, other.a) }
+        Self {
+            r: l(self.r, other.r),
+            g: l(self.g, other.g),
+            b: l(self.b, other.b),
+            a: l(self.a, other.a),
+        }
     }
 }
 
@@ -108,7 +120,15 @@ mod tests {
 
     #[test]
     fn hex_parses_channels() {
-        assert_eq!(Color::hex(0xffb020), Color { r: 0xff, g: 0xb0, b: 0x20, a: 255 });
+        assert_eq!(
+            Color::hex(0xffb020),
+            Color {
+                r: 0xff,
+                g: 0xb0,
+                b: 0x20,
+                a: 255
+            }
+        );
     }
 
     #[test]

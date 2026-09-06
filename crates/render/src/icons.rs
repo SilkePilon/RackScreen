@@ -21,7 +21,9 @@ fn collect(group: &usvg::Group, out: &mut IconPaths) {
         match node {
             usvg::Node::Group(g) => collect(g, out),
             usvg::Node::Path(p) => {
-                let Some(path) = p.data().clone().transform(p.abs_transform()) else { continue };
+                let Some(path) = p.data().clone().transform(p.abs_transform()) else {
+                    continue;
+                };
                 if let Some(st) = p.stroke() {
                     out.strokes.push((path.clone(), st.width().get()));
                 }
@@ -35,10 +37,17 @@ fn collect(group: &usvg::Group, out: &mut IconPaths) {
 }
 
 fn load(svg: &[u8]) -> Result<IconPaths> {
-    let tree = usvg::Tree::from_data(svg, &usvg::Options::default()).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let mut out = IconPaths { strokes: Vec::new(), fills: Vec::new() };
+    let tree = usvg::Tree::from_data(svg, &usvg::Options::default())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut out = IconPaths {
+        strokes: Vec::new(),
+        fills: Vec::new(),
+    };
     collect(tree.root(), &mut out);
-    anyhow::ensure!(!out.strokes.is_empty() || !out.fills.is_empty(), "icon has no paths");
+    anyhow::ensure!(
+        !out.strokes.is_empty() || !out.fills.is_empty(),
+        "icon has no paths"
+    );
     Ok(out)
 }
 
@@ -62,16 +71,36 @@ impl IconCache {
 
     /// Draw `name` centred at (cx, cy + dy), `size` px across at scale 1.0.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&self, px: &mut Pixmap, name: &str, cx: f32, cy: f32, size: f32, color: Color, alpha: f32, scale: f32, dy: f32) {
+    pub fn draw(
+        &self,
+        px: &mut Pixmap,
+        name: &str,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        color: Color,
+        alpha: f32,
+        scale: f32,
+        dy: f32,
+    ) {
         if alpha <= 0.0 || scale <= 0.0 {
             return;
         }
-        let Some(icon) = self.icons.get(name) else { return };
+        let Some(icon) = self.icons.get(name) else {
+            return;
+        };
         let k = scale * size / ICON_UNITS;
-        let ts = Transform::from_translate(cx, cy + dy).pre_scale(k, k).pre_translate(-ICON_UNITS / 2.0, -ICON_UNITS / 2.0);
+        let ts = Transform::from_translate(cx, cy + dy)
+            .pre_scale(k, k)
+            .pre_translate(-ICON_UNITS / 2.0, -ICON_UNITS / 2.0);
         let p = paint(color, alpha);
         for (path, width) in &icon.strokes {
-            let stroke = Stroke { width: *width, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Stroke::default() };
+            let stroke = Stroke {
+                width: *width,
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+                ..Stroke::default()
+            };
             px.stroke_path(path, &p, &stroke, ts, None);
         }
         for path in &icon.fills {
