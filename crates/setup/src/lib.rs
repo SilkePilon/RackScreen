@@ -17,6 +17,9 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::anim::Slide;
+use crate::ops::paths::service_user;
+use crate::ops::shell::RealShell;
+use crate::ops::systemd::Systemd;
 use crate::theme::Theme;
 
 #[derive(Clone, Debug)]
@@ -81,10 +84,18 @@ struct App {
 
 impl App {
     fn new(start: Start, ctx: Ctx, log_sink: LogSink) -> App {
+        // Best effort, so the menu footer and Configure's restart offer are right from
+        // the first draw instead of waiting for a Status visit.
+        let service_active = if ctx.sim {
+            None
+        } else {
+            let sh = RealShell;
+            Systemd::new(&sh, &service_user()).is_active().ok()
+        };
         let shared = Shared {
             ctx,
             theme: Theme::detect(),
-            service_active: None,
+            service_active,
             banner: None,
             log_sink,
         };

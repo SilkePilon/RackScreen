@@ -1,5 +1,7 @@
 //! Configure: a form over the YAML fields with inline editing and validation.
 
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+
 use rackscreen_app::config::Config;
 use rackscreen_core::anim::Secs;
 use rackscreen_core::night::parse_hhmm;
@@ -9,6 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::ops::config_file::save_config;
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
@@ -152,6 +155,8 @@ enum Mode {
     Browse,
     Edit(String),
     AskRestart,
+    /// `systemctl restart` is running on a worker thread; keys wait for its result.
+    Restarting,
 }
 
 pub struct Configure {
@@ -159,33 +164,69 @@ pub struct Configure {
     row: usize,
     mode: Mode,
     error: Option<String>,
+    /// Non-error status shown in the footer (e.g. the restart result).
+    note: Option<String>,
     dirty: bool,
     scroll: usize,
+    /// The file on disk could not be loaded: `cfg` holds defaults for display only and
+    /// `s` must never overwrite the user's file with them.
+    unreadable: bool,
+    restart_rx: Option<Receiver<String>>,
 }
 
 impl Configure {
     pub fn new(shared: &Shared) -> Configure {
-        let cfg = Config::load_or_default(&shared.ctx.config_path).unwrap_or_default();
+        Configure::from_load(Config::load_or_default(&shared.ctx.config_path))
+    }
+
+    /// Build from the result of loading the config file.
+    pub fn from_load(loaded: anyhow::Result<Config>) -> Configure {
+        let (cfg, error, unreadable) = match loaded {
+            Ok(cfg) => (cfg, None, false),
+            Err(e) => (
+                Config::default(),
+                Some(format!("config unreadable: {e:#}; fix the file by hand")),
+                true,
+            ),
+        };
         Configure {
             cfg,
             row: 0,
             mode: Mode::Browse,
-            error: None,
+            error,
+            note: None,
             dirty: false,
             scroll: 0,
+            unreadable,
+            restart_rx: None,
         }
     }
 
     fn save(&mut self, shared: &mut Shared) -> Action {
+        if self.unreadable {
+            self.error =
+                Some("not saved: the existing config is unreadable; fix the file by hand".into());
+            return Action::None;
+        }
         if let Err(e) = self.cfg.validate() {
             self.error = Some(format!("{e:#}"));
             return Action::None;
         }
-        match self.cfg.save(&shared.ctx.config_path) {
+        match save_config(&self.cfg, &shared.ctx.config_path) {
             Ok(()) => {
                 self.dirty = false;
                 shared.banner = Some("config saved".into());
-                if shared.service_active == Some(true) && !shared.ctx.sim {
+                if shared.ctx.sim {
+                    return Action::Back;
+                }
+                // Ask systemd now rather than trusting a cached value: on a fresh run
+                // nothing has populated `shared.service_active` yet.
+                let sh = RealShell;
+                let active = Systemd::new(&sh, &service_user())
+                    .is_active()
+                    .unwrap_or(false);
+                shared.service_active = Some(active);
+                if active {
                     self.mode = Mode::AskRestart;
                     Action::None
                 } else {
@@ -197,6 +238,23 @@ impl Configure {
                 Action::None
             }
         }
+    }
+
+    fn spawn_restart(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("restart".into())
+            .spawn(move || {
+                let sh = RealShell;
+                let msg = match Systemd::new(&sh, &service_user()).restart() {
+                    Ok(()) => "config saved; service restarted".to_string(),
+                    Err(e) => format!("config saved; restart failed: {e:#}"),
+                };
+                let _ = tx.send(msg);
+            })
+            .expect("spawn restart");
+        self.restart_rx = Some(rx);
+        self.mode = Mode::Restarting;
     }
 }
 
@@ -250,13 +308,35 @@ impl Screen for Configure {
             },
             Mode::AskRestart => {
                 if matches!(key.code, KeyCode::Enter | KeyCode::Char('y')) {
-                    let sh = RealShell;
-                    let _ = Systemd::new(&sh, &service_user()).restart();
+                    self.spawn_restart();
+                    return Action::None;
                 }
                 return Action::Back;
             }
+            Mode::Restarting => {
+                // Leaving early is allowed; the restart finishes on its own.
+                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+                    return Action::Back;
+                }
+                self.mode = Mode::Restarting;
+            }
         }
         Action::None
+    }
+
+    fn tick(&mut self, shared: &mut Shared, _now: Secs) {
+        let Some(rx) = &self.restart_rx else { return };
+        let msg = match rx.try_recv() {
+            Ok(m) => m,
+            Err(TryRecvError::Disconnected) => "restart thread died".to_string(),
+            Err(TryRecvError::Empty) => return,
+        };
+        self.restart_rx = None;
+        shared.banner = Some(msg.clone());
+        self.note = Some(msg);
+        if matches!(self.mode, Mode::Restarting) {
+            self.mode = Mode::Browse;
+        }
     }
 
     fn draw(&self, f: &mut Frame, area: Rect, shared: &Shared, _now: Secs) {
@@ -313,10 +393,16 @@ impl Screen for Configure {
             ]));
         }
         f.render_widget(Paragraph::new(lines), list);
-        let msg = match (&self.error, self.dirty) {
-            (Some(e), _) => Line::from(Span::styled(format!("  {e}"), th.bad())),
-            (None, true) => Line::from(Span::styled("  unsaved changes: s to save", th.warning())),
-            (None, false) => Line::from(Span::styled(
+        let msg = match (&self.mode, &self.error, &self.note, self.dirty) {
+            (Mode::Restarting, _, _, _) => {
+                Line::from(Span::styled("  restarting service...", th.warning()))
+            }
+            (_, Some(e), _, _) => Line::from(Span::styled(format!("  {e}"), th.bad())),
+            (_, None, _, true) => {
+                Line::from(Span::styled("  unsaved changes: s to save", th.warning()))
+            }
+            (_, None, Some(n), false) => Line::from(Span::styled(format!("  {n}"), th.good())),
+            (_, None, None, false) => Line::from(Span::styled(
                 format!("  {}", shared.ctx.config_path.display()),
                 th.faint_style(),
             )),
@@ -340,6 +426,7 @@ impl Screen for Configure {
             Mode::Browse => "↑↓ move  ⏎ edit/toggle  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
+            Mode::Restarting => "restarting...  Esc back".into(),
         }
     }
     fn subtitle(&self) -> String {
@@ -350,6 +437,75 @@ impl Screen for Configure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
+    use crate::Ctx;
+    use rackscreen_app::logs::LogSink;
+    use std::path::Path;
+
+    fn shared_at(path: &Path) -> Shared {
+        Shared {
+            ctx: Ctx {
+                config_path: path.to_path_buf(),
+                sim: true,
+                version: "0.2.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+            log_sink: LogSink::new(10),
+        }
+    }
+
+    #[test]
+    fn unreadable_config_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let mut sh = shared_at(&path);
+        let mut screen = Configure::from_load(Err(anyhow::anyhow!("parse config.yaml: bad")));
+        assert!(screen.error.as_deref().unwrap().contains("unreadable"));
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0),
+            Action::None
+        ));
+        assert!(!path.exists(), "defaults must not replace the user's file");
+        assert!(screen.error.as_deref().unwrap().contains("not saved"));
+        assert!(sh.banner.is_none());
+    }
+
+    #[test]
+    fn readable_config_saves_and_goes_back_in_sim() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let mut sh = shared_at(&path);
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0),
+            Action::Back
+        ));
+        assert_eq!(Config::load_or_default(&path).unwrap(), Config::default());
+        assert_eq!(sh.banner.as_deref(), Some("config saved"));
+    }
+
+    #[test]
+    fn restart_result_reaches_banner_on_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        let (tx, rx) = mpsc::channel();
+        screen.restart_rx = Some(rx);
+        screen.mode = Mode::Restarting;
+        screen.tick(&mut sh, 0.0);
+        assert!(sh.banner.is_none(), "nothing yet");
+        tx.send("config saved; service restarted".to_string())
+            .unwrap();
+        screen.tick(&mut sh, 0.1);
+        assert_eq!(
+            sh.banner.as_deref(),
+            Some("config saved; service restarted")
+        );
+        assert!(matches!(screen.mode, Mode::Browse));
+        assert!(screen.restart_rx.is_none());
+    }
 
     #[test]
     fn get_set_round_trip_and_validation() {
