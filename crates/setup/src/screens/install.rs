@@ -245,6 +245,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         let steps = vec![
             StepView {
@@ -287,6 +289,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         // `preview` drops the sender, so the receiver is disconnected right away: the same
         // state a panicking worker thread leaves behind.

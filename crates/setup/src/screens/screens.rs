@@ -535,6 +535,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: rackscreen_app::logs::LogSink::new(10),
+            update: None,
+            redraw: false,
         }
     }
 
@@ -628,6 +630,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: rackscreen_app::logs::LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         let mut s = Screens::new(&sh);
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();

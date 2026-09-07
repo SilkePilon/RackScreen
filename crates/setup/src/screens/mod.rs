@@ -8,6 +8,7 @@ pub mod run;
 pub mod screens;
 pub mod status;
 pub mod uninstall;
+pub mod update;
 
 use crate::{Screen, ScreenId, Shared};
 
@@ -20,6 +21,7 @@ pub fn make(id: ScreenId, shared: &Shared) -> Box<dyn Screen> {
         ScreenId::Configure => Box::new(configure::Configure::new(shared)),
         ScreenId::Status => Box::new(status::Status::new(shared)),
         ScreenId::RunHere => Box::new(run::RunHere::new(shared)),
+        ScreenId::Update => Box::new(update::Update::new(shared)),
         ScreenId::Uninstall => Box::new(uninstall::Uninstall::new(shared)),
     }
 }

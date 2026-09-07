@@ -6,3 +6,4 @@ pub mod paths;
 pub mod shell;
 pub mod systemd;
 pub mod uninstall;
+pub mod update;

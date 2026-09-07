@@ -408,6 +408,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         let mut screen = Calibrate::from_parts(Config::default(), Vec::new());
         for code in [
@@ -450,6 +452,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         // One screen, so `s` reaches `save` (with none the key is ignored outright).
         let one = vec![Orientation {

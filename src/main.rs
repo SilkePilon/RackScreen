@@ -34,6 +34,12 @@ enum Cmd {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    /// Update to the latest GitHub release
+    Update {
+        /// Only report whether an update exists (0 up to date, 1 available, 2 unknown)
+        #[arg(long)]
+        check: bool,
+    },
     /// Interactive setup (default when run in a terminal)
     Setup {
         /// Desktop simulator window instead of SPI displays
@@ -83,7 +89,7 @@ fn ensure_root(sim: bool) -> Result<()> {
     }
     let exe = std::env::current_exe()?;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    eprintln!("rackscreen setup needs root; re-running with sudo");
+    eprintln!("rackscreen needs root; re-running with sudo");
     let status = std::process::Command::new("sudo")
         .arg(exe)
         .args(&args)
@@ -118,6 +124,17 @@ fn main() -> Result<()> {
                 seed: args.seed,
             };
             Monitor::start(&cfg, opts)?.run_blocking()
+        }
+        Some(Cmd::Update { check }) => {
+            let version = env!("CARGO_PKG_VERSION");
+            // A read-only check needs no privileges; installing the new binary does.
+            let code = if check {
+                rackscreen_setup::ops::update::check_and_print(version)
+            } else {
+                ensure_root(false)?;
+                rackscreen_setup::ops::update::run_cli(version)
+            };
+            std::process::exit(code);
         }
         Some(Cmd::Setup { sim, config }) => setup(rackscreen_setup::Start::Menu, sim, config),
         Some(Cmd::Calibrate { sim, config }) => {

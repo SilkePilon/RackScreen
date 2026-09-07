@@ -520,6 +520,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         }
     }
 

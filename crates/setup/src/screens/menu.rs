@@ -10,7 +10,7 @@ use ratatui::Frame;
 use crate::anim::Slide;
 use crate::{Action, Screen, ScreenId, Shared};
 
-pub const ITEMS: [(ScreenId, &str, &str); 7] = [
+pub const ITEMS: [(ScreenId, &str, &str); 8] = [
     (ScreenId::Install, "Install", "set up service + config"),
     (
         ScreenId::Calibrate,
@@ -25,6 +25,11 @@ pub const ITEMS: [(ScreenId, &str, &str); 7] = [
     (ScreenId::Configure, "Configure", "cluster, night, display"),
     (ScreenId::Status, "Status", "service, links, logs"),
     (ScreenId::RunHere, "Run here", "foreground with logs"),
+    (
+        ScreenId::Update,
+        "Update",
+        "download and install the latest release",
+    ),
     (ScreenId::Uninstall, "Uninstall", "remove everything"),
 ];
 
@@ -73,7 +78,7 @@ impl Screen for Menu {
             Constraint::Length(1),
             Constraint::Length(ITEMS.len() as u16),
             Constraint::Min(1),
-            Constraint::Length(2),
+            Constraint::Length(3),
         ])
         .areas(area);
         let bar_pos = self.bar.value(now);
@@ -108,6 +113,18 @@ impl Screen for Menu {
                 th.muted(),
             ),
         ])];
+        if let Some(u) = &shared.update {
+            let (style, text) = if u.newer {
+                (th.warning(), format!("update: {} available", u.latest))
+            } else {
+                (th.muted(), "up to date".to_string())
+            };
+            foot.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(g.dot, style),
+                Span::styled(format!(" {text}"), th.muted()),
+            ]));
+        }
         if let Some(b) = &shared.banner {
             foot.push(Line::from(vec![
                 Span::raw("   "),
@@ -148,6 +165,8 @@ mod tests {
             service_active: Some(true),
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         }
     }
 
@@ -161,6 +180,30 @@ mod tests {
         assert!(text.contains("▸ Install"));
         assert!(text.contains("Uninstall"));
         assert!(text.contains("service: active"));
+    }
+
+    #[test]
+    fn footer_shows_the_update_state() {
+        let mut sh = shared();
+        let menu = Menu::new(&sh);
+        let mut term = Terminal::new(TestBackend::new(60, 16)).unwrap();
+        term.draw(|f| menu.draw(f, f.area(), &sh, 0.0)).unwrap();
+        assert!(!term.backend().to_string().contains("up to date"));
+        sh.update = Some(crate::ops::update::UpdateInfo {
+            latest: "v9.9.9".into(),
+            newer: true,
+        });
+        term.draw(|f| menu.draw(f, f.area(), &sh, 0.0)).unwrap();
+        assert!(term
+            .backend()
+            .to_string()
+            .contains("update: v9.9.9 available"));
+        sh.update = Some(crate::ops::update::UpdateInfo {
+            latest: "v0.2.0".into(),
+            newer: false,
+        });
+        term.draw(|f| menu.draw(f, f.area(), &sh, 0.0)).unwrap();
+        assert!(term.backend().to_string().contains("up to date"));
     }
 
     #[test]

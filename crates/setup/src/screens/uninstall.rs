@@ -214,6 +214,8 @@ mod tests {
             service_active: Some(true),
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         let screen = Uninstall::new(&sh);
         let mut term = Terminal::new(TestBackend::new(70, 18)).unwrap();
@@ -236,6 +238,8 @@ mod tests {
             service_active: Some(true),
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         let (tx, rx) = mpsc::channel();
         drop(tx); // a worker that panicked before sending UEvent::Complete

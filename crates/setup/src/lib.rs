@@ -7,6 +7,7 @@ pub mod theme;
 pub mod widgets;
 
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -20,6 +21,7 @@ use crate::anim::Slide;
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
+use crate::ops::update::UpdateInfo;
 use crate::theme::Theme;
 
 #[derive(Clone, Debug)]
@@ -44,6 +46,7 @@ pub enum ScreenId {
     Configure,
     Status,
     RunHere,
+    Update,
     Uninstall,
 }
 
@@ -61,6 +64,10 @@ pub struct Shared {
     pub service_active: Option<bool>,
     pub banner: Option<String>,
     pub log_sink: LogSink,
+    /// What the background release check found, `None` until it answers (or if it failed).
+    pub update: Option<UpdateInfo>,
+    /// Set by a screen that handed the terminal away and needs a full repaint.
+    pub redraw: bool,
 }
 
 impl Shared {
@@ -73,6 +80,8 @@ impl Shared {
             service_active: self.service_active,
             banner: self.banner.clone(),
             log_sink: self.log_sink.clone(),
+            update: self.update.clone(),
+            redraw: self.redraw,
         }
     }
 }
@@ -90,11 +99,30 @@ pub trait Screen {
 
 const SLIDE_SECS: Secs = 0.2;
 
+/// Ask GitHub once, in the background, so the menu can show an update hint. A failure
+/// (offline, rate limited) just drops the sender and the UI stays quiet about updates.
+fn spawn_update_check(version: &'static str) -> Option<Receiver<UpdateInfo>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("update-check".into())
+        .spawn(move || {
+            if let Ok(release) = ops::update::fetch_latest() {
+                let _ = tx.send(UpdateInfo {
+                    newer: ops::update::is_newer(version, &release.tag),
+                    latest: release.tag,
+                });
+            }
+        })
+        .ok()
+        .map(|_| rx)
+}
+
 struct App {
     shared: Shared,
     current: Box<dyn Screen>,
     current_id: ScreenId,
     slide: Slide, // 1.0 = fully off to the right, 0.0 = in place
+    update_rx: Option<Receiver<UpdateInfo>>,
 }
 
 impl App {
@@ -107,12 +135,15 @@ impl App {
             let sh = RealShell;
             Systemd::new(&sh, &service_user()).is_active().ok()
         };
+        let update_rx = spawn_update_check(ctx.version);
         let shared = Shared {
             ctx,
             theme: Theme::detect(),
             service_active,
             banner: None,
             log_sink,
+            update: None,
+            redraw: false,
         };
         let id = match start {
             Start::Menu => ScreenId::Menu,
@@ -124,6 +155,7 @@ impl App {
             current,
             current_id: id,
             slide: Slide::fixed(0.0),
+            update_rx,
         }
     }
 
@@ -187,7 +219,22 @@ impl App {
         let t0 = Instant::now();
         loop {
             let now = t0.elapsed().as_secs_f64();
+            if let Some(rx) = &self.update_rx {
+                match rx.try_recv() {
+                    Ok(info) => {
+                        self.shared.update = Some(info);
+                        self.update_rx = None;
+                    }
+                    // Offline or rate limited: stay quiet and stop looking.
+                    Err(mpsc::TryRecvError::Disconnected) => self.update_rx = None,
+                    Err(mpsc::TryRecvError::Empty) => {}
+                }
+            }
             self.current.tick(&mut self.shared, now);
+            if self.shared.redraw {
+                self.shared.redraw = false;
+                terminal.clear()?;
+            }
             terminal.draw(|f| self.draw(f, now))?;
             // header glyph animates continuously; 60 Hz only while something moves, else 10 Hz
             let wait = if self.animating(now) { 16 } else { 100 };

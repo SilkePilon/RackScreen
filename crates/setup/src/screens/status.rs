@@ -219,7 +219,7 @@ impl Screen for Status {
         }
         let [_, top, logs] = Layout::vertical([
             Constraint::Length(1),
-            Constraint::Length(9),
+            Constraint::Length(10),
             Constraint::Min(3),
         ])
         .areas(area);
@@ -298,6 +298,17 @@ impl Screen for Status {
                 th.muted(),
             ))),
         }
+        let (upd_style, upd_text) = match &shared.update {
+            Some(u) if u.newer => (th.warning(), format!("   {} available", u.latest)),
+            Some(_) => (th.muted(), "   up to date".to_string()),
+            None => (th.muted(), String::new()),
+        };
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(g.dot, th.muted()),
+            Span::styled(format!(" binary v{}", shared.ctx.version), th.normal()),
+            Span::styled(upd_text, upd_style),
+        ]));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::raw("  "),
@@ -413,6 +424,11 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: Some(crate::ops::update::UpdateInfo {
+                latest: "v0.3.1".into(),
+                newer: true,
+            }),
+            redraw: false,
         };
         let screen = Status::with_snapshot(snap);
         let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();
@@ -421,6 +437,8 @@ mod tests {
         assert!(text.contains("service active (running)"));
         assert!(text.contains("up 1h 06m"));
         assert!(text.contains("spi1 overlay"));
+        assert!(text.contains("binary v0.2.0"));
+        assert!(text.contains("v0.3.1 available"));
         assert!(text.contains("line two"));
         assert_eq!(fmt_uptime(90_000), "1d 1h");
     }
@@ -460,6 +478,8 @@ mod tests {
             service_active: None,
             banner: None,
             log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
         };
         let mut screen = Status::with_snapshot(snap);
         for _ in 0..100 {

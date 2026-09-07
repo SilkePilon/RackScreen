@@ -12,9 +12,9 @@ One line, no clone:
 
     curl -fsSL https://github.com/silkepilon/RackScreen/releases/latest/download/install.sh | bash
 
-It downloads the latest release and opens the setup menu. **Install** copies the binary to `/usr/local/bin`, writes `/etc/rackscreen/config.yaml`, installs the `rackscreen@<user>` service and offers to enable SPI in the boot files (reboot afterwards). **Calibrate screens** shows a test pattern on the panels; press `r`/`f` per screen until the arrow points up and the dot is top-right, then `s`. **Configure** edits the config in a form. **Status** shows the service and link states with logs. **Uninstall** removes everything except the boot file lines.
+It downloads the latest release and opens the setup menu. **Install** copies the binary to `/usr/local/bin`, writes `/etc/rackscreen/config.yaml`, installs the `rackscreen@<user>` service and offers to enable SPI in the boot files (reboot afterwards). **Calibrate screens** shows a test pattern on the panels; press `r`/`f` per screen until the arrow points up and the dot is top-right, then `s`. **Configure** edits the config in a form. **Status** shows the service and link states with logs. **Update** downloads the latest release, verifies its SHA-256, swaps `/usr/local/bin/rackscreen` and restarts the service. **Uninstall** removes everything except the boot file lines.
 
-Later runs: just type `rackscreen` (it asks for sudo). The service runs `rackscreen run --config /etc/rackscreen/config.yaml`.
+Later runs: just type `rackscreen` (it asks for sudo). The service runs `rackscreen run --config /etc/rackscreen/config.yaml`. Without the menu: `sudo rackscreen update` updates in place, `rackscreen update --check` only reports (exit 0 up to date, 1 update available, 2 unknown).
 
 Upgrading from v0.1: `~/.config/rackscreen/config.toml` is no longer read; re-enter your settings via Configure.
 
