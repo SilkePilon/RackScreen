@@ -127,6 +127,8 @@ pub struct RenderLoop {
     /// Whether an Electricity Maps token is configured; without one the
     /// electricity screens show "no token" instead of "waiting for data".
     pub token_present: bool,
+    /// Only one screen may iris at a time: four at once stall the SPI bus.
+    pub one_at_a_time: bool,
 }
 
 impl RenderLoop {
@@ -139,6 +141,16 @@ impl RenderLoop {
         let start = Instant::now();
         let mut model = Model::new(self.thresholds);
         model.set_screens(self.screens_roles.clone(), self.cycle_secs.clone());
+        model.set_one_at_a_time(self.one_at_a_time);
+        // A fresh seed per boot, so the screens do not cycle in the same order
+        // after every restart.
+        model.set_rng_seed(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64)
+                .unwrap_or(1)
+                | 1,
+        );
         model.set_token_present(self.token_present);
         model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);

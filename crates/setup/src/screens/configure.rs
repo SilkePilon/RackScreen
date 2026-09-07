@@ -59,6 +59,7 @@ pub enum Field {
     Brightness,
     Fps,
     SpiChunk,
+    OneAtATime,
     ElecEnabled,
     ElecZone,
     ElecToken,
@@ -71,7 +72,7 @@ pub enum Field {
     HotTemp,
 }
 
-pub const FIELDS: [(Field, &str, FieldKind); 30] = [
+pub const FIELDS: [(Field, &str, FieldKind); 31] = [
     (Field::Kubeconfig, "kubeconfig path", FieldKind::Text),
     (
         Field::PromNamespace,
@@ -100,6 +101,7 @@ pub const FIELDS: [(Field, &str, FieldKind); 30] = [
     (Field::Brightness, "brightness 0.1-1.0", FieldKind::Number),
     (Field::Fps, "fps", FieldKind::Number),
     (Field::SpiChunk, "spi chunk bytes", FieldKind::Number),
+    (Field::OneAtATime, "screens one at a time", FieldKind::Bool),
     (Field::ElecEnabled, "electricity enabled", FieldKind::Bool),
     (Field::ElecZone, "electricity zone", FieldKind::Text),
     (Field::ElecToken, "electricity api token", FieldKind::Secret),
@@ -134,6 +136,7 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::Brightness => format!("{}", cfg.display.brightness),
         Field::Fps => cfg.display.fps.to_string(),
         Field::SpiChunk => cfg.display.spi_chunk.to_string(),
+        Field::OneAtATime => cfg.display.one_at_a_time.to_string(),
         Field::ElecEnabled => cfg.electricity.enabled.to_string(),
         Field::ElecZone => cfg.electricity.zone.clone(),
         Field::ElecToken => cfg.electricity.token.clone(),
@@ -188,6 +191,7 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         }
         Field::Fps => cfg.display.fps = num::<u32>(t, "fps")?.clamp(1, 60),
         Field::SpiChunk => cfg.display.spi_chunk = num::<usize>(t, "spi chunk")?.max(64),
+        Field::OneAtATime => cfg.display.one_at_a_time = t == "true",
         Field::ElecEnabled => cfg.electricity.enabled = t == "true",
         Field::ElecZone => cfg.electricity.zone = t.into(),
         Field::ElecToken => cfg.electricity.token = text.into(),
@@ -588,6 +592,11 @@ mod tests {
         assert!(!c.qbittorrent.enabled);
         set(&mut c, Field::Fps, "500").unwrap();
         assert_eq!(c.display.fps, 60);
+        assert_eq!(get(&c, Field::OneAtATime), "true");
+        set(&mut c, Field::OneAtATime, "false").unwrap();
+        assert!(!c.display.one_at_a_time);
+        set(&mut c, Field::OneAtATime, "true").unwrap();
+        assert!(c.display.one_at_a_time);
         for (f, _, _) in FIELDS {
             let v = get(&c, f);
             assert!(set(&mut c, f, &v).is_ok(), "{f:?} round trip with {v:?}");
@@ -597,7 +606,7 @@ mod tests {
     #[test]
     fn electricity_price_and_temp_fields() {
         let mut c = Config::default();
-        assert_eq!(FIELDS.len(), 30);
+        assert_eq!(FIELDS.len(), 31);
         assert_eq!(get(&c, Field::ElecZone), "NL");
         assert_eq!(get(&c, Field::PriceSource), "energyzero");
         assert_eq!(get(&c, Field::HotTemp), "70");

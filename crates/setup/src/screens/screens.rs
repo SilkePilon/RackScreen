@@ -22,6 +22,8 @@ pub struct Editor {
     rows: Vec<(Vec<Role>, u64)>,
     pub selected: usize,
     picker: Option<Picker>,
+    /// `display.one_at_a_time`: only one screen irises at a time.
+    one_at_a_time: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,7 +40,17 @@ impl Editor {
             rows,
             selected: 0,
             picker: None,
+            one_at_a_time: true,
         }
+    }
+    pub fn one_at_a_time(&self) -> bool {
+        self.one_at_a_time
+    }
+    pub fn set_one_at_a_time(&mut self, on: bool) {
+        self.one_at_a_time = on;
+    }
+    pub fn toggle_one_at_a_time(&mut self) {
+        self.one_at_a_time = !self.one_at_a_time;
     }
     pub fn rows(&self) -> &[(Vec<Role>, u64)] {
         &self.rows
@@ -148,13 +160,16 @@ impl Screens {
     pub fn new(shared: &Shared) -> Screens {
         let cfg = Config::load_or_default(&shared.ctx.config_path)
             .map_err(|e| format!("config unreadable: {e:#}; fix the file by hand"));
-        let editor = Editor::new(cfg.as_ref().map(rows_from).unwrap_or_else(|_| {
+        let mut editor = Editor::new(cfg.as_ref().map(rows_from).unwrap_or_else(|_| {
             Preset::Cluster
                 .rows()
                 .into_iter()
                 .map(|r| (r, 15))
                 .collect()
         }));
+        if let Ok(c) = &cfg {
+            editor.set_one_at_a_time(c.display.one_at_a_time);
+        }
         Screens {
             error: cfg.as_ref().err().cloned(),
             cfg,
@@ -175,6 +190,7 @@ impl Screens {
         for (i, (roles, secs)) in self.editor.rows().iter().enumerate() {
             set_screen_roles(cfg, i, roles, *secs);
         }
+        cfg.display.one_at_a_time = self.editor.one_at_a_time();
         match save_config(cfg, &shared.ctx.config_path) {
             Ok(()) => {
                 self.dirty = false;
@@ -294,6 +310,10 @@ impl Screen for Screens {
                 self.editor.apply_preset(Preset::Mixed);
                 self.dirty = true;
             }
+            KeyCode::Char('o') => {
+                self.editor.toggle_one_at_a_time();
+                self.dirty = true;
+            }
             KeyCode::Char('s') => return self.save(shared),
             KeyCode::Esc | KeyCode::Char('q') => return Action::Back,
             _ => {}
@@ -324,7 +344,8 @@ impl Screen for Screens {
         let g = th.glyphs();
         let [_, list, roles, foot] = Layout::vertical([
             Constraint::Length(1),
-            Constraint::Length(self.editor.rows().len() as u16 + 1),
+            // one row per screen, the one-at-a-time line, then a blank row
+            Constraint::Length(self.editor.rows().len() as u16 + 2),
             Constraint::Min(4),
             Constraint::Length(2),
         ])
@@ -357,6 +378,22 @@ impl Screen for Screens {
                 ),
             ]));
         }
+        lines.push(Line::from(vec![
+            Span::styled("      one screen at a time: ", th.muted()),
+            Span::styled(
+                if self.editor.one_at_a_time() {
+                    "on"
+                } else {
+                    "off"
+                },
+                if self.editor.one_at_a_time() {
+                    th.good()
+                } else {
+                    th.muted()
+                },
+            ),
+            Span::styled("  (o)", th.faint_style()),
+        ]));
         f.render_widget(Paragraph::new(lines), list);
 
         let mut body = vec![Line::from(Span::styled("  Roles:", th.muted()))];
@@ -439,7 +476,7 @@ impl Screen for Screens {
         if self.editor.picker().is_some() {
             "↑↓ move  space toggle  J/K reorder  ⏎ done  Esc cancel".into()
         } else {
-            "↑↓ screen  ⏎ roles  +/- interval  c/e/m preset  s save  Esc back".into()
+            "↑↓ screen  ⏎ roles  +/- interval  c/e/m preset  o solo  s save  Esc back".into()
         }
     }
     fn subtitle(&self) -> String {
@@ -534,6 +571,44 @@ mod tests {
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
         assert!(text.contains("! no price source"), "{text}");
+    }
+
+    #[test]
+    fn one_at_a_time_toggles_draws_and_saves() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = test_shared(dir.path());
+        let mut s = Screens::new(&sh);
+        assert!(
+            s.editor.one_at_a_time(),
+            "on unless the config says otherwise"
+        );
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        assert!(term
+            .backend()
+            .to_string()
+            .contains("one screen at a time: on"));
+        s.handle(
+            KeyEvent::from(KeyCode::Char('o')),
+            &mut sh.clone_for_test(),
+            0.0,
+        );
+        assert!(!s.editor.one_at_a_time());
+        assert!(s.dirty);
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(text.contains("one screen at a time: off"), "{text}");
+        assert!(matches!(
+            s.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0),
+            Action::Back
+        ));
+        let saved = Config::load_or_default(&dir.path().join("c.yaml")).unwrap();
+        assert!(
+            !saved.display.one_at_a_time,
+            "the toggle is written through"
+        );
     }
 
     #[test]

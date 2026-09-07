@@ -39,6 +39,8 @@ Every screen shows one or more **roles** and cycles through them; the switch is 
 
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Three presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`) and `m` mixed (each screen alternates a cluster role with an electricity one). A screen with a single role never cycles.
 
+Only one screen irises at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
+
 In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load.
 
 ## Electricity mode

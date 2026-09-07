@@ -138,6 +138,7 @@ impl Monitor {
             stop: stop.clone(),
             token_present: matches!(source, SourceKind::Fake)
                 || (cfg.electricity.enabled && !cfg.electricity.token.is_empty()),
+            one_at_a_time: cfg.display.one_at_a_time,
         };
         let render_thread = std::thread::Builder::new()
             .name("render".into())

@@ -46,6 +46,7 @@ display:
   brightness: 1.0
   fps: 30
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
+  one_at_a_time: true      # one screen irises at a time, in random order (kinder to the SPI bus)
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable

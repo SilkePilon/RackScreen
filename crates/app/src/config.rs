@@ -78,6 +78,8 @@ pub struct DisplayCfg {
     pub brightness: f32,
     pub fps: u32,
     pub spi_chunk: usize,
+    /// Let only one screen run its iris transition at a time, in random order.
+    pub one_at_a_time: bool,
 }
 
 /// Electricity Maps: grid mix, carbon intensity and renewable share.
@@ -222,6 +224,7 @@ impl Default for DisplayCfg {
             brightness: 1.0,
             fps: 30,
             spi_chunk: 4096,
+            one_at_a_time: true,
         }
     }
 }
@@ -393,6 +396,7 @@ mod tests {
         );
         assert!(c.qbittorrent.enabled);
         assert_eq!(c.display.spi_chunk, 4096);
+        assert!(c.display.one_at_a_time);
         c.validate().unwrap();
     }
 
@@ -407,6 +411,7 @@ mod tests {
         assert_eq!(c.screens[0].hz, 40_000_000);
         assert_eq!(c.screens[0].rotate, 0);
         assert_eq!(c.display.fps, 30);
+        assert!(c.display.one_at_a_time, "on unless the file says otherwise");
     }
 
     #[test]
