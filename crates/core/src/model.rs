@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
 use crate::electricity::{partition, Section, Source};
-use crate::event::{Event, LinkTarget, Robustness, Torrent};
+use crate::event::{App, Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::screens::ScreenState;
 use crate::theme::layout::{SEG_N, TORRENT_RADII};
@@ -87,6 +87,12 @@ pub struct UpsState {
 pub struct NetState {
     pub rx_bps: f64,
     pub tx_bps: f64,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AppsState {
+    pub apps: Vec<App>,
     pub have: bool,
 }
 
@@ -201,6 +207,7 @@ pub struct Model {
     prices: PriceState,
     ups: UpsState,
     net: NetState,
+    apps: AppsState,
     ups_charge: Smooth,
     ups_load: Smooth,
     /// Ring fill (0..1) for download and upload, eased.
@@ -284,6 +291,7 @@ impl Model {
             prices: PriceState::default(),
             ups: UpsState::default(),
             net: NetState::default(),
+            apps: AppsState::default(),
             ups_charge: Smooth::new(0.0, SMOOTH_SECS),
             ups_load: Smooth::new(0.0, SMOOTH_SECS),
             net_rx: Smooth::new(0.03, SMOOTH_SECS),
@@ -360,6 +368,9 @@ impl Model {
     }
     pub fn net(&self) -> &NetState {
         &self.net
+    }
+    pub fn apps(&self) -> &AppsState {
+        &self.apps
     }
     pub fn smooth_ups_charge(&self, now: Secs) -> f32 {
         self.ups_charge.value(now)
@@ -967,11 +978,16 @@ impl Model {
             | Event::GithubStar { .. }
             | Event::GithubMerge { .. }
             | Event::GithubRelease { .. }
-            | Event::GithubRun { .. }
-            | Event::Apps(_)
-            | Event::AppSynced { .. }
-            | Event::AppDegraded { .. }
-            | Event::AppHealthy { .. } => {}
+            | Event::GithubRun { .. } => {}
+            Event::Apps(list) => {
+                self.apps = AppsState {
+                    apps: list,
+                    have: true,
+                };
+            }
+            Event::AppSynced { .. } => self.fx.push(FxRequest::AppSynced),
+            Event::AppDegraded { .. } => self.fx.push(FxRequest::AppDegraded),
+            Event::AppHealthy { .. } => self.fx.push(FxRequest::AppHealthy),
         }
     }
 
@@ -1548,6 +1564,34 @@ mod tests {
         assert!(
             ((b - a).rem_euclid(1.0) - 0.25).abs() < 0.01,
             "half fill, 3 s = quarter lap"
+        );
+    }
+
+    #[test]
+    fn apps_fold_and_edge_events_splash() {
+        use crate::event::{App, AppHealth, AppSync};
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Apps(vec![App {
+                name: "argocd".into(),
+                sync: AppSync::Synced,
+                health: AppHealth::Healthy,
+                operating: false,
+            }]),
+            0.0,
+        );
+        assert!(m.apps().have);
+        assert_eq!(m.apps().apps.len(), 1);
+        m.apply(Event::AppDegraded { name: "x".into() }, 1.0);
+        m.apply(Event::AppSynced { name: "x".into() }, 1.0);
+        m.apply(Event::AppHealthy { name: "x".into() }, 1.0);
+        assert_eq!(
+            m.pending_fx(),
+            &[
+                FxRequest::AppDegraded,
+                FxRequest::AppSynced,
+                FxRequest::AppHealthy
+            ]
         );
     }
 

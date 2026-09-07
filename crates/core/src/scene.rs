@@ -449,6 +449,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         Role::Renewable => crate::scene_electricity::renewable_scene(model, now),
         Role::Ups => crate::scene_ups::ups_scene(model, now),
         Role::Net => crate::scene_net::net_scene(model, now),
+        Role::Deploys => crate::scene_deploys::deploys_scene(model, now),
         Role::GhActivity
         | Role::Weather
         | Role::Wind
@@ -456,8 +457,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         | Role::Rain
         | Role::Sun
         | Role::Moon
-        | Role::Iss
-        | Role::Deploys => no_data_scene(now),
+        | Role::Iss => no_data_scene(now),
     }
 }
 

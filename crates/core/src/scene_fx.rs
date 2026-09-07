@@ -168,6 +168,7 @@ impl crate::model::Model {
             Role::Price => !(link.prices && self.prices().have),
             Role::Ups => !(link.prom && self.ups().have),
             Role::Net => !(link.prom && self.net().have),
+            Role::Deploys => !(link.argocd && self.apps().have),
             Role::GhActivity
             | Role::Weather
             | Role::Wind
@@ -175,8 +176,7 @@ impl crate::model::Model {
             | Role::Rain
             | Role::Sun
             | Role::Moon
-            | Role::Iss
-            | Role::Deploys => true,
+            | Role::Iss => true,
         }
     }
 
