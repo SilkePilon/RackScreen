@@ -3,8 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
-use chrono_tz::Tz;
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
 use rackscreen_core::event::{Event, LinkTarget};
 use serde_json::Value;
 
@@ -21,7 +20,9 @@ pub enum PriceSource {
 pub struct PriceConfig {
     pub source: PriceSource,
     pub poll_secs: u64,
-    pub tz: Tz,
+    /// The system local zone, the same clock `runloop` uses for the
+    /// current-hour marker; set the Pi's zone with `timedatectl`.
+    pub tz: Local,
 }
 
 const ENTSOE_URL: &str = "https://web-api.tp.entsoe.eu/api";
@@ -130,17 +131,17 @@ pub fn parse_entsoe(xml: &str) -> Result<Vec<(String, f32)>> {
 /// Bucket timestamped prices into the 24 local hours of `day`, converting to ct/kWh.
 /// `per_kwh` = input is €/kWh (EnergyZero) else €/MWh (ENTSO-E). Missing hours are NaN;
 /// sub-hourly points average into their hour.
-pub fn hourly_ct_for_day(
+pub fn hourly_ct_for_day<Z: TimeZone>(
     points: &[(String, f32)],
     day: NaiveDate,
-    tz: Tz,
+    tz: &Z,
     per_kwh: bool,
 ) -> Vec<f32> {
     let mut sum = [0.0f32; 24];
     let mut cnt = [0u32; 24];
     for (ts, price) in points {
         let Some(t) = parse_utc(ts) else { continue };
-        let local = t.with_timezone(&tz);
+        let local = t.with_timezone(tz);
         if local.date_naive() != day {
             continue;
         }
@@ -159,13 +160,14 @@ pub fn hourly_ct_for_day(
         .collect()
 }
 
-fn day_bounds_utc(day: NaiveDate, tz: Tz) -> (DateTime<Utc>, DateTime<Utc>) {
+fn day_bounds_utc<Z: TimeZone>(day: NaiveDate, tz: &Z) -> (DateTime<Utc>, DateTime<Utc>) {
     let midnight = day.and_hms_opt(0, 0, 0).unwrap();
     let start = tz
         .from_local_datetime(&midnight)
         .single()
         .unwrap_or_else(|| tz.from_utc_datetime(&midnight));
-    let end = start + chrono::Duration::days(1);
+    // a local day, so the DST days stay 23 or 25 hours long
+    let end = start.clone() + chrono::Duration::days(1);
     (start.with_timezone(&Utc), end.with_timezone(&Utc))
 }
 
@@ -177,7 +179,7 @@ fn redact(e: reqwest::Error) -> anyhow::Error {
 }
 
 async fn fetch_day(cfg: &PriceConfig, day: NaiveDate) -> Result<Vec<f32>> {
-    let (from, till) = day_bounds_utc(day, cfg.tz);
+    let (from, till) = day_bounds_utc(day, &cfg.tz);
     match &cfg.source {
         PriceSource::EnergyZero { include_vat } => {
             let url = format!(
@@ -202,7 +204,7 @@ async fn fetch_day(cfg: &PriceConfig, day: NaiveDate) -> Result<Vec<f32>> {
             Ok(hourly_ct_for_day(
                 &parse_energyzero(&body)?,
                 day,
-                cfg.tz,
+                &cfg.tz,
                 true,
             ))
         }
@@ -232,7 +234,12 @@ async fn fetch_day(cfg: &PriceConfig, day: NaiveDate) -> Result<Vec<f32>> {
                 .await
                 .map_err(redact)
                 .context("entsoe body")?;
-            Ok(hourly_ct_for_day(&parse_entsoe(&body)?, day, cfg.tz, false))
+            Ok(hourly_ct_for_day(
+                &parse_entsoe(&body)?,
+                day,
+                &cfg.tz,
+                false,
+            ))
         }
     }
 }
@@ -301,7 +308,7 @@ mod tests {
         let pts = parse_energyzero(EZ).unwrap();
         assert_eq!(pts.len(), 24);
         let day = NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
-        let ct = hourly_ct_for_day(&pts, day, chrono_tz::Europe::Amsterdam, true);
+        let ct = hourly_ct_for_day(&pts, day, &chrono_tz::Europe::Amsterdam, true);
         assert_eq!(ct.len(), 24);
         // fixture: 22:00Z on the 5th is 00:00 local on the 6th and costs 0.22 €/kWh
         assert!((ct[0] - 22.0).abs() < 0.01);
@@ -314,7 +321,7 @@ mod tests {
         assert_eq!(pts.len(), 24);
         assert_eq!(pts[0].1, 85.5);
         let day = NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
-        let ct = hourly_ct_for_day(&pts, day, chrono_tz::Europe::Amsterdam, false);
+        let ct = hourly_ct_for_day(&pts, day, &chrono_tz::Europe::Amsterdam, false);
         assert!((ct[0] - 8.55).abs() < 0.01, "€/MWh to ct/kWh");
         assert!(parse_entsoe("<x/>").is_err());
     }
@@ -337,12 +344,29 @@ mod tests {
     }
 
     #[test]
+    fn the_local_zone_buckets_into_the_hour_the_marker_shows() {
+        use chrono::Timelike;
+        // `runloop` marks the current hour with `chrono::Local`; bucketing has to
+        // agree with it, whatever the Pi's system zone is
+        let now = Local::now();
+        let ct = hourly_ct_for_day(
+            &[(now.with_timezone(&Utc).to_rfc3339(), 0.1)],
+            now.date_naive(),
+            &Local,
+            true,
+        );
+        let h = now.hour() as usize;
+        assert!((ct[h] - 10.0).abs() < 0.01, "hour {h} of {ct:?}");
+        assert_eq!(ct.iter().filter(|v| v.is_finite()).count(), 1);
+    }
+
+    #[test]
     fn missing_hours_are_nan_and_zones_map() {
         let day = NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
         let ct = hourly_ct_for_day(
             &[("2026-09-06T10:00:00Z".into(), 0.1)],
             day,
-            chrono_tz::Europe::Amsterdam,
+            &chrono_tz::Europe::Amsterdam,
             true,
         );
         assert!(ct[12].is_finite() && ct[11].is_nan());

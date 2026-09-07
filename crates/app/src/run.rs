@@ -217,18 +217,11 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
         let pcfg = rackscreen_sources::prices::PriceConfig {
             source,
             poll_secs: cfg.price.poll_secs,
-            tz: local_tz(),
+            // the system local zone, the same clock the current-hour marker uses
+            tz: chrono::Local,
         };
         runtime.spawn(rackscreen_sources::prices::run_prices(pcfg, ctx.clone()));
     }
-}
-
-/// `$TZ` when it names a zone we know, else the rack's home zone.
-fn local_tz() -> chrono_tz::Tz {
-    std::env::var("TZ")
-        .ok()
-        .and_then(|t| t.parse().ok())
-        .unwrap_or(chrono_tz::Europe::Amsterdam)
 }
 
 /// `None` when prices are off, or when ENTSO-E is picked without a token or a

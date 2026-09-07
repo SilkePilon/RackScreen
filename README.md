@@ -51,7 +51,7 @@ The `price` role is separate and has its own `price source`, cycled with `⏎`:
 - `entsoe` — the European transparency platform; ask for a free API token by mail and fill in `entsoe token` plus `entsoe zone (EIC)`, the EIC code of your bidding zone (for example `10YNL----------L` for the Netherlands). Left empty, the zone is derived from the electricity zone when that country is known; without a token or a zone, prices stay off and the log says so.
 - `none` — no price polling; the `price` role then shows no data.
 
-`price incl. VAT` asks EnergyZero for prices with VAT and levies included; ENTSO-E always reports the raw exchange price. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
+`price incl. VAT` asks EnergyZero for prices with VAT and levies included; ENTSO-E always reports the raw exchange price. The price ring is bucketed into the Pi's own local hours, the same clock that marks the current hour, so set the system time zone once: `sudo timedatectl set-timezone Europe/Amsterdam`. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
 
 ## Develop on the desktop
 

@@ -25,5 +25,8 @@ urlencoding = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "charset", "query"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 quick-xml = "0.42"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["clock"] }
+
+[dev-dependencies]
 chrono-tz = "0.10"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

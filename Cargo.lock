@@ -2538,7 +2538,6 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
- "chrono-tz",
  "dirs",
  "nix 0.31.3",
  "rackscreen-core",
