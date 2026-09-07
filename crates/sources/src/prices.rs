@@ -79,29 +79,48 @@ pub fn parse_energyzero(json: &str) -> Result<Vec<(String, f32)>> {
         .collect())
 }
 
-/// ENTSO-E Publication_MarketDocument -> (ISO timestamp, €/MWh) for every hourly Point.
+/// ENTSO-E Publication_MarketDocument -> (ISO timestamp, price per MWh) for
+/// every position of every Period.
+///
+/// `curveType` A03 ("variable sized block") leaves out any position whose price
+/// equals the previous one, so a period is read as a sparse list and then filled
+/// in: every position from 1 to the count the period's `timeInterval` implies
+/// carries the last price seen, and the positions before the first point take
+/// the first price.
 pub fn parse_entsoe(xml: &str) -> Result<Vec<(String, f32)>> {
     use quick_xml::events::Event as X;
     use quick_xml::Reader;
     let mut reader = Reader::from_str(xml);
     let mut out = Vec::new();
     let mut path: Vec<String> = Vec::new();
+    let mut text = String::new();
+    // the Period being read
     let mut start: Option<DateTime<Utc>> = None;
+    let mut end: Option<DateTime<Utc>> = None;
     let mut resolution_min: i64 = 60;
     let mut position: i64 = 0;
-    let mut text = String::new();
+    let mut points: Vec<(i64, f32)> = Vec::new();
     loop {
         match reader.read_event().context("xml")? {
             X::Start(e) => {
-                path.push(e.name().as_ref().to_string());
+                let name = e.name().as_ref().to_string();
+                if name == "Period" {
+                    (start, end, resolution_min) = (None, None, 60);
+                    points.clear();
+                }
+                path.push(name);
                 text.clear();
             }
             X::Text(t) => text = t.xml10_content().into_owned(),
             X::End(_) => {
                 let tag = path.pop().unwrap_or_default();
                 let parent = path.last().map(String::as_str).unwrap_or("");
+                // the document repeats the interval as `period.timeInterval`;
+                // only the one inside a Period dates its points
+                let in_period = path.iter().any(|p| p == "Period");
                 match (parent, tag.as_str()) {
-                    ("timeInterval", "start") => start = parse_utc(&text),
+                    ("timeInterval", "start") if in_period => start = parse_utc(&text),
+                    ("timeInterval", "end") if in_period => end = parse_utc(&text),
                     ("Period", "resolution") => {
                         resolution_min = match text.as_str() {
                             "PT15M" => 15,
@@ -111,11 +130,11 @@ pub fn parse_entsoe(xml: &str) -> Result<Vec<(String, f32)>> {
                     }
                     ("Point", "position") => position = text.trim().parse().unwrap_or(0),
                     ("Point", "price.amount") => {
-                        if let (Some(s), Ok(p)) = (start, text.trim().parse::<f32>()) {
-                            let ts = s + chrono::Duration::minutes((position - 1) * resolution_min);
-                            out.push((ts.to_rfc3339(), p));
+                        if let Ok(p) = text.trim().parse::<f32>() {
+                            points.push((position, p));
                         }
                     }
+                    (_, "Period") => out.extend(fill_period(start, end, resolution_min, &points)),
                     _ => {}
                 }
                 text.clear();
@@ -126,6 +145,38 @@ pub fn parse_entsoe(xml: &str) -> Result<Vec<(String, f32)>> {
     }
     anyhow::ensure!(!out.is_empty(), "no price points in ENTSO-E document");
     Ok(out)
+}
+
+/// One timestamped price per position of a period, carrying prices forward over
+/// the positions the document leaves out.
+fn fill_period(
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+    resolution_min: i64,
+    points: &[(i64, f32)],
+) -> Vec<(String, f32)> {
+    let (Some(s), false) = (start, points.is_empty()) else {
+        return Vec::new();
+    };
+    let last_pos = points.iter().map(|(p, _)| *p).max().unwrap_or(0);
+    let expected = end
+        .map(|e| (e - s).num_minutes() / resolution_min.max(1))
+        .unwrap_or(0);
+    let n = expected.max(last_pos);
+    let mut carried = points
+        .iter()
+        .min_by_key(|(p, _)| *p)
+        .map(|(_, v)| *v)
+        .expect("points is not empty");
+    let mut out = Vec::with_capacity(n.max(0) as usize);
+    for pos in 1..=n {
+        if let Some((_, v)) = points.iter().find(|(p, _)| *p == pos) {
+            carried = *v;
+        }
+        let ts = s + chrono::Duration::minutes((pos - 1) * resolution_min);
+        out.push((ts.to_rfc3339(), carried));
+    }
+    out
 }
 
 /// Bucket timestamped prices into the 24 local hours of `day`, converting to ct/kWh.
@@ -302,6 +353,7 @@ mod tests {
 
     const EZ: &str = include_str!("../tests/fixtures/energyzero.json");
     const ENTSOE: &str = include_str!("../tests/fixtures/entsoe.xml");
+    const ENTSOE_A03: &str = include_str!("../tests/fixtures/entsoe-a03.xml");
 
     #[test]
     fn energyzero_to_local_hours() {
@@ -341,6 +393,26 @@ mod tests {
         assert!(!text.contains("SECRETTOKEN"), "leaked the token: {text}");
         assert!(!text.contains("securityToken"), "leaked the query: {text}");
         assert!(text.contains("entsoe request"), "kept the context: {text}");
+    }
+
+    #[test]
+    fn entsoe_a03_carries_the_missing_positions_forward() {
+        // curveType A03 only publishes a point when the price changes: three
+        // points stand for a whole day
+        let pts = parse_entsoe(ENTSOE_A03).unwrap();
+        assert_eq!(pts.len(), 24, "one point per hour of the interval");
+        let v: Vec<f32> = pts.iter().map(|(_, p)| *p).collect();
+        assert_eq!(&v[0..2], &[85.5, 85.5], "position 2 repeats position 1");
+        assert_eq!(&v[2..9], &[76.4; 7], "3..9 repeat position 3");
+        assert_eq!(&v[9..24], &[-4.25; 15], "10 onwards repeat position 10");
+        // hourly stamps, an hour apart, starting at the period start
+        assert_eq!(pts[0].0, "2026-09-05T22:00:00+00:00");
+        assert_eq!(pts[23].0, "2026-09-06T21:00:00+00:00");
+        let day = NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
+        let ct = hourly_ct_for_day(&pts, day, &chrono_tz::Europe::Amsterdam, false);
+        assert_eq!(ct.iter().filter(|v| v.is_finite()).count(), 24);
+        assert!((ct[0] - 8.55).abs() < 0.01);
+        assert!(ct[23] < 0.0, "the cheap evening stays negative");
     }
 
     #[test]
