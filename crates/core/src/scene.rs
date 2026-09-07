@@ -164,6 +164,15 @@ pub fn badge(cy: f32, stroke: Color, text: String) -> Drawable {
     }
 }
 
+/// The standard badge with another width (for `23 km/h`, `AQI 32`, phase names).
+pub fn badge_w(cy: f32, stroke: Color, text: String, w: f32) -> Drawable {
+    let mut b = badge(cy, stroke, text);
+    if let Drawable::Badge { w: bw, .. } = &mut b {
+        *bw = w;
+    }
+    b
+}
+
 /// A full closed ring of `states.len()` segments.
 pub fn ring(radius: f32, states: Vec<SegState>) -> Drawable {
     let n = states.len();
@@ -438,6 +447,8 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         Role::Price => crate::scene_electricity::price_scene(model, now, model.local_hour()),
         Role::Carbon => crate::scene_electricity::carbon_scene(model, now),
         Role::Renewable => crate::scene_electricity::renewable_scene(model, now),
+        Role::Ups => crate::scene_ups::ups_scene(model, now),
+        Role::Net => crate::scene_net::net_scene(model, now),
         Role::GhActivity
         | Role::Weather
         | Role::Wind
@@ -446,8 +457,6 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         | Role::Sun
         | Role::Moon
         | Role::Iss
-        | Role::Ups
-        | Role::Net
         | Role::Deploys => no_data_scene(now),
     }
 }

@@ -73,6 +73,35 @@ pub struct PriceState {
     pub have: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UpsState {
+    pub on_battery: bool,
+    pub low_battery: bool,
+    pub charge_pct: f32,
+    pub load_pct: f32,
+    pub runtime_secs: u32,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NetState {
+    pub rx_bps: f64,
+    pub tx_bps: f64,
+    pub have: bool,
+}
+
+/// Ring fill for a bit rate: 100 kbit/s is (almost) empty, 1 Gbit/s is full,
+/// four decades in between, and a floor so idle still shows a little.
+pub fn net_fill(bps: f64) -> f32 {
+    if bps <= 0.0 {
+        return 0.03;
+    }
+    (((bps / 1e5).log10() / 4.0) as f32).clamp(0.03, 1.0)
+}
+
+/// Laps per second of the net pulse at full fill (one lap every 6 s).
+const NET_LAPS_PER_SEC: f64 = 1.0 / 6.0;
+
 /// A smoothed share below this is treated as gone: no segment, no icon.
 const SHARE_EPS: f32 = 0.05;
 
@@ -170,6 +199,17 @@ pub struct Model {
     storage_pct: Smooth,
     electricity: ElectricityState,
     prices: PriceState,
+    ups: UpsState,
+    net: NetState,
+    ups_charge: Smooth,
+    ups_load: Smooth,
+    /// Ring fill (0..1) for download and upload, eased.
+    net_rx: Smooth,
+    net_tx: Smooth,
+    /// Position of the travelling pulse on each net ring, in laps (fractional).
+    net_rx_phase: f64,
+    net_tx_phase: f64,
+    net_last_tick: Option<Secs>,
     /// Percent of total production per source, eased.
     shares: HashMap<Source, Smooth>,
     renewable: Smooth,
@@ -242,6 +282,15 @@ impl Model {
             storage_pct: Smooth::new(0.0, SMOOTH_SECS),
             electricity: ElectricityState::default(),
             prices: PriceState::default(),
+            ups: UpsState::default(),
+            net: NetState::default(),
+            ups_charge: Smooth::new(0.0, SMOOTH_SECS),
+            ups_load: Smooth::new(0.0, SMOOTH_SECS),
+            net_rx: Smooth::new(0.03, SMOOTH_SECS),
+            net_tx: Smooth::new(0.03, SMOOTH_SECS),
+            net_rx_phase: 0.0,
+            net_tx_phase: 0.0,
+            net_last_tick: None,
             shares: HashMap::new(),
             renewable: Smooth::new(0.0, SMOOTH_SECS),
             fossil_free: Smooth::new(0.0, SMOOTH_SECS),
@@ -305,6 +354,28 @@ impl Model {
     }
     pub fn prices(&self) -> &PriceState {
         &self.prices
+    }
+    pub fn ups(&self) -> &UpsState {
+        &self.ups
+    }
+    pub fn net(&self) -> &NetState {
+        &self.net
+    }
+    pub fn smooth_ups_charge(&self, now: Secs) -> f32 {
+        self.ups_charge.value(now)
+    }
+    pub fn smooth_ups_load(&self, now: Secs) -> f32 {
+        self.ups_load.value(now)
+    }
+    pub fn smooth_net_rx(&self, now: Secs) -> f32 {
+        self.net_rx.value(now)
+    }
+    pub fn smooth_net_tx(&self, now: Secs) -> f32 {
+        self.net_tx.value(now)
+    }
+    /// Pulse positions (download, upload) in laps, 0..1.
+    pub fn net_phases(&self) -> (f32, f32) {
+        (self.net_rx_phase as f32, self.net_tx_phase as f32)
     }
     /// Eased share of total production for one source, in percent.
     pub fn smooth_share(&self, source: Source, now: Secs) -> f32 {
@@ -460,6 +531,12 @@ impl Model {
             self.reslot_torrents(now);
         }
         self.track_mix_leader(now);
+        let dt = self.net_last_tick.map_or(0.0, |l| (now - l).max(0.0));
+        self.net_last_tick = Some(now);
+        self.net_rx_phase =
+            (self.net_rx_phase + dt * self.net_rx.value(now) as f64 * NET_LAPS_PER_SEC).fract();
+        self.net_tx_phase =
+            (self.net_tx_phase + dt * self.net_tx.value(now) as f64 * NET_LAPS_PER_SEC).fract();
         for req in std::mem::take(&mut self.fx) {
             self.fx_state.apply(req, now);
         }
@@ -809,6 +886,35 @@ impl Model {
                     have: true,
                 };
             }
+            Event::Ups {
+                on_battery,
+                low_battery,
+                charge_pct,
+                load_pct,
+                runtime_secs,
+            } => {
+                self.ups_charge.set(charge_pct, now);
+                self.ups_load.set(load_pct, now);
+                self.ups = UpsState {
+                    on_battery,
+                    low_battery,
+                    charge_pct,
+                    load_pct,
+                    runtime_secs,
+                    have: true,
+                };
+            }
+            Event::UpsOnBattery => self.fx.push(FxRequest::UpsOnBattery),
+            Event::UpsOnline => self.fx.push(FxRequest::UpsOnline),
+            Event::Network { rx_bps, tx_bps } => {
+                self.net_rx.set(net_fill(rx_bps), now);
+                self.net_tx.set(net_fill(tx_bps), now);
+                self.net = NetState {
+                    rx_bps,
+                    tx_bps,
+                    have: true,
+                };
+            }
             Event::Torrents(list) => self.fold_torrents(list, now),
             Event::TorrentAdded { .. } => self.fx.push(FxRequest::TorrentAdded),
             Event::TorrentDone { .. } => self.fx.push(FxRequest::TorrentDone),
@@ -862,10 +968,6 @@ impl Model {
             | Event::GithubMerge { .. }
             | Event::GithubRelease { .. }
             | Event::GithubRun { .. }
-            | Event::Ups { .. }
-            | Event::UpsOnBattery
-            | Event::UpsOnline
-            | Event::Network { .. }
             | Event::Apps(_)
             | Event::AppSynced { .. }
             | Event::AppDegraded { .. }
@@ -1401,6 +1503,61 @@ mod tests {
         assert_eq!(m.unix_now(), 1_788_782_400);
         assert_eq!(m.utc_offset_secs(), 7200);
         assert!(m.location_present() && m.github_token_present());
+    }
+
+    #[test]
+    fn ups_and_network_fold_into_state_and_smooths() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Ups {
+                on_battery: false,
+                low_battery: false,
+                charge_pct: 100.0,
+                load_pct: 6.0,
+                runtime_secs: 3014,
+            },
+            0.0,
+        );
+        assert!(m.ups().have);
+        assert_eq!(m.ups().runtime_secs, 3014);
+        assert_eq!(m.smooth_ups_charge(5.0), 100.0);
+        assert_eq!(m.smooth_ups_load(5.0), 6.0);
+        m.apply(Event::UpsOnBattery, 1.0);
+        assert_eq!(m.pending_fx(), &[FxRequest::UpsOnBattery]);
+        m.apply(Event::UpsOnline, 2.0);
+        assert_eq!(m.pending_fx().last(), Some(&FxRequest::UpsOnline));
+
+        m.apply(
+            Event::Network {
+                rx_bps: 1e7,
+                tx_bps: 1e5,
+            },
+            0.0,
+        );
+        assert!(m.net().have);
+        assert!(
+            (m.smooth_net_rx(5.0) - 0.5).abs() < 1e-6,
+            "10 Mbit is half the log scale"
+        );
+        assert!((m.smooth_net_tx(5.0) - 0.03).abs() < 1e-6, "idle floor");
+        // the pulse phase advances with fill: one lap per 6 s at full fill
+        m.tick(10.0);
+        let (a, _) = m.net_phases();
+        m.tick(13.0);
+        let (b, _) = m.net_phases();
+        assert!(
+            ((b - a).rem_euclid(1.0) - 0.25).abs() < 0.01,
+            "half fill, 3 s = quarter lap"
+        );
+    }
+
+    #[test]
+    fn net_fill_is_a_clamped_log_scale() {
+        assert_eq!(net_fill(0.0), 0.03);
+        assert_eq!(net_fill(1e5), 0.03);
+        assert!((net_fill(1e7) - 0.5).abs() < 1e-6);
+        assert_eq!(net_fill(1e9), 1.0);
+        assert_eq!(net_fill(5e9), 1.0);
     }
 
     fn torrent(name: &str, progress: f32) -> Torrent {

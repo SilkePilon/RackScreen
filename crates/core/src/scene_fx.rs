@@ -166,6 +166,8 @@ impl crate::model::Model {
                 !(link.electricity && self.electricity().have)
             }
             Role::Price => !(link.prices && self.prices().have),
+            Role::Ups => !(link.prom && self.ups().have),
+            Role::Net => !(link.prom && self.net().have),
             Role::GhActivity
             | Role::Weather
             | Role::Wind
@@ -174,8 +176,6 @@ impl crate::model::Model {
             | Role::Sun
             | Role::Moon
             | Role::Iss
-            | Role::Ups
-            | Role::Net
             | Role::Deploys => true,
         }
     }
