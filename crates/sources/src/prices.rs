@@ -24,6 +24,8 @@ pub struct PriceConfig {
     pub tz: Tz,
 }
 
+const ENTSOE_URL: &str = "https://web-api.tp.entsoe.eu/api";
+
 /// ENTSO-E bidding-zone EIC codes for the countries Electricity Maps zones map to directly.
 pub fn entsoe_zone_for(country: &str) -> Option<&'static str> {
     Some(match country.to_ascii_uppercase().as_str() {
@@ -167,6 +169,13 @@ fn day_bounds_utc(day: NaiveDate, tz: Tz) -> (DateTime<Utc>, DateTime<Utc>) {
     (start.with_timezone(&Utc), end.with_timezone(&Utc))
 }
 
+/// A reqwest error prints the URL it came from, and the ENTSO-E URL carries the
+/// security token as a query parameter. Drop the URL before the error reaches a
+/// log line; the context added by the caller says which request failed.
+fn redact(e: reqwest::Error) -> anyhow::Error {
+    anyhow::Error::new(e.without_url())
+}
+
 async fn fetch_day(cfg: &PriceConfig, day: NaiveDate) -> Result<Vec<f32>> {
     let (from, till) = day_bounds_utc(day, cfg.tz);
     match &cfg.source {
@@ -181,11 +190,15 @@ async fn fetch_day(cfg: &PriceConfig, day: NaiveDate) -> Result<Vec<f32>> {
                 .get(&url)
                 .send()
                 .await
+                .map_err(redact)
                 .context("energyzero request")?
                 .error_for_status()
+                .map_err(redact)
                 .context("energyzero status")?
                 .text()
-                .await?;
+                .await
+                .map_err(redact)
+                .context("energyzero body")?;
             Ok(hourly_ct_for_day(
                 &parse_energyzero(&body)?,
                 day,
@@ -194,20 +207,31 @@ async fn fetch_day(cfg: &PriceConfig, day: NaiveDate) -> Result<Vec<f32>> {
             ))
         }
         PriceSource::Entsoe { token, zone } => {
-            let url = format!(
-                "https://web-api.tp.entsoe.eu/api?securityToken={token}&documentType=A44&in_Domain={zone}&out_Domain={zone}&periodStart={}&periodEnd={}",
-                from.format("%Y%m%d%H%M"),
-                till.format("%Y%m%d%H%M")
-            );
+            // the token goes in through `query`, never into a formatted URL we
+            // could accidentally log
+            let period_start = from.format("%Y%m%d%H%M").to_string();
+            let period_end = till.format("%Y%m%d%H%M").to_string();
             let body = client()
-                .get(&url)
+                .get(ENTSOE_URL)
+                .query(&[
+                    ("securityToken", token.as_str()),
+                    ("documentType", "A44"),
+                    ("in_Domain", zone.as_str()),
+                    ("out_Domain", zone.as_str()),
+                    ("periodStart", period_start.as_str()),
+                    ("periodEnd", period_end.as_str()),
+                ])
                 .send()
                 .await
+                .map_err(redact)
                 .context("entsoe request")?
                 .error_for_status()
+                .map_err(redact)
                 .context("entsoe status")?
                 .text()
-                .await?;
+                .await
+                .map_err(redact)
+                .context("entsoe body")?;
             Ok(hourly_ct_for_day(&parse_entsoe(&body)?, day, cfg.tz, false))
         }
     }
@@ -293,6 +317,23 @@ mod tests {
         let ct = hourly_ct_for_day(&pts, day, chrono_tz::Europe::Amsterdam, false);
         assert!((ct[0] - 8.55).abs() < 0.01, "€/MWh to ct/kWh");
         assert!(parse_entsoe("<x/>").is_err());
+    }
+
+    #[tokio::test]
+    async fn request_errors_never_carry_the_token() {
+        // an unroutable port: the request fails before anything is sent
+        let err = client()
+            .get("http://127.0.0.1:1/api")
+            .query(&[("securityToken", "SECRETTOKEN"), ("documentType", "A44")])
+            .send()
+            .await
+            .map_err(redact)
+            .context("entsoe request")
+            .expect_err("connection refused");
+        let text = format!("{err:#} {err:?}");
+        assert!(!text.contains("SECRETTOKEN"), "leaked the token: {text}");
+        assert!(!text.contains("securityToken"), "leaked the query: {text}");
+        assert!(text.contains("entsoe request"), "kept the context: {text}");
     }
 
     #[test]
