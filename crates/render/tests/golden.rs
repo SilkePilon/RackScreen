@@ -211,6 +211,49 @@ fn torrent_mode() {
     check("torrent", &px);
 }
 
+/// The outer ring unwinding after its torrent finished, with the other two
+/// holding their slots until it is gone.
+#[test]
+fn torrent_unwind() {
+    let mut m = ready_model();
+    m.apply(
+        Event::Link {
+            target: LinkTarget::QBittorrent,
+            up: true,
+        },
+        0.0,
+    );
+    let rest = vec![
+        Torrent {
+            name: "b".into(),
+            progress: 41.0,
+            eta_secs: 3000,
+            speed_bps: 3_000_000,
+        },
+        Torrent {
+            name: "c".into(),
+            progress: 12.0,
+            eta_secs: 9000,
+            speed_bps: 1_000_000,
+        },
+    ];
+    let mut all = vec![Torrent {
+        name: "a".into(),
+        progress: 78.0,
+        eta_secs: 900,
+        speed_bps: 9_000_000,
+    }];
+    all.extend(rest.iter().cloned());
+    m.apply(Event::Torrents(all), 0.0);
+    m.tick(1.0);
+    m.apply(Event::Torrents(rest), 1.0);
+    m.tick(1.3);
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Health, 1.3), &mut px);
+    check("torrent_unwind", &px);
+}
+
 fn temps_model() -> Model {
     let mut m = ready_model();
     m.apply(

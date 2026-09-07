@@ -7,7 +7,7 @@ use crate::electricity::{partition, Section, Source};
 use crate::event::{Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::screens::ScreenState;
-use crate::theme::layout::SEG_N;
+use crate::theme::layout::{SEG_N, TORRENT_RADII};
 use crate::theme::Role;
 
 pub const SMOOTH_SECS: Secs = 0.8;
@@ -69,6 +69,27 @@ pub struct PriceState {
 
 /// A smoothed share below this is treated as gone: no segment, no icon.
 const SHARE_EPS: f32 = 0.05;
+
+/// An unwinding torrent ring below this percent is finished and is dropped.
+const TORRENT_GONE_PCT: f32 = 0.5;
+/// How long a torrent ring takes to slide to another radius slot.
+const TORRENT_SLOT_SECS: Secs = 0.4;
+
+/// One animated torrent ring: eased progress and radius, plus the values last
+/// reported for it so the badge can keep summarising a ring that is unwinding.
+#[derive(Clone, Debug)]
+struct TorrentAnim {
+    /// Torrent name: the identity that survives across updates.
+    name: String,
+    progress: Smooth,
+    radius: Smooth,
+    /// Index into `TORRENT_RADII`, or `None` while the entry waits for a slot.
+    slot: Option<usize>,
+    /// The torrent is gone from qBittorrent; its ring is unwinding to zero.
+    leaving: bool,
+    /// The last values reported, for the badge once the live list is empty.
+    last: Torrent,
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClusterState {
@@ -150,6 +171,8 @@ pub struct Model {
     night_override: Option<bool>,
     fx: Vec<FxRequest>,
     fx_state: Fx,
+    /// One animated ring per torrent, alive until its ring has unwound.
+    torrent_anims: Vec<TorrentAnim>,
     /// One entry per physical screen, top to bottom.
     screens: Vec<ScreenState>,
     seen_api_up: bool,
@@ -191,6 +214,7 @@ impl Model {
             night_override: None,
             fx: Vec::new(),
             fx_state: Fx::default(),
+            torrent_anims: Vec::new(),
             screens: [Role::Cpu, Role::Mem, Role::Pods, Role::Health]
                 .into_iter()
                 .map(|r| ScreenState::new(vec![r], DEFAULT_CYCLE_SECS))
@@ -334,6 +358,13 @@ impl Model {
         // sources that left the mix ease to zero, then stop costing anything
         self.shares
             .retain(|_, sm| sm.target() > 0.0 || sm.value(now) >= SHARE_EPS);
+        // rings that have finished unwinding leave, and the rest close ranks
+        let before = self.torrent_anims.len();
+        self.torrent_anims
+            .retain(|a| !a.leaving || a.progress.value(now) >= TORRENT_GONE_PCT);
+        if self.torrent_anims.len() != before {
+            self.reslot_torrents(now);
+        }
         self.track_mix_leader(now);
         for req in std::mem::take(&mut self.fx) {
             self.fx_state.apply(req, now);
@@ -379,8 +410,133 @@ impl Model {
         s.have_nodes && s.nodes_total > 0 && s.nodes_ready == s.nodes_total && s.alerts.is_empty()
     }
 
+    /// True while HEALTH shows torrent rings: a healthy cluster, qBittorrent up
+    /// and at least one ring left on screen. A ring that is only unwinding still
+    /// counts, so the last torrent plays out before the heart comes back.
     pub fn torrent_mode(&self) -> bool {
-        self.all_healthy() && self.link.qbit && !self.state.torrents.is_empty()
+        self.all_healthy() && self.link.qbit && !self.torrent_anims.is_empty()
+    }
+
+    /// The torrent rings to draw, outermost first: radius, eased progress in
+    /// percent and the index into the accent palette.
+    pub fn torrent_rings(&self, now: Secs) -> Vec<(f32, f32, usize)> {
+        let mut out: Vec<(f32, f32, usize)> = self
+            .torrent_anims
+            .iter()
+            .filter_map(|a| {
+                a.slot
+                    .map(|slot| (a.radius.value(now), a.progress.value(now), slot))
+            })
+            .collect();
+        out.sort_by_key(|(_, _, slot)| *slot);
+        out
+    }
+
+    /// The torrents the HEALTH badge summarises: the live list, or the last
+    /// known values of the entries that are still unwinding once it is empty.
+    pub fn torrent_badge_list(&self) -> Vec<&Torrent> {
+        if !self.state.torrents.is_empty() {
+            return self.state.torrents.iter().collect();
+        }
+        self.torrent_anims.iter().map(|a| &a.last).collect()
+    }
+
+    /// Fold a torrent list into the animated entries: retarget the ones still
+    /// there, sweep new ones in from zero and unwind the ones that vanished.
+    fn fold_torrents(&mut self, list: Vec<Torrent>, now: Secs) {
+        for t in &list {
+            match self.torrent_anims.iter_mut().find(|a| a.name == t.name) {
+                Some(a) => {
+                    a.leaving = false;
+                    a.progress.set(t.progress, now);
+                    a.last = t.clone();
+                }
+                None => {
+                    let mut progress = Smooth::new(0.0, SMOOTH_SECS);
+                    progress.set(t.progress, now);
+                    self.torrent_anims.push(TorrentAnim {
+                        name: t.name.clone(),
+                        progress,
+                        radius: Smooth::new(0.0, TORRENT_SLOT_SECS),
+                        slot: None,
+                        leaving: false,
+                        last: t.clone(),
+                    });
+                }
+            }
+        }
+        for a in self.torrent_anims.iter_mut() {
+            if !a.leaving && !list.iter().any(|t| t.name == a.name) {
+                a.leaving = true;
+                a.progress.set(0.0, now);
+            }
+        }
+        self.state.torrents = list;
+        self.reslot_torrents(now);
+    }
+
+    /// Hand out radius slots. While anything is unwinding the entries on screen
+    /// keep the slot they have and only free slots are handed out; otherwise the
+    /// three most complete torrents take the slots from the outside in.
+    fn reslot_torrents(&mut self, now: Secs) {
+        let mut want: Vec<Option<usize>> = self.torrent_anims.iter().map(|a| a.slot).collect();
+        if self.torrent_anims.iter().any(|a| a.leaving) {
+            let mut taken = [false; TORRENT_RADII.len()];
+            for slot in want.iter().flatten() {
+                taken[*slot] = true;
+            }
+            for i in self.torrents_by_progress() {
+                if want[i].is_some() {
+                    continue;
+                }
+                if let Some(free) = taken.iter().position(|t| !t) {
+                    taken[free] = true;
+                    want[i] = Some(free);
+                }
+            }
+        } else {
+            want = vec![None; self.torrent_anims.len()];
+            for (slot, i) in self
+                .torrents_by_progress()
+                .into_iter()
+                .take(TORRENT_RADII.len())
+                .enumerate()
+            {
+                want[i] = Some(slot);
+            }
+        }
+        for (i, slot) in want.into_iter().enumerate() {
+            let a = &mut self.torrent_anims[i];
+            match (a.slot, slot) {
+                (_, None) => a.slot = None,
+                (Some(prev), Some(next)) if prev == next => {}
+                (Some(_), Some(next)) => {
+                    a.radius.set(TORRENT_RADII[next], now);
+                    a.slot = Some(next);
+                }
+                // A ring nobody has seen yet starts at its slot instead of
+                // sliding in from wherever the entry was last drawn.
+                (None, Some(next)) => {
+                    a.radius = Smooth::new(TORRENT_RADII[next], TORRENT_SLOT_SECS);
+                    a.slot = Some(next);
+                }
+            }
+        }
+    }
+
+    /// Entry indices by target progress, most complete first. The name breaks
+    /// ties so the ring order never depends on the order of an update.
+    fn torrents_by_progress(&self) -> Vec<usize> {
+        let mut idx: Vec<usize> = (0..self.torrent_anims.len()).collect();
+        idx.sort_by(|&a, &b| {
+            let (a, b) = (&self.torrent_anims[a], &self.torrent_anims[b]);
+            b.progress
+                .target()
+                .partial_cmp(&a.progress.target())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        idx
     }
 
     pub fn apply(&mut self, ev: Event, now: Secs) {
@@ -534,7 +690,7 @@ impl Model {
                     have: true,
                 };
             }
-            Event::Torrents(list) => self.state.torrents = list,
+            Event::Torrents(list) => self.fold_torrents(list, now),
             Event::TorrentAdded { .. } => self.fx.push(FxRequest::TorrentAdded),
             Event::TorrentDone { .. } => self.fx.push(FxRequest::TorrentDone),
             Event::Link { target, up } => match target {
@@ -1015,6 +1171,143 @@ mod tests {
         assert_eq!(m.local_hour(), 14);
         m.set_local_hour(99);
         assert_eq!(m.local_hour(), 23, "clamped into the day");
+    }
+
+    fn torrent(name: &str, progress: f32) -> Torrent {
+        Torrent {
+            name: name.into(),
+            progress,
+            eta_secs: 600,
+            speed_bps: 1_000_000,
+        }
+    }
+
+    /// A model in torrent mode with the given list applied at `now = 0`.
+    fn torrenting(list: Vec<Torrent>) -> Model {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 3,
+                not_ready: vec![],
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Link {
+                target: LinkTarget::QBittorrent,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(Event::Torrents(list), 0.0);
+        m
+    }
+
+    #[test]
+    fn new_torrent_ring_sweeps_in_from_zero() {
+        let m = torrenting(vec![torrent("a", 80.0)]);
+        let rings = m.torrent_rings(0.0);
+        assert_eq!(rings.len(), 1);
+        assert_eq!(rings[0].0, 102.0, "outermost slot");
+        assert_eq!(rings[0].1, 0.0, "empty at the arrival instant");
+        assert_eq!(rings[0].2, 0);
+        let mid = m.torrent_rings(0.2)[0].1;
+        assert!(mid > 0.0 && mid < 80.0, "sweeping, got {mid}");
+        assert!((m.torrent_rings(1.0)[0].1 - 80.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn removed_torrent_unwinds_then_leaves() {
+        let mut m = torrenting(vec![torrent("a", 80.0)]);
+        m.tick(1.0);
+        m.apply(Event::Torrents(vec![]), 1.0);
+        let a = m.torrent_rings(1.2)[0].1;
+        let b = m.torrent_rings(1.4)[0].1;
+        assert!(a < 80.0 && b < a, "unwinding: {a} then {b}");
+        m.tick(1.2);
+        assert!(m.torrent_mode(), "the ring is still on screen");
+        assert_eq!(m.torrent_rings(1.2).len(), 1);
+        m.tick(1.7);
+        assert!(!m.torrent_mode(), "the ring finished unwinding");
+        assert!(m.torrent_rings(1.7).is_empty());
+    }
+
+    #[test]
+    fn remaining_ring_eases_to_the_freed_slot() {
+        let mut m = torrenting(vec![torrent("a", 80.0), torrent("b", 40.0)]);
+        m.tick(1.0);
+        assert_eq!(m.torrent_rings(1.0)[1].0, 86.0, "b starts one slot in");
+        m.apply(Event::Torrents(vec![torrent("b", 40.0)]), 1.0);
+        assert_eq!(
+            m.torrent_rings(1.3)[1].0,
+            86.0,
+            "b holds its slot while a unwinds"
+        );
+        m.tick(1.7);
+        let rings = m.torrent_rings(1.9);
+        assert_eq!(rings.len(), 1);
+        assert!(
+            rings[0].0 > 86.0 && rings[0].0 < 102.0,
+            "b is easing outward, got {}",
+            rings[0].0
+        );
+        assert!((m.torrent_rings(2.2)[0].0 - 102.0).abs() < 1e-4);
+        assert_eq!(m.torrent_rings(2.2)[0].2, 0, "and takes the outer accent");
+    }
+
+    #[test]
+    fn badge_falls_back_to_the_last_values_while_unwinding() {
+        let mut m = torrenting(vec![torrent("a", 80.0)]);
+        m.apply(Event::Torrents(vec![]), 1.0);
+        assert!(m.state().torrents.is_empty());
+        let list = m.torrent_badge_list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].speed_bps, 1_000_000);
+    }
+
+    #[test]
+    fn only_three_torrents_get_a_ring() {
+        let m = torrenting(vec![
+            torrent("a", 10.0),
+            torrent("b", 90.0),
+            torrent("c", 50.0),
+            torrent("d", 70.0),
+        ]);
+        let rings = m.torrent_rings(2.0);
+        assert_eq!(rings.len(), 3);
+        let pcts: Vec<f32> = rings.iter().map(|r| r.1.round()).collect();
+        assert_eq!(pcts, vec![90.0, 70.0, 50.0], "most complete outermost");
+    }
+
+    /// Churn like the fake source's `t` / `6` keys, one frame at a time: the
+    /// slot bookkeeping must never index out of range or draw a fourth ring.
+    #[test]
+    fn torrent_churn_keeps_at_most_three_rings() {
+        let mut m = torrenting(vec![torrent("a", 78.0), torrent("b", 41.0)]);
+        let names = ["a", "b", "c", "d"];
+        let mut now = 0.0;
+        for frame in 0..600 {
+            now += 1.0 / 30.0;
+            if frame % 47 == 0 {
+                let keep = (frame / 47) % 5;
+                let list = names
+                    .iter()
+                    .take(keep)
+                    .enumerate()
+                    .map(|(i, n)| torrent(n, 10.0 + i as f32 * 25.0))
+                    .collect();
+                m.apply(Event::Torrents(list), now);
+            }
+            m.tick(now);
+            let rings = m.torrent_rings(now);
+            assert!(rings.len() <= 3, "frame {frame}: {} rings", rings.len());
+            for (radius, progress, accent) in rings {
+                assert!((70.0..=102.0).contains(&radius), "radius {radius}");
+                assert!((-0.01..=100.01).contains(&progress), "progress {progress}");
+                assert!(accent < 3);
+            }
+        }
     }
 
     #[test]

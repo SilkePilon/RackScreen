@@ -1,7 +1,6 @@
 //! Pure scene description: what to draw on one screen at one instant.
 
 use crate::anim::{breathe, pulse, Secs};
-use crate::event::Torrent;
 use crate::format::{fmt_eta, fmt_speed};
 use crate::model::Model;
 use crate::theme::layout::*;
@@ -381,7 +380,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         }
         Role::Health => {
             if model.torrent_mode() {
-                return torrent_scene(&model.state().torrents, now);
+                return torrent_scene(model, now);
             }
             let st = model.state();
             let mut s = Scene::new();
@@ -444,19 +443,19 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
 
 const TORRENT_ACCENTS: [Color; 3] = [GREEN, BLUE, VIOLET];
 
-pub fn torrent_scene(torrents: &[Torrent], now: Secs) -> Scene {
-    let mut sorted: Vec<&Torrent> = torrents.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.progress
-            .partial_cmp(&a.progress)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+/// The torrent rings, drawn from the model's animated entries so they sweep in
+/// when a download starts and unwind when it stops.
+pub fn torrent_scene(model: &Model, now: Secs) -> Scene {
     let mut s = Scene::new();
-    for (i, t) in sorted.iter().take(3).enumerate() {
-        let r = TORRENT_RADII[i];
+    for (radius, progress, accent) in model.torrent_rings(now) {
         s.push(ring(
-            r,
-            ring_states(t.progress, TORRENT_ACCENTS[i], seg_count(r), now),
+            radius,
+            ring_states(
+                progress,
+                TORRENT_ACCENTS[accent.min(TORRENT_ACCENTS.len() - 1)],
+                seg_count(radius),
+                now,
+            ),
         ));
     }
     let mut ic = icon_at("download", TORRENT_ICON_CY, TORRENT_ICON_SIZE, WHITE, 1.0);
@@ -464,12 +463,13 @@ pub fn torrent_scene(torrents: &[Torrent], now: Secs) -> Scene {
         *dy = -2.0 + 4.0 * pulse(now, 1.6);
     }
     s.push(ic);
+    let live = model.torrent_badge_list();
     let window = (now / 5.0).floor();
     let frac = now - window * 5.0;
     let text = if (window as i64) % 2 == 0 {
-        fmt_speed(sorted.iter().map(|t| t.speed_bps).sum())
+        fmt_speed(live.iter().map(|t| t.speed_bps).sum())
     } else {
-        let eta = sorted
+        let eta = live
             .iter()
             .map(|t| t.eta_secs)
             .filter(|e| (0..864_000).contains(e))
@@ -528,7 +528,7 @@ pub fn no_data_scene_with(now: Secs, icon: &'static str) -> Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{Event, LinkTarget};
+    use crate::event::{Event, LinkTarget, Torrent};
     use crate::model::Thresholds;
 
     #[test]
@@ -708,7 +708,8 @@ mod tests {
             ]),
             0.0,
         );
-        let s = role_scene(&m, Role::Health, 0.0);
+        // the rings sweep in from empty, so read them once the sweep has settled
+        let s = role_scene(&m, Role::Health, 1.0);
         let rings: Vec<_> = s
             .items
             .iter()
@@ -719,6 +720,11 @@ mod tests {
             assert_eq!(*radius, 102.0);
         }
         assert_eq!(s.lit_count(), 54, "outer ring is the 90% torrent");
+        assert_eq!(
+            role_scene(&m, Role::Health, 0.0).lit_count(),
+            0,
+            "at the arrival instant both rings are still empty"
+        );
         let text = s.items.iter().find_map(|d| match d {
             Drawable::Badge { text, .. } => Some(text.clone()),
             _ => None,
