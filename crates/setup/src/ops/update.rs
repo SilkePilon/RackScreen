@@ -94,7 +94,8 @@ pub fn parse_sha256_file(text: &str) -> Option<String> {
     }
 }
 
-pub fn verify_sha256(path: &Path, hex: &str) -> Result<bool> {
+/// The lowercase hex sha256 of a file's contents.
+pub fn sha256_hex(path: &Path) -> Result<String> {
     let mut file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 64 * 1024];
@@ -107,12 +108,15 @@ pub fn verify_sha256(path: &Path, hex: &str) -> Result<bool> {
         }
         hasher.update(&buf[..n]);
     }
-    let got = hasher
+    Ok(hasher
         .finalize()
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    Ok(got == hex.trim().to_ascii_lowercase())
+        .collect::<String>())
+}
+
+pub fn verify_sha256(path: &Path, hex: &str) -> Result<bool> {
+    Ok(sha256_hex(path)? == hex.trim().to_ascii_lowercase())
 }
 
 /// Only aarch64 machines with the binary already in place can self-update; everything else
@@ -377,8 +381,23 @@ impl Updater {
                 ));
             }
             Some(url) => {
-                let checked = verify_asset(url, &tmp);
-                self.report_or_clean(events, StepId::Verify, &tmp, checked.map(|n| ((), Some(n))))?;
+                let actual_hex = self.report_or_clean(
+                    events,
+                    StepId::Verify,
+                    &tmp,
+                    sha256_hex(&tmp).map(|h| (h, None)),
+                )?;
+                let sha_result = fetch_text(url).map(|text| parse_sha256_file(&text));
+                let outcome = verify_outcome(sha_result, &actual_hex);
+                let failed = matches!(outcome, Outcome::Failed(_));
+                let _ = events.send(Event::Finished(StepId::Verify, outcome.clone()));
+                if failed {
+                    let _ = std::fs::remove_file(&tmp);
+                    let Outcome::Failed(msg) = outcome else {
+                        unreachable!()
+                    };
+                    bail!("{msg}");
+                }
             }
         }
 
@@ -420,13 +439,19 @@ impl Updater {
     }
 }
 
-fn verify_asset(url: &str, file: &Path) -> Result<String> {
-    let text = fetch_text(url)?;
-    let hex = parse_sha256_file(&text).context("checksum file has no sha256")?;
-    if !verify_sha256(file, &hex)? {
-        bail!("checksum mismatch, download discarded");
+/// Decide the Verify step's outcome from the `.sha256` fetch and the actual hash of the
+/// downloaded file. `sha_result` is `Err` when *fetching* the checksum asset failed
+/// (network error) and `Ok(None)` when it fetched but had no parseable digest; both are
+/// treated the same as a release with no checksum asset at all — warn and keep the binary.
+/// Only an actual digest mismatch is a real failure.
+fn verify_outcome(sha_result: Result<Option<String>>, actual_hex: &str) -> Outcome {
+    match sha_result {
+        Err(_) | Ok(None) => Outcome::Warn("checksum unavailable, installed unverified".into()),
+        Ok(Some(hex)) if hex.eq_ignore_ascii_case(actual_hex) => {
+            Outcome::Done(format!("sha256 {}…", &hex[..12]))
+        }
+        Ok(Some(_)) => Outcome::Failed("checksum mismatch, download discarded".into()),
     }
-    Ok(format!("sha256 {}…", &hex[..12]))
 }
 
 /// Send `Finished` for a step; `None` as the note means the caller reports it itself.
@@ -620,6 +645,31 @@ mod tests {
         assert!(!tmp.exists());
         let mode = std::fs::metadata(&dest).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[test]
+    fn verify_outcome_only_fails_on_a_real_mismatch() {
+        let hex = "a".repeat(64);
+        // A matching digest is a plain success.
+        assert_eq!(
+            verify_outcome(Ok(Some(hex.clone())), &hex),
+            Outcome::Done(format!("sha256 {}…", &hex[..12]))
+        );
+        // A real mismatch is the only case that fails the step.
+        assert_eq!(
+            verify_outcome(Ok(Some("b".repeat(64))), &hex),
+            Outcome::Failed("checksum mismatch, download discarded".into())
+        );
+        // A network error fetching the checksum asset just warns and keeps the binary.
+        assert_eq!(
+            verify_outcome(Err(anyhow::anyhow!("network error")), &hex),
+            Outcome::Warn("checksum unavailable, installed unverified".into())
+        );
+        // A fetched-but-unparseable checksum file is treated the same way.
+        assert_eq!(
+            verify_outcome(Ok(None), &hex),
+            Outcome::Warn("checksum unavailable, installed unverified".into())
+        );
     }
 
     #[test]

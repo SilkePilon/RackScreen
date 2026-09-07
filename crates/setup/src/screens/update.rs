@@ -1,5 +1,6 @@
 //! Update screen: downloads the latest release on a worker thread, then offers a relaunch.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
@@ -33,6 +34,7 @@ pub struct Update {
     progress: Slide,
     download: Option<(u64, u64)>,
     binary: PathBuf,
+    argv: Vec<OsString>,
     error: Option<String>,
 }
 
@@ -57,6 +59,7 @@ impl Update {
             progress: Slide::fixed(0.0),
             download: None,
             binary,
+            argv: std::env::args_os().skip(1).collect(),
             error: None,
         }
     }
@@ -71,6 +74,7 @@ impl Update {
             progress: Slide::fixed(0.4),
             download,
             binary: Paths::system().binary(),
+            argv: vec!["setup".into()],
             error: None,
         }
     }
@@ -90,7 +94,9 @@ impl Update {
     fn relaunch(&mut self, shared: &mut Shared) -> Action {
         use std::os::unix::process::CommandExt;
         ratatui::restore();
-        let err = std::process::Command::new(&self.binary).arg("setup").exec();
+        let err = std::process::Command::new(&self.binary)
+            .args(relaunch_args(&self.argv))
+            .exec();
         // `exec` only returns on failure: take the terminal back and stay put.
         let _ = ratatui::try_init();
         shared.redraw = true;
@@ -99,6 +105,17 @@ impl Update {
             self.binary.display()
         ));
         Action::None
+    }
+}
+
+/// The argv to relaunch the new binary with: the original CLI args, so `--config` and
+/// `--sim` survive the swap. Bare `rackscreen` (no args) becomes `setup`, and any other
+/// subcommand (notably `update`, so a CLI update never loops back into `update`) is
+/// replaced with `setup` too, since the original invocation was not the setup UI.
+fn relaunch_args(original: &[OsString]) -> Vec<OsString> {
+    match original.first().and_then(|a| a.to_str()) {
+        Some("setup") => original.to_vec(),
+        _ => vec![OsString::from("setup")],
     }
 }
 
@@ -257,6 +274,22 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(74, 16)).unwrap();
         term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
         term.backend().to_string()
+    }
+
+    fn osv(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn relaunch_args_keeps_setup_invocations_and_replaces_everything_else() {
+        assert_eq!(relaunch_args(&osv(&[])), osv(&["setup"]));
+        assert_eq!(
+            relaunch_args(&osv(&["setup", "--sim", "--config", "/x"])),
+            osv(&["setup", "--sim", "--config", "/x"])
+        );
+        // A CLI `update` re-exec must not loop back into `update`.
+        assert_eq!(relaunch_args(&osv(&["update"])), osv(&["setup"]));
+        assert_eq!(relaunch_args(&osv(&["run"])), osv(&["setup"]));
     }
 
     #[test]
