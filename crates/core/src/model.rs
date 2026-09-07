@@ -14,6 +14,8 @@ pub const SMOOTH_SECS: Secs = 0.8;
 const HOT_DEBOUNCE_SECS: Secs = 300.0;
 /// Dwell per role on a cycling screen when the caller gives none.
 pub const DEFAULT_CYCLE_SECS: Secs = 15.0;
+/// Seed the transition picker starts from; `set_rng_seed` replaces it per boot.
+const RNG_SEED: u64 = 0x2545_F491_4F6C_DD1D;
 /// Extra first dwell per screen index, so equal dwells do not iris together.
 /// Shrunk when the dwell is too short to spread every screen over one cycle.
 pub const SCREEN_STAGGER_SECS: Secs = 2.5;
@@ -175,6 +177,14 @@ pub struct Model {
     torrent_anims: Vec<TorrentAnim>,
     /// One entry per physical screen, top to bottom.
     screens: Vec<ScreenState>,
+    /// Only one screen may iris at a time, in random order: simultaneous
+    /// transitions on the Pi make four displays fight over one SPI bus.
+    one_at_a_time: bool,
+    /// While serialising: the instant the next transition may start, i.e. the
+    /// end of the last one plus `TRANSITION_GAP_SECS`.
+    transition_free_at: Secs,
+    /// xorshift64 state, for picking which waiting screen goes next.
+    rng: u64,
     seen_api_up: bool,
     /// A `Boot` that arrived while the API link was down; it plays on first connect
     /// so the sweep is not aged out behind the connecting scene.
@@ -219,6 +229,9 @@ impl Model {
                 .into_iter()
                 .map(|r| ScreenState::new(vec![r], DEFAULT_CYCLE_SECS))
                 .collect(),
+            one_at_a_time: false,
+            transition_free_at: 0.0,
+            rng: RNG_SEED,
             seen_api_up: false,
             boot_pending: false,
         }
@@ -352,6 +365,27 @@ impl Model {
         self.screens.get(screen)
     }
 
+    /// Serialise iris transitions: at most one screen at a time, the next one
+    /// picked at random from those whose dwell has elapsed.
+    pub fn set_one_at_a_time(&mut self, on: bool) {
+        self.one_at_a_time = on;
+    }
+
+    /// Reseed the picker (zero is bumped, xorshift dies on it).
+    pub fn set_rng_seed(&mut self, seed: u64) {
+        self.rng = if seed == 0 { RNG_SEED } else { seed };
+    }
+
+    /// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
+    fn next_rand(&mut self) -> u64 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        x
+    }
+
     /// Drain animation requests into the queues and advance them, then advance
     /// each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
@@ -372,13 +406,38 @@ impl Model {
         let screens = self.screens.len();
         self.fx_state.tick(now, screens);
         let sweep_active = self.fx_state.sweeps.active().is_some();
-        for s in &mut self.screens {
+        let mut waiting: Vec<usize> = Vec::new();
+        for (i, s) in self.screens.iter_mut().enumerate() {
             let busy = sweep_active
                 || self.fx_state.splashes[s.current().index()]
                     .active()
                     .is_some();
-            s.tick(now, busy);
+            if self.one_at_a_time {
+                // Finish a running iris; starting one is the slot holder's call.
+                s.advance(now);
+                if s.ready_to_transition(now, busy) {
+                    waiting.push(i);
+                }
+            } else {
+                s.tick(now, busy);
+            }
         }
+        self.start_one_transition(now, &waiting);
+    }
+
+    /// Hand the free transition slot to a random waiting screen. The others keep
+    /// their elapsed dwell, so they take the following slots and none starves.
+    fn start_one_transition(&mut self, now: Secs, waiting: &[usize]) {
+        if waiting.is_empty()
+            || now < self.transition_free_at
+            || self.screens.iter().any(|s| s.transitioning())
+        {
+            return;
+        }
+        let i = waiting[(self.next_rand() % waiting.len() as u64) as usize];
+        self.screens[i].start_transition(now);
+        self.transition_free_at =
+            now + crate::screens::TRANSITION_SECS + crate::screens::TRANSITION_GAP_SECS;
     }
 
     /// When the drawn partition gets a new leader, `partition` moves that
@@ -1019,6 +1078,79 @@ mod tests {
         for k in 0..3 {
             assert!(short.screen(k).unwrap().transition(0.0).is_none());
         }
+    }
+
+    /// Two cycling screens with the same 3 s dwell and no stagger, so both want
+    /// to iris on the very same tick: the case serialisation exists for.
+    fn two_cycling_screens(one_at_a_time: bool) -> Model {
+        let mut m = Model::new(Thresholds::default());
+        let roles = vec![Role::Cpu, Role::Mem];
+        m.set_screens(vec![roles.clone(), roles], vec![3.0; 2]);
+        for s in &mut m.screens {
+            s.set_since(0.0);
+        }
+        m.set_one_at_a_time(one_at_a_time);
+        m
+    }
+
+    /// Tick at 30 Hz for `secs` and return `(screen, time)` for every iris that
+    /// started. With `exclusive`, assert no two screens are ever irising together.
+    fn run_transitions(m: &mut Model, secs: Secs, exclusive: bool) -> Vec<(usize, Secs)> {
+        let mut was_on = vec![false; m.screen_count()];
+        let mut starts = Vec::new();
+        for i in 0..(secs * 30.0) as usize {
+            let now = i as Secs / 30.0;
+            m.tick(now);
+            let mut live = 0;
+            for (k, was) in was_on.iter_mut().enumerate() {
+                let on = m.screen(k).unwrap().transition(now).is_some();
+                live += on as usize;
+                if on && !*was {
+                    starts.push((k, now));
+                }
+                *was = on;
+            }
+            assert!(!exclusive || live <= 1, "{live} screens irising at {now}");
+        }
+        starts
+    }
+
+    #[test]
+    fn one_at_a_time_serialises_transitions_with_a_gap() {
+        let mut m = two_cycling_screens(true);
+        let starts = run_transitions(&mut m, 10.0, true);
+        assert!(starts.iter().any(|(k, _)| *k == 0), "screen 0 got a turn");
+        assert!(starts.iter().any(|(k, _)| *k == 1), "screen 1 got a turn");
+        for w in starts.windows(2) {
+            let gap = w[1].1 - w[0].1 - crate::screens::TRANSITION_SECS;
+            assert!(
+                gap >= crate::screens::TRANSITION_GAP_SECS - 1e-9,
+                "{gap} s between {:?} and {:?}",
+                w[0],
+                w[1]
+            );
+        }
+    }
+
+    #[test]
+    fn without_one_at_a_time_screens_iris_together() {
+        let mut m = two_cycling_screens(false);
+        let starts = run_transitions(&mut m, 4.0, false);
+        assert_eq!(starts.len(), 2, "both screens, got {starts:?}");
+        assert_ne!(starts[0].0, starts[1].0);
+        assert_eq!(starts[0].1, starts[1].1, "same tick, as before");
+    }
+
+    #[test]
+    fn the_waiting_screen_is_picked_at_random() {
+        let mut seen = [false; 2];
+        for seed in 0..200u64 {
+            let mut m = two_cycling_screens(true);
+            m.set_rng_seed(seed);
+            let starts = run_transitions(&mut m, 4.0, true);
+            seen[starts.first().expect("one screen went first").0] = true;
+        }
+        assert_eq!(seen, [true, true], "both screens win the draw sometimes");
     }
 
     #[test]

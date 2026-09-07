@@ -4,6 +4,9 @@ use crate::anim::{Easing, Secs};
 use crate::theme::Role;
 
 pub const TRANSITION_SECS: Secs = 0.5;
+/// Quiet time between two serialised transitions, so the SPI bus is idle for a
+/// moment before the next screen starts pushing full frames again.
+pub const TRANSITION_GAP_SECS: Secs = 0.5;
 pub const MIN_CYCLE_SECS: Secs = 3.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,23 +70,51 @@ impl ScreenState {
     /// Advance timers. `busy` = a splash or sweep is active on this screen; the
     /// transition is postponed while busy.
     pub fn tick(&mut self, now: Secs, busy: bool) {
+        self.advance(now);
+        if self.ready_to_transition(now, busy) {
+            self.start_transition(now);
+        }
+    }
+
+    /// Finish a running transition once its time is up; never start one. The
+    /// caller that serialises transitions drives screens with this plus
+    /// `ready_to_transition`/`start_transition`.
+    pub fn advance(&mut self, now: Secs) {
         if self.roles.len() < 2 {
             return;
         }
-        match self.transition_started {
-            Some(t0) => {
-                if now - t0 >= TRANSITION_SECS {
-                    self.current = (self.current + 1) % self.roles.len();
-                    self.since = now;
-                    self.transition_started = None;
-                }
-            }
-            None => {
-                if !busy && now - self.since >= self.cycle_secs {
-                    self.transition_started = Some(now);
-                }
+        if let Some(t0) = self.transition_started {
+            if now - t0 >= TRANSITION_SECS {
+                self.current = (self.current + 1) % self.roles.len();
+                self.since = now;
+                self.transition_started = None;
             }
         }
+    }
+
+    /// The dwell has elapsed and nothing is in the way, so this screen would
+    /// iris now if it were allowed to.
+    pub fn ready_to_transition(&self, now: Secs, busy: bool) -> bool {
+        self.roles.len() >= 2
+            && self.transition_started.is_none()
+            && !busy
+            && now - self.since >= self.cycle_secs
+    }
+
+    /// Begin the iris. Ignored for a static screen or one already transitioning.
+    pub fn start_transition(&mut self, now: Secs) {
+        if self.roles.len() >= 2 && self.transition_started.is_none() {
+            self.transition_started = Some(now);
+        }
+    }
+
+    pub fn transitioning(&self) -> bool {
+        self.transition_started.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_since(&mut self, since: Secs) {
+        self.since = since;
     }
 
     pub fn transition(&self, now: Secs) -> Option<Transition> {
