@@ -64,6 +64,35 @@ pub fn parse_carbon(json: &str) -> Result<f32> {
         .context("carbonIntensity missing")
 }
 
+/// A non-2xx answer from Electricity Maps, kept typed so the poller can tell a
+/// rejected token from a network hiccup.
+#[derive(Debug, thiserror::Error)]
+#[error("electricity maps HTTP {status}: {body}")]
+pub struct HttpStatus {
+    pub status: u16,
+    pub body: String,
+}
+
+/// 401/403: the token is wrong, disabled or out of quota. Retrying faster will
+/// not fix it, and the user has to edit the config.
+fn token_rejected(e: &anyhow::Error) -> Option<u16> {
+    e.downcast_ref::<HttpStatus>()
+        .map(|h| h.status)
+        .filter(|s| *s == 401 || *s == 403)
+}
+
+/// Seconds until the next poll. One quick retry covers a hiccup; once the link
+/// is down, or the token has been rejected, back off to the normal interval
+/// instead of hammering the API.
+fn backoff_secs(poll_secs: u64, failures: u32, rejected: bool) -> u64 {
+    let normal = poll_secs.max(60);
+    if failures == 1 && !rejected {
+        60.min(normal)
+    } else {
+        normal
+    }
+}
+
 async fn fetch(path: &str, zone: &str, token: &str) -> Result<String> {
     let url = format!("{BASE}/{path}/latest?zone={zone}");
     let resp = client()
@@ -74,11 +103,13 @@ async fn fetch(path: &str, zone: &str, token: &str) -> Result<String> {
         .context("request")?;
     let status = resp.status();
     let body = resp.text().await.context("body")?;
-    anyhow::ensure!(
-        status.is_success(),
-        "electricity maps HTTP {status}: {}",
-        body.chars().take(120).collect::<String>()
-    );
+    if !status.is_success() {
+        return Err(HttpStatus {
+            status: status.as_u16(),
+            body: body.chars().take(120).collect::<String>(),
+        }
+        .into());
+    }
     Ok(body)
 }
 
@@ -97,6 +128,8 @@ pub async fn poll_once(cfg: &ElectricityConfig) -> Result<Event> {
 
 pub async fn run_electricity(cfg: ElectricityConfig, ctx: SourceCtx) {
     let mut failures = 0u32;
+    let mut rejected;
+    let mut warned_about_token = false;
     loop {
         if ctx.shutdown.is_cancelled() {
             return;
@@ -104,6 +137,8 @@ pub async fn run_electricity(cfg: ElectricityConfig, ctx: SourceCtx) {
         match poll_once(&cfg).await {
             Ok(ev) => {
                 failures = 0;
+                rejected = false;
+                warned_about_token = false;
                 if let Event::Electricity { mix_mw, .. } = &ev {
                     tracing::info!("electricity: poll ok ({} sources)", mix_mw.len());
                 }
@@ -115,8 +150,19 @@ pub async fn run_electricity(cfg: ElectricityConfig, ctx: SourceCtx) {
             }
             Err(e) => {
                 failures += 1;
-                tracing::warn!("electricity: {e:#}");
-                if failures >= 2 {
+                match token_rejected(&e) {
+                    // a configuration problem: say so once, then stay quiet
+                    Some(status) if !warned_about_token => {
+                        warned_about_token = true;
+                        tracing::warn!(
+                            "electricity: token rejected (HTTP {status}); check the token in Configure"
+                        );
+                    }
+                    Some(_) => tracing::debug!("electricity: {e:#}"),
+                    None => tracing::warn!("electricity: {e:#}"),
+                }
+                rejected = token_rejected(&e).is_some();
+                if failures >= 2 || rejected {
                     ctx.emit(Event::Link {
                         target: LinkTarget::Electricity,
                         up: false,
@@ -124,11 +170,7 @@ pub async fn run_electricity(cfg: ElectricityConfig, ctx: SourceCtx) {
                 }
             }
         }
-        let wait = if failures > 0 {
-            60
-        } else {
-            cfg.poll_secs.max(60)
-        };
+        let wait = backoff_secs(cfg.poll_secs, failures, rejected);
         tokio::select! {
             _ = ctx.shutdown.cancelled() => return,
             _ = tokio::time::sleep(Duration::from_secs(wait)) => {}
@@ -158,6 +200,29 @@ mod tests {
         assert!((pb.renewable_pct - 61.0).abs() < 0.01);
         assert!((pb.fossil_free_pct - 73.0).abs() < 0.01);
         assert_eq!(pb.datetime, "2026-09-06T12:00:00.000Z");
+    }
+
+    #[test]
+    fn a_rejected_token_backs_off_like_a_dead_link() {
+        let unauthorized = |status| {
+            anyhow::Error::new(HttpStatus {
+                status,
+                body: "invalid token".into(),
+            })
+        };
+        assert_eq!(token_rejected(&unauthorized(401)), Some(401));
+        assert_eq!(token_rejected(&unauthorized(403)), Some(403));
+        assert_eq!(token_rejected(&unauthorized(500)), None);
+        assert_eq!(token_rejected(&anyhow::anyhow!("timed out")), None);
+        // healthy: the configured interval, never below a minute
+        assert_eq!(backoff_secs(300, 0, false), 300);
+        assert_eq!(backoff_secs(10, 0, false), 60);
+        // one quick retry, then the normal interval instead of a minute
+        assert_eq!(backoff_secs(300, 1, false), 60);
+        assert_eq!(backoff_secs(300, 2, false), 300);
+        assert_eq!(backoff_secs(300, 9, false), 300);
+        // a rejected token never gets the quick retry
+        assert_eq!(backoff_secs(300, 1, true), 300);
     }
 
     #[test]
