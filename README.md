@@ -1,51 +1,120 @@
-# RackScreen
+<h1 align="center">
+  <br>
+  <a href="/"><img src=".github/media/rackscreen-header.png" alt="RackScreen" width="900"></a>
+  <br>
+</h1>
 
-Animated Kubernetes monitor for four GC9A01 240x240 round displays on a Raspberry Pi 3B+ (64-bit). Written in Rust.
+<p align="center">
+  <a href="https://github.com/silkepilon/RackScreen/releases/latest"><img src="https://img.shields.io/github/v/release/silkepilon/RackScreen?logo=github" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/silkepilon/RackScreen" alt="License"></a>
+  <a href="https://github.com/silkepilon/RackScreen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/silkepilon/RackScreen/ci.yml?branch=main&logo=github" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Raspberry%20Pi-3B%2B--aarch64-C51A4A?logo=raspberrypi&logoColor=white" alt="Raspberry Pi 3B+ aarch64">
+  <img src="https://img.shields.io/badge/Rust-1.85%2B-orange?logo=rust&logoColor=white" alt="Rust 1.85+">
+</p>
 
-Four screens, top to bottom: **CPU**, **MEM**, **PODS**, **HEALTH**. Icon-first "Minimal Mono" look: black background, segmented ring, white Lucide icon, small outlined badge with the number. Screens are never static: values ease, the last segment breathes, icons have micro-loops. Cluster events splash on their screen (pod started, crashed, gone, hot node, torrent added). Big events sweep the whole rack (node down/up, alert firing/resolved, torrent done, link restored). HEALTH turns into a download monitor when the cluster is healthy and qBittorrent is pulling.
+<p align="center">
+  <a href="#install">Install</a> &nbsp;·&nbsp;
+  <a href="#screens">Screens</a> &nbsp;·&nbsp;
+  <a href="#setup-tui">Setup TUI</a> &nbsp;·&nbsp;
+  <a href="#electricity-mode">Electricity mode</a> &nbsp;·&nbsp;
+  <a href="#configuration">Configuration</a> &nbsp;·&nbsp;
+  <a href="#development">Development</a>
+</p>
 
-Design: `docs/superpowers/specs/2026-09-05-rackscreen-design.md`.
+---
 
-## Install on the Pi
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one icon, one segmented ring and a small outlined badge on black, and none of it is ever static: values ease into place, the last segment breathes, icons run micro-loops. Cluster events splash on the screen that owns them, big events sweep the whole rack top to bottom, and a screen can cycle through several roles with an iris transition. Six roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, so the same rack can show pods on one panel and today's electricity price on the next.
 
-One line, no clone:
+## Screens
+
+Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
+
+|  |  |
+|:--:|:--:|
+| <img src=".github/media/screens/cpu.gif" alt="CPU role" width="200"> | <img src=".github/media/screens/mem.gif" alt="MEM role" width="200"> |
+| **`cpu`** — cluster CPU load; a node over the threshold splashes a flame | **`mem`** — cluster memory use, the ring easing to every new sample |
+| <img src=".github/media/screens/pods.gif" alt="PODS role" width="200"> | <img src=".github/media/screens/health.gif" alt="HEALTH role" width="200"> |
+| **`pods`** — running pods; every start and crash splashes its own icon | **`health`** — one dot per node, green while the cluster is happy |
+| <img src=".github/media/screens/thermal.gif" alt="THERMAL role" width="200"> | <img src=".github/media/screens/storage.gif" alt="STORAGE role" width="200"> |
+| **`thermal`** — the hottest node, blue to amber to red as it climbs | **`storage`** — volumes outside, used capacity inside; a sick volume breathes amber |
+| <img src=".github/media/screens/power-mix.gif" alt="POWER MIX role" width="200"> | <img src=".github/media/screens/price.gif" alt="PRICE role" width="200"> |
+| **`power-mix`** — the grid production mix, one arc and icon per source | **`price`** — the day-ahead price per hour, the current hour breathing |
+| <img src=".github/media/screens/carbon.gif" alt="CARBON role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
+| **`carbon`** — grid carbon intensity, on the Electricity Maps colour scale | **`renewable`** — the renewable share outside, the fossil-free share inside |
+
+<p align="center">
+  <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
+</p>
+<p align="center">
+  <b>HEALTH doubles as a download monitor.</b> When every node is ready, nothing is firing and qBittorrent is pulling, the health ring is replaced by one ring per torrent; here a finished download sweeps the rack green and its ring unwinds.
+</p>
+
+<p align="center">
+  <img src=".github/media/screens/all.gif" alt="One screen cycling through all ten roles" width="320">
+</p>
+<p align="center">
+  <b>One screen, all ten roles.</b> A screen cycles through the roles you give it and irises between them: the old role zooms into the middle, the new one grows back out of it, ring first.
+</p>
+
+**How events look.** A pod starting, a pod crashing, a hot node, a hot volume or a new torrent *splashes*: the ring collapses into a big coloured icon on the screen that owns that role, then unwinds back to the value. A node going down or coming back, an alert firing or resolving, a finished torrent, a restored link and a fresh boot *sweep*: the ring wipes to one colour on every panel in turn, top to bottom (or bottom to top for the bad news), holds an icon for a moment and wipes back.
+
+## Install
+
+One line on the Pi, no clone:
 
     curl -fsSL https://github.com/silkepilon/RackScreen/releases/latest/download/install.sh | bash
 
-It downloads the latest release and opens the setup menu. **Install** copies the binary to `/usr/local/bin`, writes `/etc/rackscreen/config.yaml`, installs the `rackscreen@<user>` service and offers to enable SPI in the boot files (reboot afterwards). **Calibrate screens** shows a test pattern on the panels; press `r`/`f` per screen until the arrow points up and the dot is top-right, then `s`. **Configure** edits the config in a form. **Status** shows the service and link states with logs. **Update** downloads the latest release, verifies its SHA-256, swaps `/usr/local/bin/rackscreen` and restarts the service. **Uninstall** removes everything except the boot file lines.
+It downloads the latest `aarch64` release and opens the setup menu. **Install** copies the binary to `/usr/local/bin`, writes `/etc/rackscreen/config.yaml`, installs the `rackscreen@<user>` service and offers to enable SPI in the boot files. The service runs `rackscreen run --config /etc/rackscreen/config.yaml`; later runs of the menu are just `rackscreen` (it asks for sudo).
 
-Later runs: just type `rackscreen` (it asks for sudo). The service runs `rackscreen run --config /etc/rackscreen/config.yaml`. Without the menu: `sudo rackscreen update` updates in place, `rackscreen update --check` only reports (exit 0 up to date, 1 update available, 2 unknown).
+> [!NOTE]
+> Enabling SPI edits the boot files, so reboot the Pi afterwards before the panels light up.
 
-Upgrading from v0.1: `~/.config/rackscreen/config.toml` is no longer read; re-enter your settings via Configure.
+To upgrade, re-run the one-liner, or use **Update** in the TUI, or `sudo rackscreen update`. It downloads the latest release, verifies its SHA-256, swaps `/usr/local/bin/rackscreen` and restarts the service; `rackscreen update --check` only reports (exit 0 up to date, 1 update available, 2 unknown). Your config is left alone either way.
 
-Config is YAML (`/etc/rackscreen/config.yaml`, defaults in `config.example.yaml`). Kubeconfig defaults to `~/k8s-monitor.yaml` of the service user.
+Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.example.yaml`](config.example.yaml). The kubeconfig defaults to `~/k8s-monitor.yaml` of the service user. Upgrading from v0.1: `~/.config/rackscreen/config.toml` is no longer read, so re-enter your settings via **Configure**.
+
+## Setup TUI
+
+`rackscreen setup` (what the installer opens) is a ratatui menu:
+
+- **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
+- **Calibrate screens** — fix rotation / mirroring: a test pattern per panel; press `r`/`f` until the arrow points up and the dot is top-right, then `s` to write `rotate` and `hflip`.
+- **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
+- **Configure** — cluster, night and display settings in a form, with a restart offer when you save.
+- **Status** — the service state, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `electricity`, `prices`) and the latest logs.
+- **Run here** — run the daemon in the foreground with its logs, without touching the service.
+- **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
+- **Uninstall** — remove the binary, config and service; the boot file lines stay.
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them; the switch is an iris transition. Ten roles exist:
+Every screen shows one or more **roles** and cycles through them. Ten roles exist:
 
-| Role | Shows |
-|---|---|
-| `cpu` | cluster CPU load |
-| `mem` | cluster memory use |
-| `pods` | running pods, with pod events |
-| `health` | cluster health, or the download monitor when idle and qBittorrent pulls |
-| `thermal` | the hottest node temperature (`hot node temp °C` marks the danger band) |
-| `storage` | persistent volumes with their robustness |
-| `power-mix` | the grid production mix of your zone, per source |
-| `price` | today's day-ahead price per hour, current hour marked |
-| `carbon` | grid carbon intensity in gCO2eq/kWh |
-| `renewable` | renewable and fossil-free share |
+| Role | Data source | Ring and badge |
+|---|---|---|
+| `cpu` | Prometheus | ring is cluster CPU load, badge the percentage |
+| `mem` | Prometheus | ring is memory use, badge the percentage |
+| `pods` | Kubernetes API | ring is running pods against the total, badge the count |
+| `health` | Kubernetes API + Prometheus | one dot per node, or one ring per torrent in download mode |
+| `thermal` | Prometheus | ring is the hottest node, `hot node temp °C` marks the danger band |
+| `storage` | Prometheus (Longhorn) | outer ring a section per volume by robustness, inner ring the used capacity |
+| `power-mix` | Electricity Maps | one arc and icon per production source in your zone |
+| `price` | EnergyZero or ENTSO-E | one pair of segments per hour of today, the current hour breathing |
+| `carbon` | Electricity Maps | ring and colour follow gCO2eq/kWh |
+| `renewable` | Electricity Maps | outer ring the renewable share, inner ring the fossil-free share, badge alternating |
 
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Three presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`) and `m` mixed (each screen alternates a cluster role with an electricity one). A screen with a single role never cycles.
 
 Only one screen irises at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
 
-In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load.
+In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade down and back up on their own.
 
 ## Electricity mode
 
 The grid roles (`power-mix`, `carbon`, `renewable`) use [Electricity Maps](https://app.electricitymaps.com). Sign in there for a free personal API token, which is tied to one zone. In **Configure** set `electricity enabled` to on, `electricity zone` to your zone code (`NL`, `DE`, `FR`, ...) and paste the token into `electricity api token`. Polling is every `electricity poll secs` (300 by default, never faster than a minute) so the free quota lasts.
+
+> [!NOTE]
+> Without a token the grid roles show a key icon instead of a value: they are configured but have nothing to poll with.
 
 The `price` role is separate and has its own `price source`, cycled with `⏎`:
 
@@ -55,18 +124,87 @@ The `price` role is separate and has its own `price source`, cycled with `⏎`:
 
 `price incl. VAT` asks EnergyZero for prices with VAT and levies included; ENTSO-E always reports the raw exchange price. The price ring is bucketed into the Pi's own local hours, the same clock that marks the current hour, so set the system time zone once: `sudo timedatectl set-timezone Europe/Amsterdam`. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
 
-## Develop on the desktop
+The mix colours and the source icons are the ones from the Electricity Maps web app, under their own licence; see [Licence](#licence).
 
-    cargo run -- run --sim                       # fake data, keyboard drives events
-    cargo run -- run --sim --source k8s          # real cluster through the config's kubeconfig
-    cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
-    cargo run -- calibrate --sim --config /tmp/rs.yaml
+## Configuration
 
-Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `t` torrent mode, `n` night cycle, `b` boot, `Esc` quit. `--sim-grid` shows 2x2.
+<details>
+<summary><code>config.example.yaml</code> — every key, with the defaults</summary>
 
-Tests: `cargo test --workspace`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
+```yaml
+# RackScreen configuration. Installed to /etc/rackscreen/config.yaml.
 
-Wiring (BCM numbers, from the config):
+k8s:
+  kubeconfig: ~/k8s-monitor.yaml
+
+prometheus:
+  namespace: monitoring
+  service: auto            # "auto" picks the first service containing "prometheus" that exposes `port`
+  port: 9090
+  poll_secs: 5
+  ignore_alerts: [Watchdog, InfoInhibitor]
+
+qbittorrent:
+  enabled: true
+  namespace: arr-stack
+  service: qbittorrent
+  port: 8080
+  user: ""                 # empty = rely on "bypass auth for localhost"
+  pass: ""
+  poll_secs: 3
+
+night:
+  enabled: true
+  start: "23:00"
+  end: "07:00"
+
+thresholds:
+  hot_cpu: 90
+  hot_mem: 90
+  hot_temp: 70
+
+electricity:
+  enabled: false           # set true and add your free token from app.electricitymaps.com
+  zone: NL
+  token: ""
+  poll_secs: 300
+
+price:
+  source: energyzero       # energyzero (NL, no token) | entsoe (EU, token) | none
+  entsoe_token: ""
+  entsoe_zone: ""          # EIC code, e.g. 10YNL----------L; derived from zone when empty
+  include_vat: true
+  poll_secs: 900
+
+display:
+  brightness: 1.0
+  fps: 30
+  spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
+  one_at_a_time: true      # one screen irises at a time, in random order (kinder to the SPI bus)
+
+# Each screen cycles through its `roles` list, `cycle_secs` seconds each.
+# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable
+screens:
+  - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
+  - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
+  - { roles: [pods],   cycle_secs: 15, spi: 1, cs: 0, dc: 23, rst: 22, rotate: 270, hflip: true,  hz: 16000000 }
+  - { roles: [health], cycle_secs: 15, spi: 1, cs: 1, dc: 4,  rst: 27, rotate: 270, hflip: true,  hz: 16000000 }
+```
+
+</details>
+
+- **`k8s`** — the kubeconfig the pod, node and alert watches use; `~` is the service user's home.
+- **`prometheus`** — where the metrics come from; `service: auto` picks the first service whose name contains "prometheus" and exposes `port`, and `ignore_alerts` keeps the always-on ones out of the health role.
+- **`qbittorrent`** — the client behind the download monitor; turn it off and HEALTH stays a health ring.
+- **`night`** — the window in which the panels dim, on the Pi's local clock.
+- **`thresholds`** — when a node counts as hot: the CPU and memory percentages that splash a flame, and the temperature that marks the danger band on `thermal`.
+- **`electricity`** and **`price`** — see [Electricity mode](#electricity-mode).
+- **`display`** — global brightness, frame rate, the SPI write chunk and whether screens iris one at a time.
+- **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
+
+## Wiring
+
+BCM numbers, from the config:
 
 | Screen | SPI | CS | DC | RST |
 |---|---|---|---|---|
@@ -77,15 +215,41 @@ Wiring (BCM numbers, from the config):
 
 If a screen is rotated or mirrored, change `rotate` (0/90/180/270) and `hflip` for that screen in the config; **Calibrate screens** in the setup TUI writes those values for you.
 
-## Build for the Pi yourself
+## Development
+
+The simulator draws the same scenes in a window, so none of this needs a Pi:
+
+    cargo run -- run --sim                           # fake data, keyboard drives events
+    cargo run -- run --sim --source k8s              # real cluster through the config's kubeconfig
+    cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
+    cargo run -- calibrate --sim --config /tmp/rs.yaml
+
+Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `t` torrent mode, `n` night cycle, `b` boot, `Esc` quit. `--sim-grid` shows all four panels at once.
+
+Tests: `cargo test --workspace --features sim,pi`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
+
+Build for the Pi:
 
     cargo install cross --version 0.2.5
     cross build --release --target aarch64-unknown-linux-gnu --no-default-features --features pi
 
-Binary: `target/aarch64-unknown-linux-gnu/release/rackscreen`.
+The binary lands in `target/aarch64-unknown-linux-gnu/release/rackscreen`.
 
-## Licences
+Regenerate the media in this README:
 
-Code MIT. Icons: Lucide (ISC), `assets/icons/LICENSE`. Font: JetBrains Mono (OFL), `assets/fonts/OFL.txt`.
+    bash .github/media/generate-header.sh
+    cargo run -p rackscreen-app --example gifs -- .github/media/screens
 
-The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see `assets/icons/EM-LICENSE.md`. Grid data from Electricity Maps and day-ahead prices from EnergyZero or ENTSO-E belong to those services and are subject to their own terms.
+The design notes are in [`docs/superpowers/specs/2026-09-05-rackscreen-design.md`](docs/superpowers/specs/2026-09-05-rackscreen-design.md).
+
+## Licence
+
+Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`. Font: JetBrains Mono (OFL), `assets/fonts/OFL.txt`.
+
+The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps and day-ahead prices from EnergyZero or ENTSO-E belong to those services and are subject to their own terms.
+
+<p align="center">
+  <a href="https://github.com/silkepilon/RackScreen">GitHub</a> &nbsp;·&nbsp;
+  <a href="https://github.com/silkepilon/RackScreen/issues">Issues</a> &nbsp;·&nbsp;
+  <a href="https://github.com/silkepilon/RackScreen/releases">Releases</a>
+</p>
