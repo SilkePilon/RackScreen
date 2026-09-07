@@ -56,7 +56,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
   <b>One screen, all ten roles.</b> A screen cycles through the roles you give it and irises between them: the old role zooms into the middle, the new one grows back out of it, ring first.
 </p>
 
-**How events look.** A pod starting, a pod crashing, a hot node, a hot volume or a new torrent *splashes*: the ring collapses into a big coloured icon on the screen that owns that role, then unwinds back to the value. A node going down or coming back, an alert firing or resolving, a finished torrent, a restored link and a fresh boot *sweep*: the ring wipes to one colour on every panel in turn, top to bottom (or bottom to top for the bad news), holds an icon for a moment and wipes back.
+**How events look.** A pod starting, a pod crashing, a hot node, a degraded volume or a new torrent *splashes* on the screen that owns that role: a ripple runs out from the centre, the ring flashes the event colour in a wave, and the role icon swaps to the event icon with a little overshoot before easing back. A node going down or coming back, an alert firing or resolving, a finished torrent, a restored link and a fresh boot *sweep* the whole rack: the ring wipes to one colour on every panel in turn, top to bottom (bottom to top for bad news), holds an icon for a moment and wipes back.
 
 ## Install
 
