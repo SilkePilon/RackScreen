@@ -450,8 +450,8 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         Role::Ups => crate::scene_ups::ups_scene(model, now),
         Role::Net => crate::scene_net::net_scene(model, now),
         Role::Deploys => crate::scene_deploys::deploys_scene(model, now),
-        Role::GhActivity
-        | Role::Weather
+        Role::GhActivity => crate::scene_github::github_scene(model, now),
+        Role::Weather
         | Role::Wind
         | Role::Aqi
         | Role::Rain

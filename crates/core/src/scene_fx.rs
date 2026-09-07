@@ -2,9 +2,7 @@
 
 use crate::anim::{pulse, Easing, Secs};
 use crate::fx::{Splash, Sweep, SweepPhase, SPLASH_SECS};
-use crate::scene::{
-    connecting_scene, no_data_scene, no_data_scene_with, role_scene, Drawable, Scene, SegState,
-};
+use crate::scene::{connecting_scene, no_data_scene_with, role_scene, Drawable, Scene, SegState};
 use crate::theme::layout::*;
 use crate::theme::{Role, WHITE};
 
@@ -169,8 +167,8 @@ impl crate::model::Model {
             Role::Ups => !(link.prom && self.ups().have),
             Role::Net => !(link.prom && self.net().have),
             Role::Deploys => !(link.argocd && self.apps().have),
-            Role::GhActivity
-            | Role::Weather
+            Role::GhActivity => !(link.github && self.github().have),
+            Role::Weather
             | Role::Wind
             | Role::Aqi
             | Role::Rain
@@ -234,12 +232,17 @@ impl crate::model::Model {
             role,
             Role::PowerMix | Role::Price | Role::Carbon | Role::Renewable
         );
-        if electricity && !self.token_present() {
-            // never configured, rather than a source that went quiet
-            no_data_scene_with(now, "key-round")
+        // never configured, rather than a source that went quiet
+        let no_key = (role == Role::GhActivity && !self.github_token_present())
+            || (electricity && !self.token_present());
+        let icon = if role.is_sky() && !self.location_present() {
+            "map-pin"
+        } else if no_key {
+            "key-round"
         } else {
-            no_data_scene(now)
-        }
+            "cloud-off"
+        };
+        no_data_scene_with(now, icon)
     }
 }
 
@@ -563,6 +566,20 @@ mod tests {
         m.apply(link(LinkTarget::Prometheus, false), 2.0);
         assert!(has_icon(&m.scene_for_role(Role::Thermal, 2.0), "cloud-off"));
         assert!(has_icon(&m.scene_for_role(Role::Storage, 2.0), "cloud-off"));
+    }
+
+    #[test]
+    fn unconfigured_roles_show_pin_or_key() {
+        let m = ready_model();
+        let icon = |s: &Scene| icons(s)[0].0;
+        assert_eq!(icon(&m.scene_for_role(Role::Weather, 1.0)), "map-pin");
+        assert_eq!(icon(&m.scene_for_role(Role::GhActivity, 1.0)), "key-round");
+        assert_eq!(icon(&m.scene_for_role(Role::Ups, 1.0)), "cloud-off");
+        let mut m = ready_model();
+        m.set_location_present(true);
+        m.set_github_token_present(true);
+        assert_eq!(icon(&m.scene_for_role(Role::Weather, 1.0)), "cloud-off");
+        assert_eq!(icon(&m.scene_for_role(Role::GhActivity, 1.0)), "cloud-off");
     }
 
     #[test]

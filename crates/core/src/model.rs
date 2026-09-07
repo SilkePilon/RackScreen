@@ -96,6 +96,23 @@ pub struct AppsState {
     pub have: bool,
 }
 
+/// Thirty days of contribution counts, oldest first, last entry today.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GithubState {
+    pub days: Vec<(String, u32)>,
+    pub have: bool,
+}
+
+impl GithubState {
+    pub fn today(&self) -> u32 {
+        self.days.last().map(|d| d.1).unwrap_or(0)
+    }
+    /// Best day in the window, at least 1 so ratios stay finite.
+    pub fn best(&self) -> u32 {
+        self.days.iter().map(|d| d.1).max().unwrap_or(0).max(1)
+    }
+}
+
 /// Ring fill for a bit rate: 100 kbit/s is (almost) empty, 1 Gbit/s is full,
 /// four decades in between, and a floor so idle still shows a little.
 pub fn net_fill(bps: f64) -> f32 {
@@ -208,8 +225,11 @@ pub struct Model {
     ups: UpsState,
     net: NetState,
     apps: AppsState,
+    github: GithubState,
     ups_charge: Smooth,
     ups_load: Smooth,
+    /// Today's contribution count, eased.
+    gh_today: Smooth,
     /// Ring fill (0..1) for download and upload, eased.
     net_rx: Smooth,
     net_tx: Smooth,
@@ -292,8 +312,10 @@ impl Model {
             ups: UpsState::default(),
             net: NetState::default(),
             apps: AppsState::default(),
+            github: GithubState::default(),
             ups_charge: Smooth::new(0.0, SMOOTH_SECS),
             ups_load: Smooth::new(0.0, SMOOTH_SECS),
+            gh_today: Smooth::new(0.0, SMOOTH_SECS),
             net_rx: Smooth::new(0.03, SMOOTH_SECS),
             net_tx: Smooth::new(0.03, SMOOTH_SECS),
             net_rx_phase: 0.0,
@@ -371,6 +393,12 @@ impl Model {
     }
     pub fn apps(&self) -> &AppsState {
         &self.apps
+    }
+    pub fn github(&self) -> &GithubState {
+        &self.github
+    }
+    pub fn smooth_gh_today(&self, now: Secs) -> f32 {
+        self.gh_today.value(now)
     }
     pub fn smooth_ups_charge(&self, now: Secs) -> f32 {
         self.ups_charge.value(now)
@@ -972,13 +1000,25 @@ impl Model {
             | Event::AirQuality { .. }
             | Event::Rain { .. }
             | Event::Sky { .. }
-            | Event::IssPass(_)
-            | Event::GithubActivity { .. }
-            | Event::GithubPush { .. }
-            | Event::GithubStar { .. }
-            | Event::GithubMerge { .. }
-            | Event::GithubRelease { .. }
-            | Event::GithubRun { .. } => {}
+            | Event::IssPass(_) => {}
+            Event::GithubActivity { days } => {
+                self.github = GithubState { days, have: true };
+                self.gh_today.set(self.github.today() as f32, now);
+            }
+            Event::GithubPush { commits, .. } => {
+                // one request per commit: the splash queue collapses them into `+N`
+                for _ in 0..commits.max(1) {
+                    self.fx.push(FxRequest::GithubPush);
+                }
+            }
+            Event::GithubStar { .. } => self.fx.push(FxRequest::GithubStar),
+            Event::GithubMerge { .. } => self.fx.push(FxRequest::GithubMerge),
+            Event::GithubRelease { .. } => self.fx.push(FxRequest::GithubRelease),
+            Event::GithubRun { ok, .. } => self.fx.push(if ok {
+                FxRequest::GithubRunPassed
+            } else {
+                FxRequest::GithubRunFailed
+            }),
             Event::Apps(list) => {
                 self.apps = AppsState {
                     apps: list,
@@ -1591,6 +1631,72 @@ mod tests {
                 FxRequest::AppDegraded,
                 FxRequest::AppSynced,
                 FxRequest::AppHealthy
+            ]
+        );
+    }
+
+    #[test]
+    fn github_activity_folds_and_pushes_splash_per_commit() {
+        let mut m = Model::new(Thresholds::default());
+        let days: Vec<(String, u32)> = (0..30)
+            .map(|i| {
+                (
+                    format!("2026-08-{:02}", i + 1),
+                    if i == 29 {
+                        28
+                    } else if i == 28 {
+                        43
+                    } else {
+                        5
+                    },
+                )
+            })
+            .collect();
+        m.apply(Event::GithubActivity { days: days.clone() }, 0.0);
+        assert!(m.github().have);
+        assert_eq!(m.github().today(), 28);
+        assert_eq!(m.github().best(), 43);
+        assert_eq!(m.smooth_gh_today(5.0), 28.0);
+        m.apply(
+            Event::GithubPush {
+                repo: "r".into(),
+                commits: 3,
+            },
+            1.0,
+        );
+        assert_eq!(m.pending_fx(), &vec![FxRequest::GithubPush; 3]);
+        m.take_fx();
+        m.apply(Event::GithubStar { repo: "r".into() }, 1.0);
+        m.apply(Event::GithubMerge { repo: "r".into() }, 1.0);
+        m.apply(
+            Event::GithubRelease {
+                repo: "r".into(),
+                tag: "v1".into(),
+            },
+            1.0,
+        );
+        m.apply(
+            Event::GithubRun {
+                repo: "r".into(),
+                ok: false,
+            },
+            1.0,
+        );
+        m.apply(
+            Event::GithubRun {
+                repo: "r".into(),
+                ok: true,
+            },
+            1.0,
+        );
+        assert_eq!(
+            m.pending_fx(),
+            &[
+                FxRequest::GithubStar,
+                FxRequest::GithubMerge,
+                FxRequest::GithubRelease,
+                FxRequest::GithubRunFailed,
+                FxRequest::GithubRunPassed,
             ]
         );
     }
