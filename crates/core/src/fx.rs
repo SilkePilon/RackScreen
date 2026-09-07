@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use crate::anim::Secs;
 use crate::model::FxRequest;
-use crate::theme::{Color, Role, AMBER, BLUE, GREEN, RED};
+use crate::theme::{Color, Role, AMBER, BLUE, GREEN, RED, VIOLET};
 
 pub const SPLASH_SECS: Secs = 2.5;
 pub const SPLASH_COLLAPSE_SECS: Secs = 1.0;
@@ -12,6 +12,7 @@ pub const SWEEP_WIPE_SECS: Secs = 0.25;
 pub const SWEEP_STAGGER_SECS: Secs = 0.12;
 pub const SWEEP_HOLD_SECS: Secs = 2.5;
 pub const BOOT_HOLD_SECS: Secs = 1.0;
+pub const SHORT_HOLD_SECS: Secs = 1.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SplashKind {
@@ -23,6 +24,17 @@ pub enum SplashKind {
     VolumeDegraded,
     VolumeHealthy,
     TorrentAdded,
+    GithubPush,
+    GithubStar,
+    GithubMerge,
+    GithubRunFailed,
+    GithubRunPassed,
+    Thunder,
+    RainSoon,
+    AirWorse,
+    AppSynced,
+    AppDegraded,
+    AppHealthy,
 }
 
 impl SplashKind {
@@ -36,6 +48,17 @@ impl SplashKind {
             SplashKind::VolumeDegraded => "database-zap",
             SplashKind::VolumeHealthy => "database",
             SplashKind::TorrentAdded => "download",
+            SplashKind::GithubPush => "git-commit-horizontal",
+            SplashKind::GithubStar => "star",
+            SplashKind::GithubMerge => "git-merge",
+            SplashKind::GithubRunFailed => "circle-x",
+            SplashKind::GithubRunPassed => "circle-check",
+            SplashKind::Thunder => "cloud-lightning",
+            SplashKind::RainSoon => "umbrella",
+            SplashKind::AirWorse => "haze",
+            SplashKind::AppSynced => "rocket",
+            SplashKind::AppDegraded => "triangle-alert",
+            SplashKind::AppHealthy => "circle-check",
         }
     }
     pub fn color(self) -> Color {
@@ -48,6 +71,17 @@ impl SplashKind {
             SplashKind::VolumeDegraded => AMBER,
             SplashKind::VolumeHealthy => GREEN,
             SplashKind::TorrentAdded => BLUE,
+            SplashKind::GithubPush => GREEN,
+            SplashKind::GithubStar => AMBER,
+            SplashKind::GithubMerge => VIOLET,
+            SplashKind::GithubRunFailed => RED,
+            SplashKind::GithubRunPassed => GREEN,
+            SplashKind::Thunder => AMBER,
+            SplashKind::RainSoon => BLUE,
+            SplashKind::AirWorse => AMBER,
+            SplashKind::AppSynced => GREEN,
+            SplashKind::AppDegraded => RED,
+            SplashKind::AppHealthy => GREEN,
         }
     }
 }
@@ -141,19 +175,29 @@ pub enum SweepKind {
     AlertResolved,
     LinkUp,
     Boot,
+    GithubRelease,
+    UpsOnBattery,
+    UpsOnline,
+    IssPass,
 }
 
 impl SweepKind {
+    /// Cluster bad news runs bottom to top and good news top to bottom, as the
+    /// README says. The rest read as motion: a release, mains power returning
+    /// and the ISS rise up the rack, a mains outage falls down it.
     pub fn direction(self) -> Direction {
         match self {
             SweepKind::NodeNotReady | SweepKind::AlertFiring => Direction::Up,
+            SweepKind::UpsOnBattery => Direction::Down,
+            SweepKind::GithubRelease | SweepKind::UpsOnline | SweepKind::IssPass => Direction::Up,
             _ => Direction::Down,
         }
     }
     pub fn color(self, role: Role) -> Color {
         match self {
-            SweepKind::NodeNotReady | SweepKind::AlertFiring => RED,
+            SweepKind::NodeNotReady | SweepKind::AlertFiring | SweepKind::UpsOnBattery => RED,
             SweepKind::Boot => role.accent(),
+            SweepKind::IssPass => VIOLET,
             _ => GREEN,
         }
     }
@@ -166,11 +210,16 @@ impl SweepKind {
             SweepKind::AlertResolved => "shield-check",
             SweepKind::LinkUp => "plug",
             SweepKind::Boot => role.icon(),
+            SweepKind::GithubRelease => "tag",
+            SweepKind::UpsOnBattery => "battery-warning",
+            SweepKind::UpsOnline => "battery-charging",
+            SweepKind::IssPass => "satellite",
         }
     }
     pub fn hold(self) -> Secs {
         match self {
             SweepKind::Boot => BOOT_HOLD_SECS,
+            SweepKind::UpsOnBattery | SweepKind::UpsOnline | SweepKind::IssPass => SHORT_HOLD_SECS,
             _ => SWEEP_HOLD_SECS,
         }
     }
@@ -294,6 +343,21 @@ impl Fx {
             FxRequest::AlertResolved => self.sweeps.push(SweepKind::AlertResolved),
             FxRequest::LinkUp => self.sweeps.push(SweepKind::LinkUp),
             FxRequest::Boot => self.sweeps.push(SweepKind::Boot),
+            FxRequest::GithubPush => splash(SplashKind::GithubPush, Role::GhActivity),
+            FxRequest::GithubStar => splash(SplashKind::GithubStar, Role::GhActivity),
+            FxRequest::GithubMerge => splash(SplashKind::GithubMerge, Role::GhActivity),
+            FxRequest::GithubRunFailed => splash(SplashKind::GithubRunFailed, Role::GhActivity),
+            FxRequest::GithubRunPassed => splash(SplashKind::GithubRunPassed, Role::GhActivity),
+            FxRequest::Thunder => splash(SplashKind::Thunder, Role::Weather),
+            FxRequest::RainSoon => splash(SplashKind::RainSoon, Role::Rain),
+            FxRequest::AirWorse => splash(SplashKind::AirWorse, Role::Aqi),
+            FxRequest::AppSynced => splash(SplashKind::AppSynced, Role::Deploys),
+            FxRequest::AppDegraded => splash(SplashKind::AppDegraded, Role::Deploys),
+            FxRequest::AppHealthy => splash(SplashKind::AppHealthy, Role::Deploys),
+            FxRequest::GithubRelease => self.sweeps.push(SweepKind::GithubRelease),
+            FxRequest::UpsOnBattery => self.sweeps.push(SweepKind::UpsOnBattery),
+            FxRequest::UpsOnline => self.sweeps.push(SweepKind::UpsOnline),
+            FxRequest::IssPass => self.sweeps.push(SweepKind::IssPass),
         }
     }
 
@@ -429,6 +493,62 @@ mod tests {
         );
         assert_eq!(SplashKind::HotTemp.color(), RED);
         assert_eq!(SplashKind::VolumeHealthy.icon(), "database");
+    }
+
+    #[test]
+    fn new_splash_kinds_route_to_their_roles() {
+        let mut fx = Fx::default();
+        fx.apply(FxRequest::GithubPush, 0.0);
+        fx.apply(FxRequest::Thunder, 0.0);
+        fx.apply(FxRequest::RainSoon, 0.0);
+        fx.apply(FxRequest::AirWorse, 0.0);
+        fx.apply(FxRequest::AppDegraded, 0.0);
+        assert_eq!(
+            fx.splashes[Role::GhActivity.index()]
+                .active()
+                .map(|s| s.kind),
+            Some(SplashKind::GithubPush)
+        );
+        assert_eq!(
+            fx.splashes[Role::Weather.index()].active().map(|s| s.kind),
+            Some(SplashKind::Thunder)
+        );
+        assert_eq!(
+            fx.splashes[Role::Rain.index()].active().map(|s| s.kind),
+            Some(SplashKind::RainSoon)
+        );
+        assert_eq!(
+            fx.splashes[Role::Aqi.index()].active().map(|s| s.kind),
+            Some(SplashKind::AirWorse)
+        );
+        assert_eq!(
+            fx.splashes[Role::Deploys.index()].active().map(|s| s.kind),
+            Some(SplashKind::AppDegraded)
+        );
+        assert_eq!(SplashKind::GithubPush.icon(), "git-commit-horizontal");
+        assert_eq!(SplashKind::GithubRunFailed.color(), RED);
+        assert_eq!(SplashKind::AppSynced.icon(), "rocket");
+    }
+
+    #[test]
+    fn new_sweep_kinds_have_direction_colour_icon_and_hold() {
+        let mut fx = Fx::default();
+        fx.apply(FxRequest::UpsOnBattery, 0.0);
+        fx.tick(0.0, 4);
+        assert_eq!(
+            fx.sweeps.active().map(|s| s.kind),
+            Some(SweepKind::UpsOnBattery)
+        );
+        assert_eq!(SweepKind::UpsOnBattery.direction(), Direction::Down);
+        assert_eq!(SweepKind::UpsOnBattery.color(Role::Cpu), RED);
+        assert_eq!(SweepKind::UpsOnBattery.icon(Role::Cpu), "battery-warning");
+        assert_eq!(SweepKind::UpsOnBattery.hold(), 1.5);
+        assert_eq!(SweepKind::UpsOnline.direction(), Direction::Up);
+        assert_eq!(SweepKind::UpsOnline.color(Role::Cpu), GREEN);
+        assert_eq!(SweepKind::GithubRelease.icon(Role::Cpu), "tag");
+        assert_eq!(SweepKind::GithubRelease.hold(), SWEEP_HOLD_SECS);
+        assert_eq!(SweepKind::IssPass.color(Role::Cpu), crate::theme::VIOLET);
+        assert_eq!(SweepKind::IssPass.hold(), 1.5);
     }
 
     #[test]

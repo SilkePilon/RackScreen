@@ -142,6 +142,21 @@ pub enum FxRequest {
     AlertResolved,
     LinkUp,
     Boot,
+    GithubPush,
+    GithubStar,
+    GithubMerge,
+    GithubRelease,
+    GithubRunFailed,
+    GithubRunPassed,
+    Thunder,
+    RainSoon,
+    AirWorse,
+    AppSynced,
+    AppDegraded,
+    AppHealthy,
+    UpsOnBattery,
+    UpsOnline,
+    IssPass,
 }
 
 pub struct Model {
@@ -172,6 +187,15 @@ pub struct Model {
     token_present: bool,
     /// Local wall-clock hour, set by the render loop.
     local_hour: u32,
+    /// Unix seconds, set by the render loop every frame; the sun dial, rain
+    /// ring and ISS countdown are clock-based.
+    unix_now: i64,
+    /// Seconds east of UTC for the Pi's local zone.
+    utc_offset_secs: i32,
+    /// `location.lat`/`lon` are set; without them the sky roles show a pin.
+    location_present: bool,
+    /// A GitHub token is set; without one `gh-activity` shows a key.
+    github_token_present: bool,
     hot_last: HashMap<(Role, String), Secs>,
     hot_temp_last: HashMap<String, Secs>,
     night_override: Option<bool>,
@@ -227,6 +251,10 @@ impl Model {
             mix_sections: Vec::new(),
             token_present: false,
             local_hour: 12,
+            unix_now: 0,
+            utc_offset_secs: 0,
+            location_present: false,
+            github_token_present: false,
             hot_last: HashMap::new(),
             hot_temp_last: HashMap::new(),
             night_override: None,
@@ -323,6 +351,30 @@ impl Model {
     }
     pub fn local_hour(&self) -> u32 {
         self.local_hour
+    }
+    pub fn set_unix_now(&mut self, secs: i64) {
+        self.unix_now = secs;
+    }
+    pub fn unix_now(&self) -> i64 {
+        self.unix_now
+    }
+    pub fn set_utc_offset_secs(&mut self, secs: i32) {
+        self.utc_offset_secs = secs;
+    }
+    pub fn utc_offset_secs(&self) -> i32 {
+        self.utc_offset_secs
+    }
+    pub fn set_location_present(&mut self, present: bool) {
+        self.location_present = present;
+    }
+    pub fn location_present(&self) -> bool {
+        self.location_present
+    }
+    pub fn set_github_token_present(&mut self, present: bool) {
+        self.github_token_present = present;
+    }
+    pub fn github_token_present(&self) -> bool {
+        self.github_token_present
     }
     pub fn pending_fx(&self) -> &[FxRequest] {
         &self.fx
@@ -1334,6 +1386,21 @@ mod tests {
         assert_eq!(m.local_hour(), 14);
         m.set_local_hour(99);
         assert_eq!(m.local_hour(), 23, "clamped into the day");
+    }
+
+    #[test]
+    fn clock_and_presence_flags() {
+        let mut m = Model::new(Thresholds::default());
+        assert_eq!(m.unix_now(), 0);
+        assert_eq!(m.utc_offset_secs(), 0);
+        assert!(!m.location_present() && !m.github_token_present());
+        m.set_unix_now(1_788_782_400);
+        m.set_utc_offset_secs(7200);
+        m.set_location_present(true);
+        m.set_github_token_present(true);
+        assert_eq!(m.unix_now(), 1_788_782_400);
+        assert_eq!(m.utc_offset_secs(), 7200);
+        assert!(m.location_present() && m.github_token_present());
     }
 
     fn torrent(name: &str, progress: f32) -> Torrent {

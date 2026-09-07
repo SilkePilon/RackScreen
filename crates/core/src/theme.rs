@@ -86,7 +86,7 @@ pub fn price_color(t: f32) -> Color {
     GREEN.mix(RED, t.clamp(0.0, 1.0))
 }
 
-/// GitHub contribution calendar greens, lightest level first.
+/// GitHub contribution calendar greens, darkest level first.
 pub const GH_GREENS: [Color; 4] = [
     Color::hex(0x0e4429),
     Color::hex(0x006d32),
