@@ -22,6 +22,7 @@ dirs = "7"
 nix = { version = "0.31", features = ["user"] }
 
 [dev-dependencies]
+gif = "0.14"
 tempfile = "3"
 
 [features]
