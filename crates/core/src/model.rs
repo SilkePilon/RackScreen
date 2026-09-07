@@ -7,6 +7,7 @@ use crate::electricity::{partition, Section, Source};
 use crate::event::{App, Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::screens::ScreenState;
+use crate::theme::eaqi_band;
 use crate::theme::layout::{SEG_N, TORRENT_RADII};
 use crate::theme::Role;
 
@@ -111,6 +112,29 @@ impl GithubState {
     pub fn best(&self) -> u32 {
         self.days.iter().map(|d| d.1).max().unwrap_or(0).max(1)
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WeatherState {
+    pub temp_c: f32,
+    pub code: u16,
+    pub is_day: bool,
+    pub wind_kmh: f32,
+    pub gust_kmh: f32,
+    pub wind_from_deg: f32,
+    pub at: String,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AirState {
+    pub eaqi: f32,
+    pub have: bool,
+}
+
+/// WMO codes 95, 96 and 99 are thunderstorms.
+fn is_thunder(code: u16) -> bool {
+    (95..=99).contains(&code)
 }
 
 /// Ring fill for a bit rate: 100 kbit/s is (almost) empty, 1 Gbit/s is full,
@@ -226,6 +250,11 @@ pub struct Model {
     net: NetState,
     apps: AppsState,
     github: GithubState,
+    weather: WeatherState,
+    air: AirState,
+    temp: Smooth,
+    eaqi: Smooth,
+    wind: Smooth,
     ups_charge: Smooth,
     ups_load: Smooth,
     /// Today's contribution count, eased.
@@ -313,6 +342,11 @@ impl Model {
             net: NetState::default(),
             apps: AppsState::default(),
             github: GithubState::default(),
+            weather: WeatherState::default(),
+            air: AirState::default(),
+            temp: Smooth::new(0.0, SMOOTH_SECS),
+            eaqi: Smooth::new(0.0, SMOOTH_SECS),
+            wind: Smooth::new(0.0, SMOOTH_SECS),
             ups_charge: Smooth::new(0.0, SMOOTH_SECS),
             ups_load: Smooth::new(0.0, SMOOTH_SECS),
             gh_today: Smooth::new(0.0, SMOOTH_SECS),
@@ -399,6 +433,21 @@ impl Model {
     }
     pub fn smooth_gh_today(&self, now: Secs) -> f32 {
         self.gh_today.value(now)
+    }
+    pub fn weather(&self) -> &WeatherState {
+        &self.weather
+    }
+    pub fn air(&self) -> &AirState {
+        &self.air
+    }
+    pub fn smooth_temp(&self, now: Secs) -> f32 {
+        self.temp.value(now)
+    }
+    pub fn smooth_eaqi(&self, now: Secs) -> f32 {
+        self.eaqi.value(now)
+    }
+    pub fn smooth_wind(&self, now: Secs) -> f32 {
+        self.wind.value(now)
     }
     pub fn smooth_ups_charge(&self, now: Secs) -> f32 {
         self.ups_charge.value(now)
@@ -996,11 +1045,39 @@ impl Model {
                 }
             }
             Event::ForceNight(v) => self.night_override = v,
-            Event::Weather { .. }
-            | Event::AirQuality { .. }
-            | Event::Rain { .. }
-            | Event::Sky { .. }
-            | Event::IssPass(_) => {}
+            Event::Weather {
+                temp_c,
+                code,
+                is_day,
+                wind_kmh,
+                gust_kmh,
+                wind_from_deg,
+                at,
+            } => {
+                if self.weather.have && is_thunder(code) && !is_thunder(self.weather.code) {
+                    self.fx.push(FxRequest::Thunder);
+                }
+                self.temp.set(temp_c, now);
+                self.wind.set(wind_kmh, now);
+                self.weather = WeatherState {
+                    temp_c,
+                    code,
+                    is_day,
+                    wind_kmh,
+                    gust_kmh,
+                    wind_from_deg,
+                    at,
+                    have: true,
+                };
+            }
+            Event::AirQuality { eaqi } => {
+                if self.air.have && eaqi_band(eaqi) > eaqi_band(self.air.eaqi) {
+                    self.fx.push(FxRequest::AirWorse);
+                }
+                self.eaqi.set(eaqi, now);
+                self.air = AirState { eaqi, have: true };
+            }
+            Event::Rain { .. } | Event::Sky { .. } | Event::IssPass(_) => {}
             Event::GithubActivity { days } => {
                 self.github = GithubState { days, have: true };
                 self.gh_today.set(self.github.today() as f32, now);
@@ -1699,6 +1776,53 @@ mod tests {
                 FxRequest::GithubRunPassed,
             ]
         );
+    }
+
+    fn weather(code: u16, temp: f32) -> Event {
+        Event::Weather {
+            temp_c: temp,
+            code,
+            is_day: true,
+            wind_kmh: 19.0,
+            gust_kmh: 39.0,
+            wind_from_deg: 232.0,
+            at: "2026-09-07T21:45".into(),
+        }
+    }
+
+    #[test]
+    fn weather_folds_and_thunder_splashes_on_the_edge() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(weather(95, 18.0), 0.0);
+        assert!(m.weather().have);
+        assert_eq!(m.weather().code, 95);
+        assert_eq!(m.smooth_temp(5.0), 18.0);
+        assert_eq!(m.smooth_wind(5.0), 19.0);
+        assert!(m.pending_fx().is_empty(), "the first sample never splashes");
+        m.apply(weather(3, 18.0), 1.0);
+        m.apply(weather(96, 18.0), 2.0);
+        assert_eq!(m.pending_fx(), &[FxRequest::Thunder]);
+        m.apply(weather(99, 18.0), 3.0);
+        assert_eq!(
+            m.pending_fx().len(),
+            1,
+            "staying thundery is not a new edge"
+        );
+    }
+
+    #[test]
+    fn air_quality_splashes_when_the_band_worsens() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(Event::AirQuality { eaqi: 32.0 }, 0.0);
+        assert!(m.air().have);
+        assert_eq!(m.smooth_eaqi(5.0), 32.0);
+        assert!(m.pending_fx().is_empty());
+        m.apply(Event::AirQuality { eaqi: 38.0 }, 1.0);
+        assert!(m.pending_fx().is_empty(), "same band");
+        m.apply(Event::AirQuality { eaqi: 41.0 }, 2.0);
+        assert_eq!(m.pending_fx(), &[FxRequest::AirWorse]);
+        m.apply(Event::AirQuality { eaqi: 10.0 }, 3.0);
+        assert_eq!(m.pending_fx().len(), 1, "improving is quiet");
     }
 
     #[test]

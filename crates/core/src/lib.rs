@@ -15,5 +15,6 @@ pub mod scene_net;
 pub mod scene_storage;
 pub mod scene_thermal;
 pub mod scene_ups;
+pub mod scene_weather;
 pub mod screens;
 pub mod theme;
