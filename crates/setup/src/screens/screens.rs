@@ -216,13 +216,21 @@ impl Screens {
         self.mode = Mode::Restarting(rx);
     }
 
-    fn role_needs_token(&self, r: Role) -> bool {
-        matches!(r, Role::PowerMix | Role::Carbon | Role::Renewable)
-            && self
-                .cfg
-                .as_ref()
-                .map(|c| c.electricity.token.is_empty())
-                .unwrap_or(false)
+    /// The `!` hint for one role: the grid roles need an Electricity Maps token,
+    /// and `price` needs a source that can actually fetch anything.
+    fn role_hint(&self, r: Role) -> Option<&'static str> {
+        let c = self.cfg.as_ref().ok()?;
+        match r {
+            Role::PowerMix | Role::Carbon | Role::Renewable => {
+                c.electricity.token.is_empty().then_some("no token")
+            }
+            Role::Price => match c.price.source.as_str() {
+                "entsoe" => c.price.entsoe_token.is_empty().then_some("no price source"),
+                "none" => Some("no price source"),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }
 
@@ -330,7 +338,7 @@ impl Screen for Screens {
             } else {
                 "static".to_string()
             };
-            let warn = rs.iter().any(|r| self.role_needs_token(*r));
+            let warn = rs.iter().find_map(|r| self.role_hint(*r));
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
@@ -343,7 +351,10 @@ impl Screen for Screens {
                     if sel { th.selected() } else { th.normal() },
                 ),
                 Span::styled(timing, th.muted()),
-                Span::styled(if warn { "  ! no token" } else { "" }, th.warning()),
+                Span::styled(
+                    warn.map(|w| format!("  ! {w}")).unwrap_or_default(),
+                    th.warning(),
+                ),
             ]));
         }
         f.render_widget(Paragraph::new(lines), list);
@@ -472,6 +483,57 @@ mod tests {
         assert_eq!(e.rows()[0].0, vec![Role::PowerMix]);
         assert_eq!(e.rows().len(), 2, "preset only touches existing rows");
         assert!(e.validate().is_ok());
+    }
+
+    fn test_shared(dir: &std::path::Path) -> Shared {
+        use crate::theme::Theme;
+        use crate::Ctx;
+        Shared {
+            ctx: Ctx {
+                config_path: dir.join("c.yaml"),
+                sim: true,
+                version: "0.3.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+            log_sink: rackscreen_app::logs::LogSink::new(10),
+        }
+    }
+
+    #[test]
+    fn hints_flag_a_missing_token_and_a_dead_price_source() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let dir = tempfile::tempdir().unwrap();
+        let sh = test_shared(dir.path());
+        let mut s = Screens::new(&sh);
+        // defaults: no Electricity Maps token, prices from EnergyZero
+        assert_eq!(s.role_hint(Role::PowerMix), Some("no token"));
+        assert_eq!(s.role_hint(Role::Carbon), Some("no token"));
+        assert_eq!(s.role_hint(Role::Price), None, "energyzero needs nothing");
+        assert_eq!(s.role_hint(Role::Cpu), None);
+        {
+            let cfg = s.cfg.as_mut().unwrap();
+            cfg.electricity.token = "tok".into();
+            cfg.price.source = "entsoe".into();
+        }
+        assert_eq!(s.role_hint(Role::PowerMix), None);
+        assert_eq!(
+            s.role_hint(Role::Price),
+            Some("no price source"),
+            "entsoe without a token cannot fetch"
+        );
+        s.cfg.as_mut().unwrap().price.entsoe_token = "t".into();
+        assert_eq!(s.role_hint(Role::Price), None);
+        s.cfg.as_mut().unwrap().price.source = "none".into();
+        assert_eq!(s.role_hint(Role::Price), Some("no price source"));
+        // and the row says so
+        s.editor.apply_preset(Preset::Electricity);
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(text.contains("! no price source"), "{text}");
     }
 
     #[test]
