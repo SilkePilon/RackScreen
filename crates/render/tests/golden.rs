@@ -382,6 +382,26 @@ fn electricity_without_a_token_shows_a_key() {
 }
 
 #[test]
+fn iris_mid_transition() {
+    // one screen cycling cpu -> mem: tick past the dwell and catch the iris in
+    // its outgoing half, where the scene is both shrunk and partly unlit
+    let mut m = ready_model();
+    m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
+    let mut t = 0.0;
+    while t < 3.05 {
+        m.tick(t);
+        t += 1.0 / 30.0;
+    }
+    let s = m.scene(0, 3.25);
+    assert!(s.zoom < 0.5 && s.zoom > 0.1, "zoom {}", s.zoom);
+    assert!(s.ring_reveal < 1.0, "reveal {}", s.ring_reveal);
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&s, &mut px);
+    check("iris_mid", &px);
+}
+
+#[test]
 fn sweep_hold() {
     let mut m = ready_model();
     m.apply(

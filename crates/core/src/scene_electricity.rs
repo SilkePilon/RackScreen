@@ -403,6 +403,41 @@ mod tests {
     }
 
     #[test]
+    fn missing_hours_are_dark_and_the_badge_says_nothing() {
+        // a partial day: ENTSO-E published 0..12, the rest is still missing
+        let mut ct = day();
+        for v in ct.iter_mut().skip(12) {
+            *v = f32::NAN;
+        }
+        let m = price_model(ct);
+        let s = price_scene(&m, 2.5, 14);
+        let states = s
+            .items
+            .iter()
+            .find_map(|d| match d {
+                Drawable::Ring { states, .. } => Some(states.clone()),
+                _ => None,
+            })
+            .expect("ring");
+        assert!(matches!(states[22], SegState::On(..)), "hour 11 is priced");
+        assert!(
+            states[24..48].iter().all(|st| *st == SegState::Off),
+            "the missing hours stay dark"
+        );
+        assert_eq!(s.lit_count(), 24, "two segments for each of the 12 hours");
+        // the current hour is one of the missing ones
+        assert_eq!(badge_text(&s), "--");
+        assert!(s
+            .items
+            .iter()
+            .any(|d| matches!(d, Drawable::Badge { stroke, .. } if *stroke == GREY)));
+        // the min window still works off the hours that did arrive
+        assert_eq!(badge_text(&price_scene(&m, 7.5, 14)), "min 6.2");
+        // and a priced current hour is unaffected
+        assert_eq!(badge_text(&price_scene(&m, 2.5, 3)), "9.2 ct");
+    }
+
+    #[test]
     fn negative_prices_are_blue() {
         let mut ct = day();
         ct[3] = -1.5;
