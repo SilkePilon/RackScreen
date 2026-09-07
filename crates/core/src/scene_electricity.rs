@@ -15,6 +15,9 @@ const MIX_TICK_R1: f32 = 88.0;
 pub fn power_mix_scene(model: &Model, now: Secs) -> Scene {
     let shares = model.smooth_shares(now);
     let sections = partition(&shares, SEG_N);
+    // Non-zero only while a new leader is being turned up to 12 o'clock; the
+    // ring, its ticks and its icons all move together.
+    let start_deg = model.smooth_mix_start(now);
     let mut states = vec![SegState::Off; SEG_N];
     for (k, sec) in sections.iter().enumerate() {
         let end = (sec.start + sec.len).min(SEG_N);
@@ -29,12 +32,17 @@ pub fn power_mix_scene(model: &Model, now: Secs) -> Scene {
         }
     }
     let mut s = Scene::new();
-    s.push(ring(RING_R, states));
+    let mut r = ring(RING_R, states);
+    if let Drawable::Ring { start_deg: sd, .. } = &mut r {
+        *sd = start_deg;
+    }
+    s.push(r);
     for sec in &sections {
         if sec.len < MIX_ICON_MIN_SEGS {
             continue;
         }
-        let angle = (sec.start as f32 + (sec.len as f32 - 1.0) / 2.0) * (360.0 / SEG_N as f32);
+        let angle =
+            (sec.start as f32 + (sec.len as f32 - 1.0) / 2.0) * (360.0 / SEG_N as f32) + start_deg;
         let a = angle.to_radians();
         let (sin, cos) = (a.sin(), a.cos());
         s.push(Drawable::Tick {
@@ -278,6 +286,59 @@ mod tests {
         assert!(!names.contains(&"zap"));
         let lit = s.lit_count();
         assert_eq!(lit + 7, SEG_N, "one dark gap per section");
+    }
+
+    fn ring_start(s: &Scene) -> f32 {
+        s.items
+            .iter()
+            .find_map(|d| match d {
+                Drawable::Ring { start_deg, .. } => Some(*start_deg),
+                _ => None,
+            })
+            .expect("ring")
+    }
+
+    #[test]
+    fn a_new_leader_turns_the_ring_up_to_twelve_oclock() {
+        let mut m = mix_model(&[(Source::Solar, 70.0), (Source::Wind, 30.0)]);
+        // let the first mix settle: solar leads from 12 o'clock, ring at rest
+        let mut t = 0.0;
+        while t < 1.0 {
+            m.tick(t);
+            t += 1.0 / 30.0;
+        }
+        assert_eq!(ring_start(&power_mix_scene(&m, 1.0)), 0.0, "settled ring");
+        assert_eq!(icons(&power_mix_scene(&m, 1.0))[0], "em-solar");
+        // wind takes the lead: `partition` moves it to segment 0 at once, so the
+        // ring turns back by where wind was and eases the turn out
+        m.apply(
+            Event::Electricity {
+                zone: "NL".into(),
+                mix_mw: vec![(Source::Wind, 70.0), (Source::Solar, 30.0)],
+                renewable_pct: 61.0,
+                fossil_free_pct: 73.0,
+                carbon_gco2: 214.0,
+                updated_at: "2026-09-07T12:00:01Z".into(),
+            },
+            1.0,
+        );
+        let mut swapped: Option<(Secs, f32)> = None;
+        while t < 2.0 {
+            m.tick(t);
+            let sd = ring_start(&power_mix_scene(&m, t));
+            if sd != 0.0 && swapped.is_none() {
+                swapped = Some((t, sd));
+            }
+            t += 1.0 / 30.0;
+        }
+        let (t0, sd) = swapped.expect("the ring turns on a leader change");
+        assert!(sd.abs() > 30.0, "turned by {sd} degrees at {t0}");
+        let icons_at_swap = icons(&power_mix_scene(&m, t0));
+        assert_eq!(icons_at_swap[0], "em-wind", "wind leads the sections now");
+        // still turning half way through the smooth, back at rest after it
+        let mid = ring_start(&power_mix_scene(&m, t0 + 0.4));
+        assert!(mid != 0.0 && mid.abs() < sd.abs(), "eases out, got {mid}");
+        assert_eq!(ring_start(&power_mix_scene(&m, t0 + 1.0)), 0.0, "settled");
     }
 
     #[test]

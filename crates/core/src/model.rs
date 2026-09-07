@@ -3,16 +3,20 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
-use crate::electricity::Source;
+use crate::electricity::{partition, Section, Source};
 use crate::event::{Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::screens::ScreenState;
+use crate::theme::layout::SEG_N;
 use crate::theme::Role;
 
 pub const SMOOTH_SECS: Secs = 0.8;
 const HOT_DEBOUNCE_SECS: Secs = 300.0;
 /// Dwell per role on a cycling screen when the caller gives none.
 pub const DEFAULT_CYCLE_SECS: Secs = 15.0;
+/// Extra first dwell per screen index, so equal dwells do not iris together.
+/// Shrunk when the dwell is too short to spread every screen over one cycle.
+pub const SCREEN_STAGGER_SECS: Secs = 2.5;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Thresholds {
@@ -129,6 +133,13 @@ pub struct Model {
     renewable: Smooth,
     fossil_free: Smooth,
     carbon: Smooth,
+    /// Rotation of the power-mix ring in degrees; non-zero only while a new
+    /// leader is being turned to 12 o'clock.
+    mix_start: Smooth,
+    /// Leader and full partition as last drawn, to know where the new leader
+    /// was before it took the lead.
+    mix_leader: Option<Source>,
+    mix_sections: Vec<Section>,
     /// An Electricity Maps token is configured; without one the electricity
     /// roles show a key instead of the offline cloud.
     token_present: bool,
@@ -170,6 +181,9 @@ impl Model {
             renewable: Smooth::new(0.0, SMOOTH_SECS),
             fossil_free: Smooth::new(0.0, SMOOTH_SECS),
             carbon: Smooth::new(0.0, SMOOTH_SECS),
+            mix_start: Smooth::new(0.0, SMOOTH_SECS),
+            mix_leader: None,
+            mix_sections: Vec::new(),
             token_present: false,
             local_hour: 12,
             hot_last: HashMap::new(),
@@ -246,6 +260,12 @@ impl Model {
     pub fn smooth_carbon(&self, now: Secs) -> f32 {
         self.carbon.value(now)
     }
+    /// Degrees the power-mix ring (icons and ticks included) is turned
+    /// clockwise from its natural leader-at-12-o'clock position. Zero unless a
+    /// leader change is being animated.
+    pub fn smooth_mix_start(&self, now: Secs) -> f32 {
+        self.mix_start.value(now)
+    }
     pub fn set_token_present(&mut self, present: bool) {
         self.token_present = present;
     }
@@ -274,11 +294,20 @@ impl Model {
     /// `i`; missing entries use `DEFAULT_CYCLE_SECS`. An empty layout keeps one
     /// CPU screen so `scene(0, ..)` always has something to show.
     pub fn set_screens(&mut self, roles: Vec<Vec<Role>>, cycle_secs: Vec<Secs>) {
+        let count = roles.len().max(1);
         self.screens = roles
             .into_iter()
             .enumerate()
             .map(|(i, r)| {
-                ScreenState::new(r, cycle_secs.get(i).copied().unwrap_or(DEFAULT_CYCLE_SECS))
+                let cycle = cycle_secs
+                    .get(i)
+                    .copied()
+                    .unwrap_or(DEFAULT_CYCLE_SECS)
+                    .max(crate::screens::MIN_CYCLE_SECS);
+                // Spread the first transitions over at most one dwell, so screens
+                // that share a dwell never iris on the same frame again.
+                let step = SCREEN_STAGGER_SECS.min(cycle / count as Secs);
+                ScreenState::new_with_offset(r, cycle, i as Secs * step)
             })
             .collect();
         if self.screens.is_empty() {
@@ -305,6 +334,7 @@ impl Model {
         // sources that left the mix ease to zero, then stop costing anything
         self.shares
             .retain(|_, sm| sm.target() > 0.0 || sm.value(now) >= SHARE_EPS);
+        self.track_mix_leader(now);
         for req in std::mem::take(&mut self.fx) {
             self.fx_state.apply(req, now);
         }
@@ -318,6 +348,30 @@ impl Model {
                     .is_some();
             s.tick(now, busy);
         }
+    }
+
+    /// When the drawn partition gets a new leader, `partition` moves that
+    /// source to segment 0 at once. Compensate by turning the whole ring so the
+    /// new leader stays where it was, then ease the turn back to zero: the ring
+    /// rotates the new leader up to 12 o'clock over `SMOOTH_SECS`.
+    fn track_mix_leader(&mut self, now: Secs) {
+        let sections = partition(&self.smooth_shares(now), SEG_N);
+        let leader = sections.first().map(|s| s.source);
+        if let (Some(new), Some(old)) = (leader, self.mix_leader) {
+            if new != old {
+                if let Some(prev) = self.mix_sections.iter().find(|s| s.source == new) {
+                    let pitch = 360.0 / SEG_N as f32;
+                    let deg = prev.start as f32 * pitch + self.mix_start.value(now);
+                    // shortest way round: (-180, 180]
+                    let deg = deg.rem_euclid(360.0);
+                    let deg = if deg > 180.0 { deg - 360.0 } else { deg };
+                    self.mix_start = Smooth::new(deg, SMOOTH_SECS);
+                    self.mix_start.set(0.0, now);
+                }
+            }
+        }
+        self.mix_leader = leader;
+        self.mix_sections = sections;
     }
 
     pub fn all_healthy(&self) -> bool {
@@ -505,7 +559,13 @@ impl Model {
                 LinkTarget::Prices => self.link.prices = up,
             },
             Event::Boot => {
-                if self.link.api {
+                // Only cluster roles wait for the API link; a layout of pure
+                // electricity screens would otherwise never see its boot sweep.
+                let needs_api = self
+                    .screens
+                    .iter()
+                    .any(|s| s.roles().iter().any(|r| r.is_cluster()));
+                if self.link.api || !needs_api {
                     self.fx.push(FxRequest::Boot);
                 } else {
                     self.boot_pending = true;
@@ -756,6 +816,53 @@ mod tests {
         assert_eq!(m.pending_fx(), &[FxRequest::Boot]);
         m.tick(0.0);
         assert_eq!(m.fx().sweeps.active().unwrap().kind, SweepKind::Boot);
+    }
+
+    #[test]
+    fn boot_plays_at_once_when_no_screen_needs_the_cluster() {
+        use crate::fx::SweepKind;
+        let mut m = Model::new(Thresholds::default());
+        m.set_screens(
+            vec![vec![Role::PowerMix, Role::Price], vec![Role::Carbon]],
+            vec![15.0; 2],
+        );
+        m.apply(Event::Boot, 0.0);
+        assert_eq!(m.pending_fx(), &[FxRequest::Boot]);
+        m.tick(0.0);
+        assert_eq!(m.fx().sweeps.active().unwrap().kind, SweepKind::Boot);
+        // one cluster role anywhere in the layout is enough to defer again
+        let mut m2 = Model::new(Thresholds::default());
+        m2.set_screens(vec![vec![Role::PowerMix, Role::Thermal]], vec![15.0]);
+        m2.apply(Event::Boot, 0.0);
+        assert!(m2.pending_fx().is_empty());
+    }
+
+    #[test]
+    fn screens_are_staggered_by_index() {
+        let mut m = Model::new(Thresholds::default());
+        let roles = vec![Role::Cpu, Role::Mem];
+        m.set_screens(vec![roles.clone(), roles.clone(), roles], vec![15.0; 3]);
+        let mut started = [None; 3];
+        for i in 0..640 {
+            let now = i as f64 / 30.0;
+            m.tick(now);
+            for (k, slot) in started.iter_mut().enumerate() {
+                if slot.is_none() && m.screen(k).unwrap().transition(now).is_some() {
+                    *slot = Some(i);
+                }
+            }
+        }
+        let t: Vec<usize> = started.iter().map(|s| s.expect("transitioned")).collect();
+        assert!(t[0] < t[1] && t[1] < t[2], "staggered, got {t:?}");
+        assert_eq!(t[1] - t[0], 75, "2.5 s apart at 30 Hz");
+        assert_eq!(t[2] - t[1], 75);
+        // a short dwell shrinks the step instead of overflowing past a cycle
+        let mut short = Model::new(Thresholds::default());
+        let roles = vec![Role::Cpu, Role::Mem];
+        short.set_screens(vec![roles.clone(), roles.clone(), roles], vec![3.0; 3]);
+        for k in 0..3 {
+            assert!(short.screen(k).unwrap().transition(0.0).is_none());
+        }
     }
 
     #[test]

@@ -141,6 +141,14 @@ impl Role {
     pub fn parse(s: &str) -> Option<Role> {
         Role::ALL.iter().copied().find(|r| r.name() == s)
     }
+    /// Cluster roles need the Kubernetes API link; the electricity roles are fed
+    /// by public grid APIs and work without a cluster.
+    pub fn is_cluster(self) -> bool {
+        matches!(
+            self,
+            Role::Cpu | Role::Mem | Role::Pods | Role::Health | Role::Thermal | Role::Storage
+        )
+    }
     pub fn accent(self) -> Color {
         match self {
             Role::Cpu => AMBER,
@@ -250,6 +258,23 @@ mod tests {
         for r in Role::ALL {
             assert_eq!(Role::from_index(r.index()), Some(r));
         }
+    }
+
+    #[test]
+    fn cluster_roles_are_the_six_kubernetes_ones() {
+        let cluster: Vec<Role> = Role::ALL.into_iter().filter(|r| r.is_cluster()).collect();
+        assert_eq!(
+            cluster,
+            vec![
+                Role::Cpu,
+                Role::Mem,
+                Role::Pods,
+                Role::Health,
+                Role::Thermal,
+                Role::Storage
+            ]
+        );
+        assert!(!Role::PowerMix.is_cluster() && !Role::Price.is_cluster());
     }
 
     #[test]

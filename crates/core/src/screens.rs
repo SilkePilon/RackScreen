@@ -25,16 +25,24 @@ pub struct ScreenState {
 
 impl ScreenState {
     pub fn new(roles: Vec<Role>, cycle_secs: Secs) -> ScreenState {
+        ScreenState::new_with_offset(roles, cycle_secs, 0.0)
+    }
+
+    /// Like `new`, but the first dwell lasts `offset` seconds longer, so screens
+    /// with equal dwells do not iris on the same frame. The offset is clamped to
+    /// one dwell, so no screen waits more than two dwells for its first change.
+    pub fn new_with_offset(roles: Vec<Role>, cycle_secs: Secs, offset: Secs) -> ScreenState {
         let roles = if roles.is_empty() {
             vec![Role::Cpu]
         } else {
             roles
         };
+        let cycle_secs = cycle_secs.max(MIN_CYCLE_SECS);
         ScreenState {
             roles,
-            cycle_secs: cycle_secs.max(MIN_CYCLE_SECS),
+            cycle_secs,
             current: 0,
-            since: 0.0,
+            since: offset.clamp(0.0, cycle_secs),
             transition_started: None,
         }
     }
@@ -138,6 +146,49 @@ mod tests {
         assert_eq!(s.current(), Role::Thermal);
         s.tick(10.8, false);
         assert_eq!(s.transition(10.8).unwrap().to, Role::Cpu, "wraps around");
+    }
+
+    /// Tick two screens at 30 Hz and return the tick index at which each one's
+    /// first transition started.
+    fn first_transition_ticks(a: &mut ScreenState, b: &mut ScreenState) -> (usize, usize) {
+        let (mut ta, mut tb) = (None, None);
+        for i in 0..600 {
+            let now = i as f64 / 30.0;
+            a.tick(now, false);
+            b.tick(now, false);
+            if ta.is_none() && a.transition(now).is_some() {
+                ta = Some(i);
+            }
+            if tb.is_none() && b.transition(now).is_some() {
+                tb = Some(i);
+            }
+            if ta.is_some() && tb.is_some() {
+                break;
+            }
+        }
+        (ta.expect("a transitions"), tb.expect("b transitions"))
+    }
+
+    #[test]
+    fn offset_screens_do_not_iris_in_lockstep() {
+        let roles = vec![Role::Cpu, Role::Mem];
+        let mut a = ScreenState::new_with_offset(roles.clone(), 5.0, 0.0);
+        let mut b = ScreenState::new_with_offset(roles.clone(), 5.0, 2.5);
+        let (ta, tb) = first_transition_ticks(&mut a, &mut b);
+        assert_ne!(ta, tb, "different offsets, different ticks");
+        assert_eq!(tb - ta, 75, "2.5 s later at 30 Hz");
+        // equal offsets (the old behaviour) do start on the same tick
+        let mut c = ScreenState::new(roles.clone(), 5.0);
+        let mut d = ScreenState::new(roles.clone(), 5.0);
+        let (tc, td) = first_transition_ticks(&mut c, &mut d);
+        assert_eq!(tc, td);
+        // an offset longer than the dwell is clamped, so the wait stays bounded
+        let e = ScreenState::new_with_offset(roles, 3.0, 5.0);
+        assert!(
+            (e.since - 3.0).abs() < 1e-9,
+            "clamped to one dwell, got {}",
+            e.since
+        );
     }
 
     #[test]

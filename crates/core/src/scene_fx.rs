@@ -88,11 +88,14 @@ pub fn splash_overlay(mut base: Scene, splash: &Splash, now: Secs) -> Scene {
         });
     }
 
-    // 5. collapsed counter in the badge
+    // 5. collapsed counter in the badge (only badges that carry text; the
+    //    thermal dots badge is a frame with no text and stays as it is)
     if splash.count > 1 {
         for d in base.items.iter_mut() {
             if let Drawable::Badge { text, .. } = d {
-                *text = format!("+{}", splash.count);
+                if !text.is_empty() {
+                    *text = format!("+{}", splash.count);
+                }
             }
         }
     }
@@ -148,17 +151,28 @@ pub fn sweep_scene(sweep: &Sweep, role: Role, phase: SweepPhase, now: Secs) -> S
 }
 
 impl crate::model::Model {
+    /// A role has nothing live to show: its data never arrived, or the link that
+    /// feeds it is down (stale data is not shown as live).
     fn needs_data(&self, role: Role) -> bool {
         let st = self.state();
+        let link = self.link();
         match role {
-            Role::Cpu | Role::Mem => !(self.link().prom && st.have_metrics),
+            Role::Cpu | Role::Mem => !(link.prom && st.have_metrics),
             Role::Pods => !st.have_pods,
             Role::Health => !st.have_nodes,
-            Role::Thermal => !st.have_temps,
-            Role::Storage => !st.have_storage,
-            Role::PowerMix | Role::Carbon | Role::Renewable => !self.electricity().have,
-            Role::Price => !self.prices().have,
+            Role::Thermal => !(link.prom && st.have_temps),
+            Role::Storage => !(link.prom && st.have_storage),
+            Role::PowerMix | Role::Carbon | Role::Renewable => {
+                !(link.electricity && self.electricity().have)
+            }
+            Role::Price => !(link.prices && self.prices().have),
         }
+    }
+
+    /// Cluster roles show the connecting scene while the API link is down; the
+    /// electricity roles do not depend on the cluster at all.
+    fn wants_connecting(&self, role: Role) -> bool {
+        role.is_cluster() && !self.link().api
     }
 
     /// Scene for one screen at one instant; the only call the render loop makes.
@@ -169,7 +183,7 @@ impl crate::model::Model {
             None => return connecting_scene(now),
         };
         let role = state.current();
-        if !self.link().api {
+        if self.wants_connecting(role) {
             return connecting_scene(now);
         }
         if let Some(sw) = self.fx().sweeps.active() {
@@ -181,7 +195,11 @@ impl crate::model::Model {
         if let Some(tr) = state.transition(now) {
             let (zoom, reveal) = crate::screens::transition_transform(tr.t);
             let shown = if tr.t < 0.5 { tr.from } else { tr.to };
-            let mut s = self.scene_for_role(shown, now);
+            let mut s = if self.wants_connecting(shown) {
+                connecting_scene(now)
+            } else {
+                self.scene_for_role(shown, now)
+            };
             s.zoom = zoom;
             s.ring_reveal = reveal;
             return s;
@@ -444,6 +462,182 @@ mod tests {
         assert_eq!(s.zoom, 1.0);
         let s = m.scene(7, 1.0);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "plug-zap"));
+    }
+
+    fn link(target: LinkTarget, up: bool) -> Event {
+        Event::Link { target, up }
+    }
+
+    fn electricity_event() -> Event {
+        Event::Electricity {
+            zone: "NL".into(),
+            mix_mw: vec![
+                (crate::electricity::Source::Solar, 60.0),
+                (crate::electricity::Source::Wind, 40.0),
+            ],
+            renewable_pct: 61.0,
+            fossil_free_pct: 73.0,
+            carbon_gco2: 214.0,
+            updated_at: "2026-09-07T12:00:00Z".into(),
+        }
+    }
+
+    fn has_icon(s: &Scene, name: &str) -> bool {
+        icons(s).iter().any(|(n, ..)| *n == name)
+    }
+
+    #[test]
+    fn electricity_roles_go_back_to_no_data_when_the_link_drops() {
+        let mut m = ready_model();
+        m.set_token_present(true);
+        m.apply(electricity_event(), 0.0);
+        m.apply(link(LinkTarget::Electricity, true), 0.0);
+        let s = m.scene_for_role(Role::PowerMix, 5.0);
+        assert!(s.lit_count() > 0, "power mix ring lit with the link up");
+        assert!(!has_icon(&s, "cloud-off"));
+        m.apply(link(LinkTarget::Electricity, false), 6.0);
+        let s = m.scene_for_role(Role::PowerMix, 6.0);
+        assert!(has_icon(&s, "cloud-off"), "stale mix is not shown as live");
+        assert!(has_icon(&m.scene_for_role(Role::Carbon, 6.0), "cloud-off"));
+        assert!(has_icon(
+            &m.scene_for_role(Role::Renewable, 6.0),
+            "cloud-off"
+        ));
+        // without a token the same outage shows the key instead
+        m.set_token_present(false);
+        assert!(has_icon(
+            &m.scene_for_role(Role::PowerMix, 6.0),
+            "key-round"
+        ));
+    }
+
+    #[test]
+    fn price_role_gates_on_the_prices_link() {
+        let mut m = ready_model();
+        m.set_token_present(true);
+        m.apply(
+            Event::Prices {
+                date: "2026-09-07".into(),
+                ct_per_kwh: vec![10.0; 24],
+                currency: "EUR".into(),
+            },
+            0.0,
+        );
+        m.apply(link(LinkTarget::Prices, true), 0.0);
+        assert!(has_icon(&m.scene_for_role(Role::Price, 1.0), "euro"));
+        m.apply(link(LinkTarget::Prices, false), 2.0);
+        assert!(has_icon(&m.scene_for_role(Role::Price, 2.0), "cloud-off"));
+    }
+
+    #[test]
+    fn thermal_and_storage_gate_on_the_prometheus_link() {
+        let mut m = ready_model();
+        m.apply(
+            Event::NodeTemps(vec![("n1".into(), 44.0), ("n2".into(), 51.0)]),
+            0.0,
+        );
+        m.apply(
+            Event::Storage {
+                volumes: vec![],
+                used_bytes: 1,
+                capacity_bytes: 2,
+            },
+            0.0,
+        );
+        assert!(has_icon(
+            &m.scene_for_role(Role::Thermal, 1.0),
+            "thermometer"
+        ));
+        assert!(has_icon(&m.scene_for_role(Role::Storage, 1.0), "database"));
+        m.apply(link(LinkTarget::Prometheus, false), 2.0);
+        assert!(has_icon(&m.scene_for_role(Role::Thermal, 2.0), "cloud-off"));
+        assert!(has_icon(&m.scene_for_role(Role::Storage, 2.0), "cloud-off"));
+    }
+
+    #[test]
+    fn electricity_roles_do_not_need_the_api_link() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_token_present(true);
+        m.set_screens(vec![vec![Role::PowerMix], vec![Role::Cpu]], vec![15.0; 2]);
+        m.apply(electricity_event(), 0.0);
+        m.apply(link(LinkTarget::Electricity, true), 0.0);
+        assert!(!m.link().api);
+        let s = m.scene(0, 5.0);
+        assert!(!has_icon(&s, "plug-zap"), "power mix ignores the API link");
+        assert!(s.lit_count() > 0);
+        assert!(has_icon(&m.scene(1, 5.0), "plug-zap"), "cpu still connects");
+    }
+
+    #[test]
+    fn transition_into_a_cluster_role_with_api_down_shows_connecting() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_token_present(true);
+        m.set_screens(vec![vec![Role::PowerMix, Role::Cpu]], vec![3.0]);
+        m.apply(electricity_event(), 0.0);
+        m.apply(link(LinkTarget::Electricity, true), 0.0);
+        for i in 0..=100 {
+            m.tick(i as f64 * 0.033);
+        }
+        let s = m.scene(0, 3.4);
+        assert!(s.zoom < 1.0, "mid transition");
+        assert!(
+            has_icon(&s, "plug-zap"),
+            "incoming cpu half is the connecting scene"
+        );
+    }
+
+    #[test]
+    fn two_screens_with_the_same_role_both_get_the_splash() {
+        let mut m = ready_model();
+        m.set_screens(vec![vec![Role::Pods], vec![Role::Pods]], vec![15.0; 2]);
+        m.apply(
+            Event::PodStarted {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            1.0,
+        );
+        m.tick(1.0);
+        assert!(has_icon(&m.scene(0, 1.4), "package-plus"));
+        assert!(has_icon(&m.scene(1, 1.4), "package-plus"));
+    }
+
+    #[test]
+    fn splash_counter_leaves_textless_badges_alone() {
+        let mut m = ready_model();
+        m.apply(
+            Event::NodeTemps(vec![("n1".into(), 44.0), ("n2".into(), 51.0)]),
+            0.0,
+        );
+        m.set_screens(vec![vec![Role::Thermal]], vec![15.0]);
+        for _ in 0..3 {
+            m.apply(
+                Event::HotTemp {
+                    node: "n2".into(),
+                    celsius: 80.0,
+                },
+                1.0,
+            );
+        }
+        m.tick(1.0);
+        let s = m.scene(0, 1.5);
+        let texts: Vec<String> = s
+            .items
+            .iter()
+            .filter_map(|d| match d {
+                Drawable::Badge { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!texts.is_empty());
+        assert!(
+            texts.iter().all(|t| t.is_empty() || t == "+3"),
+            "the dots badge keeps its empty text, got {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.is_empty()),
+            "thermal dots badge is textless"
+        );
     }
 
     #[test]

@@ -298,6 +298,11 @@ fn storage_idle_and_degraded() {
 fn electricity_model() -> Model {
     let mut m = ready_model();
     m.set_token_present(true);
+    // the pollers raise their link before the first payload; without it the
+    // roles are treated as having no live data
+    for target in [LinkTarget::Electricity, LinkTarget::Prices] {
+        m.apply(Event::Link { target, up: true }, 0.0);
+    }
     m.apply(
         Event::Electricity {
             zone: "NL".into(),

@@ -67,7 +67,13 @@ type SegKey = (u32, u32, u32, usize, u32, u32);
 
 /// How many distinct rings to keep before dropping the lot. Rotating rings vary
 /// `start_deg` every frame, so without a cap the map would grow without bound.
-const SEG_CACHE_MAX: usize = 512;
+const SEG_CACHE_MAX: usize = 1024;
+
+/// `start_deg` is snapped to this many degrees before the paths are built, so a
+/// full turn of a rotating ring allocates at most 720 entries before it starts
+/// hitting the cache again. A quarter of a degree is well under a pixel at the
+/// ring radius.
+const START_QUANT_DEG: f32 = 0.5;
 
 pub struct SegmentCache {
     map: HashMap<SegKey, Vec<Path>>,
@@ -97,13 +103,16 @@ impl SegmentCache {
         start_deg: f32,
     ) -> &[Path] {
         use rackscreen_core::theme::layout::{SEG_LEN, SEG_W};
+        let steps = (360.0 / START_QUANT_DEG) as u32;
+        let step = ((start_deg.rem_euclid(360.0) / START_QUANT_DEG).round() as u32) % steps;
+        let start_deg = step as f32 * START_QUANT_DEG;
         let key = (
             (cx * 10.0) as u32,
             (cy * 10.0) as u32,
             (radius * 10.0) as u32,
             n,
             (pitch_deg * 100.0) as u32,
-            (start_deg.rem_euclid(360.0) * 100.0) as u32,
+            step,
         );
         if self.map.len() > SEG_CACHE_MAX && !self.map.contains_key(&key) {
             self.map.clear();
@@ -214,9 +223,27 @@ mod tests {
     fn segment_cache_is_capped() {
         let mut c = SegmentCache::new();
         for i in 0..(SEG_CACHE_MAX + 4) {
-            c.segments_pitched(120.0, 120.0, 102.0, 1, 6.0, i as f32 * 0.5);
+            c.segments_pitched(120.0, 120.0, 102.0, 1, 6.0 + i as f32, 0.0);
         }
         assert!(c.map.len() <= SEG_CACHE_MAX + 1, "len {}", c.map.len());
+    }
+
+    #[test]
+    fn rotation_quantises_to_half_a_degree() {
+        let mut c = SegmentCache::new();
+        for i in 0..3600 {
+            c.segments_pitched(120.0, 120.0, 102.0, 4, 6.0, i as f32 * 0.1);
+        }
+        assert_eq!(c.map.len(), 720, "one key per half degree of a full turn");
+        // neighbours inside one step share an entry, and 360 wraps onto 0
+        let mut d = SegmentCache::new();
+        d.segments_pitched(120.0, 120.0, 102.0, 4, 6.0, 0.0);
+        d.segments_pitched(120.0, 120.0, 102.0, 4, 6.0, 0.2);
+        d.segments_pitched(120.0, 120.0, 102.0, 4, 6.0, 359.9);
+        d.segments_pitched(120.0, 120.0, 102.0, 4, 6.0, -0.1);
+        assert_eq!(d.map.len(), 1);
+        d.segments_pitched(120.0, 120.0, 102.0, 4, 6.0, 0.5);
+        assert_eq!(d.map.len(), 2);
     }
 
     #[test]
