@@ -438,6 +438,17 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         Role::Price => crate::scene_electricity::price_scene(model, now, model.local_hour()),
         Role::Carbon => crate::scene_electricity::carbon_scene(model, now),
         Role::Renewable => crate::scene_electricity::renewable_scene(model, now),
+        Role::GhActivity
+        | Role::Weather
+        | Role::Wind
+        | Role::Aqi
+        | Role::Rain
+        | Role::Sun
+        | Role::Moon
+        | Role::Iss
+        | Role::Ups
+        | Role::Net
+        | Role::Deploys => no_data_scene(now),
     }
 }
 

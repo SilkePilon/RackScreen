@@ -86,6 +86,43 @@ pub fn price_color(t: f32) -> Color {
     GREEN.mix(RED, t.clamp(0.0, 1.0))
 }
 
+/// GitHub contribution calendar greens, lightest level first.
+pub const GH_GREENS: [Color; 4] = [
+    Color::hex(0x0e4429),
+    Color::hex(0x006d32),
+    Color::hex(0x26a641),
+    Color::hex(0x39d353),
+];
+
+/// Outdoor temperature: 0 °C and below blue, 15 green, 25 amber, 35 and above red.
+pub fn outdoor_color(c: f32) -> Color {
+    if c <= 15.0 {
+        BLUE.mix(GREEN, (c / 15.0).clamp(0.0, 1.0))
+    } else if c <= 25.0 {
+        GREEN.mix(AMBER, (c - 15.0) / 10.0)
+    } else {
+        AMBER.mix(RED, ((c - 25.0) / 10.0).clamp(0.0, 1.0))
+    }
+}
+
+/// European Air Quality Index band, 0 (good) to 5 (extremely poor).
+pub fn eaqi_band(v: f32) -> usize {
+    match v {
+        v if v < 20.0 => 0,
+        v if v < 40.0 => 1,
+        v if v < 60.0 => 2,
+        v if v < 80.0 => 3,
+        v if v < 100.0 => 4,
+        _ => 5,
+    }
+}
+
+/// The EEA colour for an EAQI value.
+pub fn eaqi_color(v: f32) -> Color {
+    const BANDS: [u32; 6] = [0x50F0E6, 0x50CCAA, 0xF0E641, 0xFF5050, 0x960032, 0x7D2181];
+    Color::hex(BANDS[eaqi_band(v)])
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Role {
     Cpu,
@@ -98,10 +135,21 @@ pub enum Role {
     Price,
     Carbon,
     Renewable,
+    GhActivity,
+    Weather,
+    Wind,
+    Aqi,
+    Rain,
+    Sun,
+    Moon,
+    Iss,
+    Ups,
+    Net,
+    Deploys,
 }
 
 impl Role {
-    pub const ALL: [Role; 10] = [
+    pub const ALL: [Role; 21] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -112,6 +160,17 @@ impl Role {
         Role::Price,
         Role::Carbon,
         Role::Renewable,
+        Role::GhActivity,
+        Role::Weather,
+        Role::Wind,
+        Role::Aqi,
+        Role::Rain,
+        Role::Sun,
+        Role::Moon,
+        Role::Iss,
+        Role::Ups,
+        Role::Net,
+        Role::Deploys,
     ];
 
     pub fn index(self) -> usize {
@@ -136,17 +195,49 @@ impl Role {
             Role::Price => "price",
             Role::Carbon => "carbon",
             Role::Renewable => "renewable",
+            Role::GhActivity => "gh-activity",
+            Role::Weather => "weather",
+            Role::Wind => "wind",
+            Role::Aqi => "aqi",
+            Role::Rain => "rain",
+            Role::Sun => "sun",
+            Role::Moon => "moon",
+            Role::Iss => "iss",
+            Role::Ups => "ups",
+            Role::Net => "net",
+            Role::Deploys => "deploys",
         }
     }
     pub fn parse(s: &str) -> Option<Role> {
         Role::ALL.iter().copied().find(|r| r.name() == s)
     }
-    /// Cluster roles need the Kubernetes API link; the electricity roles are fed
-    /// by public grid APIs and work without a cluster.
+    /// Cluster roles need the Kubernetes API link; the electricity, sky and
+    /// GitHub roles are fed by public APIs and work without a cluster.
     pub fn is_cluster(self) -> bool {
         matches!(
             self,
-            Role::Cpu | Role::Mem | Role::Pods | Role::Health | Role::Thermal | Role::Storage
+            Role::Cpu
+                | Role::Mem
+                | Role::Pods
+                | Role::Health
+                | Role::Thermal
+                | Role::Storage
+                | Role::Ups
+                | Role::Net
+                | Role::Deploys
+        )
+    }
+    /// Roles that need `location.lat` / `location.lon` in the config.
+    pub fn is_sky(self) -> bool {
+        matches!(
+            self,
+            Role::Weather
+                | Role::Wind
+                | Role::Aqi
+                | Role::Rain
+                | Role::Sun
+                | Role::Moon
+                | Role::Iss
         )
     }
     pub fn accent(self) -> Color {
@@ -161,6 +252,17 @@ impl Role {
             Role::Price => GREEN,
             Role::Carbon => Color::hex(0x2AA364),
             Role::Renewable => GREEN,
+            Role::GhActivity => GH_GREENS[3],
+            Role::Weather => AMBER,
+            Role::Wind => BLUE,
+            Role::Aqi => Color::hex(0x50CCAA),
+            Role::Rain => BLUE,
+            Role::Sun => AMBER,
+            Role::Moon => Color::hex(0xe8e8f0),
+            Role::Iss => VIOLET,
+            Role::Ups => GREEN,
+            Role::Net => BLUE,
+            Role::Deploys => GREEN,
         }
     }
     pub fn icon(self) -> &'static str {
@@ -175,6 +277,17 @@ impl Role {
             Role::Price => "euro",
             Role::Carbon => "cloud",
             Role::Renewable => "leaf",
+            Role::GhActivity => "github",
+            Role::Weather => "cloud-sun",
+            Role::Wind => "wind",
+            Role::Aqi => "haze",
+            Role::Rain => "cloud-rain",
+            Role::Sun => "sunset",
+            Role::Moon => "moon",
+            Role::Iss => "satellite",
+            Role::Ups => "battery-charging",
+            Role::Net => "arrow-down-up",
+            Role::Deploys => "rocket",
         }
     }
 }
@@ -261,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn cluster_roles_are_the_six_kubernetes_ones() {
+    fn cluster_roles_are_the_kubernetes_ones() {
         let cluster: Vec<Role> = Role::ALL.into_iter().filter(|r| r.is_cluster()).collect();
         assert_eq!(
             cluster,
@@ -271,10 +384,58 @@ mod tests {
                 Role::Pods,
                 Role::Health,
                 Role::Thermal,
-                Role::Storage
+                Role::Storage,
+                Role::Ups,
+                Role::Net,
+                Role::Deploys,
             ]
         );
         assert!(!Role::PowerMix.is_cluster() && !Role::Price.is_cluster());
+        assert!(!Role::Weather.is_cluster() && !Role::GhActivity.is_cluster());
+    }
+
+    #[test]
+    fn twenty_one_roles_with_unique_names_and_icons() {
+        assert_eq!(Role::ALL.len(), 21);
+        let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
+        assert_eq!(names.len(), 21);
+        assert_eq!(Role::parse("gh-activity"), Some(Role::GhActivity));
+        assert_eq!(Role::parse("deploys"), Some(Role::Deploys));
+        assert_eq!(Role::Iss.icon(), "satellite");
+        assert_eq!(Role::Ups.icon(), "battery-charging");
+        let sky: Vec<Role> = Role::ALL.into_iter().filter(|r| r.is_sky()).collect();
+        assert_eq!(
+            sky,
+            vec![
+                Role::Weather,
+                Role::Wind,
+                Role::Aqi,
+                Role::Rain,
+                Role::Sun,
+                Role::Moon,
+                Role::Iss
+            ]
+        );
+    }
+
+    #[test]
+    fn outdoor_and_air_quality_scales() {
+        assert_eq!(outdoor_color(-5.0), BLUE);
+        assert_eq!(outdoor_color(0.0), BLUE);
+        assert_eq!(outdoor_color(15.0), GREEN);
+        assert_eq!(outdoor_color(25.0), AMBER);
+        assert_eq!(outdoor_color(35.0), RED);
+        assert_eq!(outdoor_color(40.0), RED);
+        assert_eq!(outdoor_color(20.0), GREEN.mix(AMBER, 0.5));
+        assert_eq!(eaqi_band(0.0), 0);
+        assert_eq!(eaqi_band(19.9), 0);
+        assert_eq!(eaqi_band(20.0), 1);
+        assert_eq!(eaqi_band(45.0), 2);
+        assert_eq!(eaqi_band(79.0), 3);
+        assert_eq!(eaqi_band(99.0), 4);
+        assert_eq!(eaqi_band(150.0), 5);
+        assert_eq!(eaqi_color(32.0), Color::hex(0x50CCAA));
+        assert_eq!(eaqi_color(500.0), Color::hex(0x7D2181));
     }
 
     #[test]

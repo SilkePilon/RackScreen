@@ -45,6 +45,10 @@ pub struct LinkState {
     pub qbit: bool,
     pub electricity: bool,
     pub prices: bool,
+    pub weather: bool,
+    pub rain: bool,
+    pub github: bool,
+    pub argocd: bool,
 }
 
 /// The latest Electricity Maps sample.
@@ -201,6 +205,10 @@ impl Model {
                 qbit: false,
                 electricity: false,
                 prices: false,
+                weather: false,
+                rain: false,
+                github: false,
+                argocd: false,
             },
             thresholds,
             cpu: Smooth::new(0.0, SMOOTH_SECS),
@@ -772,6 +780,10 @@ impl Model {
                 LinkTarget::QBittorrent => self.link.qbit = up,
                 LinkTarget::Electricity => self.link.electricity = up,
                 LinkTarget::Prices => self.link.prices = up,
+                LinkTarget::Weather => self.link.weather = up,
+                LinkTarget::Rain => self.link.rain = up,
+                LinkTarget::Github => self.link.github = up,
+                LinkTarget::ArgoCd => self.link.argocd = up,
             },
             Event::Boot => {
                 // Only cluster roles wait for the API link; a layout of pure
@@ -787,6 +799,25 @@ impl Model {
                 }
             }
             Event::ForceNight(v) => self.night_override = v,
+            Event::Weather { .. }
+            | Event::AirQuality { .. }
+            | Event::Rain { .. }
+            | Event::Sky { .. }
+            | Event::IssPass(_)
+            | Event::GithubActivity { .. }
+            | Event::GithubPush { .. }
+            | Event::GithubStar { .. }
+            | Event::GithubMerge { .. }
+            | Event::GithubRelease { .. }
+            | Event::GithubRun { .. }
+            | Event::Ups { .. }
+            | Event::UpsOnBattery
+            | Event::UpsOnline
+            | Event::Network { .. }
+            | Event::Apps(_)
+            | Event::AppSynced { .. }
+            | Event::AppDegraded { .. }
+            | Event::AppHealthy { .. } => {}
         }
     }
 

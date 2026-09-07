@@ -32,6 +32,67 @@ impl Robustness {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MoonPhase {
+    New,
+    WaxingCrescent,
+    FirstQuarter,
+    WaxingGibbous,
+    Full,
+    WaningGibbous,
+    LastQuarter,
+    WaningCrescent,
+}
+
+impl MoonPhase {
+    /// Short badge text.
+    pub fn label(self) -> &'static str {
+        match self {
+            MoonPhase::New => "new",
+            MoonPhase::WaxingCrescent | MoonPhase::WaxingGibbous => "waxing",
+            MoonPhase::FirstQuarter => "first q",
+            MoonPhase::Full => "full",
+            MoonPhase::WaningGibbous | MoonPhase::WaningCrescent => "waning",
+            MoonPhase::LastQuarter => "last q",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppSync {
+    Synced,
+    OutOfSync,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppHealth {
+    Healthy,
+    Progressing,
+    Degraded,
+    Suspended,
+    Missing,
+    Unknown,
+}
+
+/// One Argo CD application: name, sync state, health, and whether an operation is running.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct App {
+    pub name: String,
+    pub sync: AppSync,
+    pub health: AppHealth,
+    pub operating: bool,
+}
+
+/// The next ISS pass over the observer, unix seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IssPass {
+    pub start: i64,
+    pub end: i64,
+    pub max_elevation_deg: f32,
+    pub visible: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -39,6 +100,10 @@ pub enum LinkTarget {
     QBittorrent,
     Electricity,
     Prices,
+    Weather,
+    Rain,
+    Github,
+    ArgoCd,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -118,6 +183,84 @@ pub enum Event {
         date: String,
         ct_per_kwh: Vec<f32>,
         currency: String,
+    },
+    /// Current conditions from Open-Meteo.
+    Weather {
+        temp_c: f32,
+        /// WMO weather interpretation code.
+        code: u16,
+        is_day: bool,
+        wind_kmh: f32,
+        gust_kmh: f32,
+        /// Direction the wind comes from, degrees clockwise from north.
+        wind_from_deg: f32,
+        at: String,
+    },
+    AirQuality {
+        eaqi: f32,
+    },
+    /// Buienradar nowcast: 24 five-minute slots from `from`.
+    Rain {
+        from: i64,
+        mm_per_h: Vec<f32>,
+    },
+    /// Sun and moon, computed on the Pi once a minute.
+    Sky {
+        sunrise: Option<i64>,
+        sunset: Option<i64>,
+        sun_elevation_deg: f32,
+        /// 0..1
+        moon_illumination: f32,
+        moon_waxing: bool,
+        moon_phase: MoonPhase,
+    },
+    /// `None` when no pass clears `iss.min_elevation` in the next 24 h.
+    IssPass(Option<IssPass>),
+    /// Thirty days of contribution counts, oldest first, last entry today.
+    GithubActivity {
+        days: Vec<(String, u32)>,
+    },
+    GithubPush {
+        repo: String,
+        commits: u32,
+    },
+    GithubStar {
+        repo: String,
+    },
+    GithubMerge {
+        repo: String,
+    },
+    GithubRelease {
+        repo: String,
+        tag: String,
+    },
+    GithubRun {
+        repo: String,
+        ok: bool,
+    },
+    Ups {
+        on_battery: bool,
+        low_battery: bool,
+        charge_pct: f32,
+        load_pct: f32,
+        runtime_secs: u32,
+    },
+    UpsOnBattery,
+    UpsOnline,
+    Network {
+        rx_bps: f64,
+        tx_bps: f64,
+    },
+    /// Every Argo CD application, sorted by name.
+    Apps(Vec<App>),
+    AppSynced {
+        name: String,
+    },
+    AppDegraded {
+        name: String,
+    },
+    AppHealthy {
+        name: String,
     },
     Torrents(Vec<Torrent>),
     TorrentAdded {

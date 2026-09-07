@@ -76,7 +76,7 @@ pub struct NightWindow {
 /// Multiply every channel by `k` (0 = black, 1 = unchanged).
 pub fn darken(px: &mut Pixmap, k: f32) {
     let k = k.clamp(0.0, 1.0);
-    for p in px.data_mut().chunks_exact_mut(4) {
+    for p in px.data_mut().as_chunks_mut::<4>().0 {
         p[0] = (p[0] as f32 * k) as u8;
         p[1] = (p[1] as f32 * k) as u8;
         p[2] = (p[2] as f32 * k) as u8;
