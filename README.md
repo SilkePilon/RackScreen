@@ -17,13 +17,14 @@
   <a href="#screens">Screens</a> &nbsp;·&nbsp;
   <a href="#setup-tui">Setup TUI</a> &nbsp;·&nbsp;
   <a href="#electricity-mode">Electricity mode</a> &nbsp;·&nbsp;
+  <a href="#sky-roles">Sky roles</a> &nbsp;·&nbsp;
   <a href="#configuration">Configuration</a> &nbsp;·&nbsp;
   <a href="#development">Development</a>
 </p>
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one icon, one segmented ring and a small outlined badge on black, and none of it is ever static: values ease into place, the last segment breathes, icons run micro-loops. Cluster events splash on the screen that owns them, big events sweep the whole rack top to bottom, and a screen can cycle through several roles with an iris transition. Six roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, so the same rack can show pods on one panel and today's electricity price on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one icon, one segmented ring and a small outlined badge on black, and none of it is ever static: values ease into place, the last segment breathes, icons run micro-loops. Cluster events splash on the screen that owns them, big events sweep the whole rack top to bottom, and a screen can cycle through several roles with an iris transition. Nine roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house and one from GitHub, so the same rack can show pods on one panel and today's electricity price on the next.
 
 ## Screens
 
@@ -41,6 +42,18 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`power-mix`** — the grid production mix, one arc and icon per source | **`price`** — the day-ahead price per hour, the current hour breathing |
 | <img src=".github/media/screens/carbon.gif" alt="CARBON role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
 | **`carbon`** — grid carbon intensity, on the Electricity Maps colour scale | **`renewable`** — the renewable share outside, the fossil-free share inside |
+| <img src=".github/media/screens/gh-activity.gif" alt="GH ACTIVITY role" width="200"> | <img src=".github/media/screens/weather.gif" alt="WEATHER role" width="200"> |
+| **`gh-activity`** — today's contributions outside, the last week inside; pushes, stars and CI results splash | **`weather`** — the temperature ring and an icon for the sky; thunder splashes |
+| <img src=".github/media/screens/wind.gif" alt="WIND role" width="200"> | <img src=".github/media/screens/aqi.gif" alt="AQI role" width="200"> |
+| **`wind`** — a compass arc where the wind comes from, gusts flick it wider | **`aqi`** — the European air quality index on its colour bands |
+| <img src=".github/media/screens/rain.gif" alt="RAIN role" width="200"> | <img src=".github/media/screens/sun.gif" alt="SUN role" width="200"> |
+| **`rain`** — the next two hours in five-minute slots; rain within 15 min splashes an umbrella | **`sun`** — a 24-hour dial, daylight amber, counting down to sunset or sunrise |
+| <img src=".github/media/screens/moon.gif" alt="MOON role" width="200"> | <img src=".github/media/screens/iss.gif" alt="ISS role" width="200"> |
+| **`moon`** — the illuminated fraction, lit the way the phase is going | **`iss`** — the ring empties toward the next ISS pass; a visible pass sweeps the rack |
+| <img src=".github/media/screens/ups.gif" alt="UPS role" width="200"> | <img src=".github/media/screens/net.gif" alt="NET role" width="200"> |
+| **`ups`** — battery outside, load inside; mains loss sweeps the rack red | **`net`** — download outside, upload inside, crawling with the flow |
+| <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | |
+| **`deploys`** — one arc per Argo CD application; a sync splashes the rocket | |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -50,10 +63,10 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 </p>
 
 <p align="center">
-  <img src=".github/media/screens/all.gif" alt="One screen cycling through all ten roles" width="320">
+  <img src=".github/media/screens/all.gif" alt="One screen cycling through every role" width="320">
 </p>
 <p align="center">
-  <b>One screen, all ten roles.</b> A screen cycles through the roles you give it and irises between them: the old role zooms into the middle, the new one grows back out of it, ring first.
+  <b>One screen, every role.</b> A screen cycles through the roles you give it and irises between them: the old role zooms into the middle, the new one grows back out of it, ring first.
 </p>
 
 **How events look.** A pod starting, a pod crashing, a hot node, a degraded volume or a new torrent *splashes* on the screen that owns that role: a ripple runs out from the centre, the ring flashes the event colour in a wave, and the role icon swaps to the event icon with a little overshoot before easing back. A node going down or coming back, an alert firing or resolving, a finished torrent, a restored link and a fresh boot *sweep* the whole rack: the ring wipes to one colour on every panel in turn, top to bottom (bottom to top for bad news), holds an icon for a moment and wipes back.
@@ -81,14 +94,14 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 - **Calibrate screens** — fix rotation / mirroring: a test pattern per panel; press `r`/`f` until the arrow points up and the dot is top-right, then `s` to write `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
 - **Configure** — cluster, night and display settings in a form, with a restart offer when you save.
-- **Status** — the service state, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `electricity`, `prices`) and the latest logs.
+- **Status** — the service state, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `argocd`, `electricity`, `prices`, `weather`, `rain`, `github`) and the latest logs.
 - **Run here** — run the daemon in the foreground with its logs, without touching the service.
 - **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
 - **Uninstall** — remove the binary, config and service; the boot file lines stay.
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Ten roles exist:
+Every screen shows one or more **roles** and cycles through them. Twenty-one roles exist:
 
 | Role | Data source | Ring and badge |
 |---|---|---|
@@ -102,8 +115,19 @@ Every screen shows one or more **roles** and cycles through them. Ten roles exis
 | `price` | EnergyZero or ENTSO-E | one pair of segments per hour of today, the current hour breathing |
 | `carbon` | Electricity Maps | ring and colour follow gCO2eq/kWh |
 | `renewable` | Electricity Maps | outer ring the renewable share, inner ring the fossil-free share, badge alternating |
+| `gh-activity` | GitHub | today's contributions against the month's best outside, the last 7 days inside, badge today's count |
+| `weather` | Open-Meteo | temperature ring, icon from the WMO weather code, badge °C |
+| `wind` | Open-Meteo | compass arc where the wind comes from, badge km/h |
+| `aqi` | Open-Meteo | European AQI ring on the EEA colour bands, badge the index |
+| `rain` | Buienradar | the next two hours in 5-minute slots, badge minutes to rain |
+| `sun` | computed | 24-hour dial with daylight, badge countdown to sunset or sunrise |
+| `moon` | computed | illuminated fraction, badge percent alternating with the phase |
+| `iss` | Celestrak + SGP4 | countdown to the next ISS pass, badge minutes |
+| `ups` | Prometheus (nut-exporter) | battery charge outside, load inside, badge runtime |
+| `net` | Prometheus (node-exporter) | download outside, upload inside, badge Mbit/s |
+| `deploys` | Argo CD | one arc per application by sync and health, badge healthy over total |
 
-**Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Three presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`) and `m` mixed (each screen alternates a cluster role with an electricity one). A screen with a single role never cycles.
+**Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`), `m` mixed (each screen alternates a cluster role with an electricity one) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
 Only one screen irises at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
 
@@ -125,6 +149,23 @@ The `price` role is separate and has its own `price source`, cycled with `⏎`:
 `price incl. VAT` asks EnergyZero for prices with VAT and levies included; ENTSO-E always reports the raw exchange price. The price ring is bucketed into the Pi's own local hours, the same clock that marks the current hour, so set the system time zone once: `sudo timedatectl set-timezone Europe/Amsterdam`. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
 
 The mix colours and the source icons are the ones from the Electricity Maps web app, under their own licence; see [Licence](#licence).
+
+## Sky roles
+
+`weather`, `wind`, `aqi`, `rain`, `sun`, `moon` and `iss` all need to know where the rack is: set `location lat` and `location lon` in **Configure** (decimal degrees). Without them these roles show a pin icon.
+
+- **Weather, wind and air quality** come from [Open-Meteo](https://open-meteo.com), free and without a key; turn on `weather enabled`. One forecast call and one air-quality call every `weather poll secs` (600 by default).
+- **Rain** is the [Buienradar](https://www.buienradar.nl) two-hour nowcast, five-minute slots, free and without a key, for the Netherlands and Belgium; turn on `rain enabled`. The ring starts at "now" at the top and runs two hours clockwise; the badge counts down to the first wet slot, and rain arriving within fifteen minutes splashes an umbrella.
+- **Sun and moon** are computed on the Pi from the location and the clock, nothing to configure.
+- **ISS** fetches the station's orbital elements from [Celestrak](https://celestrak.org) once a day and predicts the next pass above `iss min elevation °` (10 by default); turn on `iss enabled`. A pass is marked visible when the sky is dark and the station is still sunlit, and a visible pass sweeps the whole rack violet when it starts.
+
+The sun dial and the rain ring use the Pi's local clock, so set the time zone once with `sudo timedatectl set-timezone Europe/Amsterdam`. Buienradar timestamps its slots on the Dutch clock, so the rain ring only lines up with "now" when the Pi is on `Europe/Amsterdam`.
+
+## GitHub role
+
+`gh-activity` shows your contribution calendar: the outer ring is today against your best day of the last 30, the inner ring the last seven days in the calendar greens. Pushes, new stars, merged pull requests and finished CI runs splash on it, and a published release sweeps the rack green.
+
+Create a fine-grained personal access token at github.com with read access to contents, metadata and Actions on the repositories you care about (contributions and the events feed need no extra permission), turn on `github enabled` and paste it into `github token`. The calendar is refreshed every five minutes and the events feed every `github poll secs` (60, the minimum GitHub allows); together with the Actions checks for repositories pushed to recently that is a few hundred requests an hour, far below the limit. Without a token the role shows a key icon.
 
 ## Configuration
 
@@ -176,6 +217,31 @@ price:
   include_vat: true
   poll_secs: 900
 
+location:
+  lat: null                # decimal degrees; needed by weather, wind, aqi, rain, sun, moon and iss
+  lon: null
+
+weather:
+  enabled: false           # Open-Meteo current conditions + air quality, no key
+  poll_secs: 600
+
+rain:
+  enabled: false           # Buienradar two-hour nowcast (NL/BE), no key
+  poll_secs: 300
+
+iss:
+  enabled: false           # next ISS pass, computed from the Celestrak TLE
+  min_elevation: 10        # degrees above the horizon that count as a pass
+
+github:
+  enabled: false           # fine-grained token: read access to contributions, events and Actions
+  token: ""
+  poll_secs: 60
+
+argocd:
+  enabled: true            # watch applications.argoproj.io for the deploys role
+  namespace: argocd
+
 display:
   brightness: 1.0
   fps: 30
@@ -183,7 +249,8 @@ display:
   one_at_a_time: true      # one screen irises at a time, in random order (kinder to the SPI bus)
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
-# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable
+# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
+#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys
 screens:
   - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
   - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
@@ -199,6 +266,9 @@ screens:
 - **`night`** — the window in which the panels dim, on the Pi's local clock.
 - **`thresholds`** — when a node counts as hot: the CPU and memory percentages that splash a flame, and the temperature that marks the danger band on `thermal`.
 - **`electricity`** and **`price`** — see [Electricity mode](#electricity-mode).
+- **`location`**, **`weather`**, **`rain`**, **`iss`** — see [Sky roles](#sky-roles).
+- **`github`** — see [GitHub role](#github-role).
+- **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
 - **`display`** — global brightness, frame rate, the SPI write chunk and whether screens iris one at a time.
 - **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
 
@@ -224,7 +294,7 @@ The simulator draws the same scenes in a window, so none of this needs a Pi:
     cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
     cargo run -- calibrate --sim --config /tmp/rs.yaml
 
-Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `t` torrent mode, `n` night cycle, `b` boot, `Esc` quit. `--sim-grid` shows all four panels at once.
+Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `b` boot, `Esc` quit. `--sim-grid` shows all four panels at once.
 
 Tests: `cargo test --workspace --features sim,pi`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
 

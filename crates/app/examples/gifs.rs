@@ -1,5 +1,5 @@
 //! Renders the README media: one GIF per screen role, one of a screen cycling
-//! through all ten roles, and one of the download monitor.
+//! through every role, and one of the download monitor.
 //!
 //!     cargo run -p rackscreen-app --example gifs -- .github/media/screens
 //!
@@ -42,9 +42,13 @@ const WARMUP: Secs = 100.5;
 const CYCLE: Secs = 3.0;
 /// Local hour the price ring marks as "now".
 const HOUR: u32 = 14;
-/// Ten roles, each dwelling `CYCLE` and then irising for half a second: one
+/// Every role, each dwelling `CYCLE` and then irising for half a second: one
 /// whole round of the cycling screen, so its GIF loops seamlessly.
-const ALL_SECS: Secs = 10.0 * (CYCLE + TRANSITION_SECS);
+const ALL_SECS: Secs = Role::ALL.len() as Secs * (CYCLE + TRANSITION_SECS);
+/// Fixed clock: 2026-09-07 12:00 UTC in Amsterdam, so the sun dial, rain ring
+/// and ISS countdown render the same every time.
+const UNIX_START: i64 = 1_788_782_400;
+const UTC_OFFSET: i32 = 7200;
 /// Three whole rounds, so the cycling screen starts its recording on CPU with a
 /// fresh dwell and warmed-up data.
 const ALL_WARMUP: Secs = 3.0 * ALL_SECS;
@@ -105,6 +109,21 @@ fn clips() -> Vec<Clip> {
                     (2.0, Step::Cmd(FakeCmd::DegradeVolume)),
                     (5.0, Step::Cmd(FakeCmd::HealVolume)),
                 ],
+                Role::GhActivity => vec![
+                    (2.0, Step::Cmd(FakeCmd::GithubPush)),
+                    (5.0, Step::Cmd(FakeCmd::CiFailure)),
+                ],
+                Role::Weather => vec![(3.0, Step::Cmd(FakeCmd::Thunder))],
+                Role::Rain => vec![(3.0, Step::Cmd(FakeCmd::RainSoon))],
+                Role::Iss => vec![(4.0, Step::Cmd(FakeCmd::IssPassNow))],
+                Role::Ups => vec![
+                    (3.0, Step::Cmd(FakeCmd::UpsToggle)),
+                    (7.0, Step::Cmd(FakeCmd::UpsToggle)),
+                ],
+                Role::Deploys => vec![
+                    (3.0, Step::Cmd(FakeCmd::AppToggle)),
+                    (6.0, Step::Cmd(FakeCmd::AppToggle)),
+                ],
                 _ => Vec::new(),
             };
             Clip::role(role, script)
@@ -156,8 +175,12 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     // An Electricity Maps token is configured, so the grid roles show data.
     model.set_token_present(true);
     model.set_local_hour(HOUR);
+    model.set_location_present(true);
+    model.set_github_token_present(true);
+    model.set_utc_offset_secs(UTC_OFFSET);
 
     let mut fake = FakeState::new(SEED);
+    fake.set_clock(UNIX_START, UTC_OFFSET);
     for ev in fake.initial() {
         model.apply(ev, 0.0);
     }
@@ -191,6 +214,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
                 Step::Event(ev) => model.apply(ev.clone(), now),
             }
         }
+        model.set_unix_now(UNIX_START + now as i64);
         model.tick(now);
         if f < warmup_frames {
             continue;

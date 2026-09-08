@@ -424,6 +424,182 @@ fn electricity_without_a_token_shows_a_key() {
     check("no_token", &px);
 }
 
+fn new_roles_model() -> Model {
+    use rackscreen_core::event::{App, AppHealth, AppSync, IssPass, MoonPhase};
+    let mut m = ready_model();
+    m.set_location_present(true);
+    m.set_github_token_present(true);
+    m.set_unix_now(1_788_782_400); // 2026-09-07T12:00Z
+    m.set_utc_offset_secs(7200);
+    for target in [
+        LinkTarget::Weather,
+        LinkTarget::Rain,
+        LinkTarget::Github,
+        LinkTarget::ArgoCd,
+    ] {
+        m.apply(Event::Link { target, up: true }, 0.0);
+    }
+    m.apply(
+        Event::Weather {
+            temp_c: 18.0,
+            code: 2,
+            is_day: true,
+            wind_kmh: 23.0,
+            gust_kmh: 39.0,
+            wind_from_deg: 40.0,
+            at: String::new(),
+        },
+        0.0,
+    );
+    m.apply(Event::AirQuality { eaqi: 32.0 }, 0.0);
+    let mut rain = vec![0.0f32; 24];
+    for (i, v) in [
+        (5, 0.3),
+        (6, 1.0),
+        (7, 2.5),
+        (8, 5.5),
+        (9, 6.5),
+        (10, 4.0),
+        (11, 2.0),
+    ] {
+        rain[i] = v;
+    }
+    m.apply(
+        Event::Rain {
+            from: 1_788_782_400,
+            mm_per_h: rain,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Sky {
+            sunrise: Some(1_788_782_400 - 7 * 3600),
+            sunset: Some(1_788_782_400 + 6 * 3600),
+            sun_elevation_deg: 45.0,
+            moon_illumination: 0.63,
+            moon_waxing: true,
+            moon_phase: MoonPhase::WaxingGibbous,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::IssPass(Some(IssPass {
+            start: 1_788_782_400 + 42 * 60,
+            end: 1_788_782_400 + 48 * 60,
+            max_elevation_deg: 62.0,
+            visible: true,
+        })),
+        0.0,
+    );
+    let days = (0..30)
+        .map(|i| (format!("d{i}"), [5u32, 12, 30, 0, 8, 25, 43, 28][i % 8]))
+        .collect();
+    m.apply(Event::GithubActivity { days }, 0.0);
+    m.apply(
+        Event::Ups {
+            on_battery: false,
+            low_battery: false,
+            charge_pct: 100.0,
+            load_pct: 18.0,
+            runtime_secs: 42 * 60,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Network {
+            rx_bps: 40e6,
+            tx_bps: 1.3e6,
+        },
+        0.0,
+    );
+    let apps: Vec<App> = (0..16)
+        .map(|i| App {
+            name: format!("app-{i:02}"),
+            sync: if i == 5 {
+                AppSync::OutOfSync
+            } else {
+                AppSync::Synced
+            },
+            health: AppHealth::Healthy,
+            operating: false,
+        })
+        .collect();
+    m.apply(Event::Apps(apps), 0.0);
+    // let the smooths settle
+    let mut t = 0.0;
+    while t < 2.0 {
+        m.tick(t);
+        t += 1.0 / 30.0;
+    }
+    m
+}
+
+#[test]
+fn new_roles_idle() {
+    let m = new_roles_model();
+    let mut r = Renderer::new().unwrap();
+    for (role, name) in [
+        (Role::GhActivity, "gh_activity"),
+        (Role::Weather, "weather"),
+        (Role::Wind, "wind"),
+        (Role::Aqi, "aqi"),
+        (Role::Rain, "rain"),
+        (Role::Sun, "sun"),
+        (Role::Moon, "moon"),
+        (Role::Iss, "iss"),
+        (Role::Ups, "ups"),
+        (Role::Net, "net"),
+        (Role::Deploys, "deploys"),
+    ] {
+        let mut px = new_pixmap();
+        // 2.5 s: the alternating badges are in their first window and faded in
+        r.render(&m.scene_for_role(role, 2.5), &mut px);
+        check(name, &px);
+    }
+}
+
+#[test]
+fn ups_on_battery_and_iss_during_pass() {
+    let mut m = new_roles_model();
+    m.apply(
+        Event::Ups {
+            on_battery: true,
+            low_battery: false,
+            charge_pct: 80.0,
+            load_pct: 18.0,
+            runtime_secs: 38 * 60,
+        },
+        2.0,
+    );
+    m.set_unix_now(1_788_782_400 + 44 * 60);
+    let mut t = 2.0;
+    while t < 4.0 {
+        m.tick(t);
+        t += 1.0 / 30.0;
+    }
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Ups, 4.0), &mut px);
+    check("ups_on_battery", &px);
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Iss, 4.0), &mut px);
+    check("iss_pass", &px);
+    let (red, g, b) = pixel(&px, 120, 18);
+    assert!(
+        red > 120 && b > 200 && g < 200,
+        "violet ring during the pass, got {red},{g},{b}"
+    );
+}
+
+#[test]
+fn sky_without_location_shows_a_pin() {
+    let m = ready_model();
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Sun, 2.0), &mut px);
+    check("no_location", &px);
+}
+
 #[test]
 fn iris_mid_transition() {
     // one screen cycling cpu -> mem: tick past the dwell and catch the iris in
