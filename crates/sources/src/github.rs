@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use chrono::{Local, NaiveDate};
+use chrono::{Local, NaiveDate, TimeZone};
 use rackscreen_core::event::{Event, LinkTarget};
 use serde_json::{json, Value};
 
@@ -35,6 +35,39 @@ pub fn window_days(today: NaiveDate) -> Vec<NaiveDate> {
         .rev()
         .map(|back| today - chrono::Duration::days(back))
         .collect()
+}
+
+/// Midnight at the start of `date` in `tz`. A DST gap can swallow local
+/// midnight (Brazil used to spring forward at 00:00), so the first instant of
+/// the day after the jump stands in for it.
+fn local_midnight<Tz: TimeZone>(date: NaiveDate, tz: &Tz) -> chrono::DateTime<Tz> {
+    let midnight = date.and_hms_opt(0, 0, 0).expect("00:00:00 is a valid time");
+    for minutes in [0, 60, 120] {
+        let at = midnight + chrono::Duration::minutes(minutes);
+        if let Some(dt) = tz
+            .from_local_datetime(&at)
+            .single()
+            .or_else(|| tz.from_local_datetime(&at).earliest())
+        {
+            return dt;
+        }
+    }
+    tz.from_utc_datetime(&midnight)
+}
+
+/// GraphQL `from`/`to` for the window: local midnight of the first day and of
+/// the day after the last, with the zone's real offset. `window` must not be
+/// empty.
+pub fn calendar_bounds<Tz: chrono::TimeZone>(window: &[NaiveDate], tz: &Tz) -> (String, String)
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let stamp = |date: NaiveDate| {
+        local_midnight(date, tz).to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+    };
+    let from = stamp(window[0]);
+    let to = stamp(window[window.len() - 1] + chrono::Duration::days(1));
+    (from, to)
 }
 
 /// `(login, days)` from the GraphQL response; every date in `window` gets a
@@ -269,6 +302,15 @@ impl RunTracker {
     }
 }
 
+/// One trip to the events feed. GitHub asks for a polling interval and hands
+/// out an ETag on a 304 as well, so both survive an unchanged feed.
+pub struct EventsPage {
+    /// `None` on 304: nothing new since the ETag.
+    pub events: Option<Vec<GhEvent>>,
+    pub etag: Option<String>,
+    pub poll_secs: Option<u64>,
+}
+
 struct Http {
     token: String,
 }
@@ -281,11 +323,7 @@ impl Http {
     }
 
     async fn calendar(&self, window: &[NaiveDate]) -> Result<(String, Vec<(String, u32)>)> {
-        let from = format!("{}T00:00:00Z", window[0].format("%Y-%m-%d"));
-        let to = format!(
-            "{}T00:00:00Z",
-            (window[window.len() - 1] + chrono::Duration::days(1)).format("%Y-%m-%d")
-        );
+        let (from, to) = calendar_bounds(window, &Local);
         let body = json!({ "query": CALENDAR_QUERY, "variables": { "from": from, "to": to } });
         let resp = self
             .auth(client().post(GRAPHQL))
@@ -305,12 +343,9 @@ impl Http {
         parse_calendar(&text, window)
     }
 
-    /// `Ok(None)` on 304 (nothing new); otherwise the page and the new ETag.
-    async fn events(
-        &self,
-        login: &str,
-        etag: Option<&str>,
-    ) -> Result<Option<(Vec<GhEvent>, Option<String>, Option<u64>)>> {
+    /// The feed page, if GitHub sent one; the ETag and `X-Poll-Interval` come
+    /// back either way, so a 304 still moves our polling to GitHub's cadence.
+    async fn events(&self, login: &str, etag: Option<&str>) -> Result<EventsPage> {
         let mut req = self.auth(client().get(format!("{API}/users/{login}/events?per_page=30")));
         if let Some(tag) = etag {
             req = req.header("If-None-Match", tag);
@@ -328,7 +363,11 @@ impl Http {
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
         if status.as_u16() == 304 {
-            return Ok(None);
+            return Ok(EventsPage {
+                events: None,
+                etag: new_etag,
+                poll_secs: poll,
+            });
         }
         let text = resp.text().await.context("events body")?;
         if !status.is_success() {
@@ -338,7 +377,11 @@ impl Http {
             }
             .into());
         }
-        Ok(Some((parse_events(&text)?, new_etag, poll)))
+        Ok(EventsPage {
+            events: Some(parse_events(&text)?),
+            etag: new_etag,
+            poll_secs: poll,
+        })
     }
 
     async fn runs(&self, repo: &str) -> Result<Vec<Run>> {
@@ -394,13 +437,15 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
                 ctx.emit(Event::GithubActivity { days });
             }
             let who = login.as_deref().context("login unknown")?;
-            if let Some((page, new_etag, poll)) = http.events(who, etag.as_deref()).await? {
-                etag = new_etag;
-                if let Some(p) = poll {
-                    wait = wait.max(p);
-                }
-                repos = pushed_repos(&page);
-                ctx.emit_all(events.diff(&page));
+            let page = http.events(who, etag.as_deref()).await?;
+            // GitHub's cadence holds even when the feed is unchanged
+            if let Some(p) = page.poll_secs {
+                wait = wait.max(p);
+            }
+            if let Some(feed) = page.events {
+                etag = page.etag;
+                repos = pushed_repos(&feed);
+                ctx.emit_all(events.diff(&feed));
             }
             for repo in repos.clone() {
                 match http.runs(&repo).await {
@@ -468,6 +513,18 @@ mod tests {
         assert_eq!(w.len(), 30);
         assert_eq!(w[0], d("2026-08-09"));
         assert_eq!(w[29], d("2026-09-07"));
+    }
+
+    #[test]
+    fn calendar_bounds_are_local_midnight_with_the_real_offset() {
+        let tz = chrono_tz::Europe::Amsterdam;
+        let (from, to) = calendar_bounds(&window_days(d("2026-09-07")), &tz);
+        assert_eq!(from, "2026-08-09T00:00:00+02:00");
+        assert_eq!(to, "2026-09-08T00:00:00+02:00");
+        // winter is an hour closer to UTC
+        let (from, to) = calendar_bounds(&window_days(d("2026-01-15")), &tz);
+        assert_eq!(from, "2025-12-17T00:00:00+01:00");
+        assert_eq!(to, "2026-01-16T00:00:00+01:00");
     }
 
     #[test]
