@@ -5,6 +5,7 @@ use rackscreen_core::anim::Secs;
 use rackscreen_core::theme::Role;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -13,8 +14,34 @@ use crate::ops::config_file::{save_config, set_screen_roles, Preset};
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
-use crate::widgets::confirm_dialog;
+use crate::widgets::{confirm_dialog, StatusTone};
 use crate::{Action, Screen, Shared};
+
+/// Join role names with ` › ` onto rows no wider than `width`, breaking after a
+/// separator so continuation rows start with a name. A single name never splits.
+pub fn wrap_roles(names: &[&str], width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for (i, n) in names.iter().enumerate() {
+        let more = i + 1 < names.len();
+        let candidate = if cur.is_empty() {
+            n.to_string()
+        } else {
+            format!("{cur} › {n}")
+        };
+        let tail = if more { 2 } else { 0 }; // room for the trailing " ›"
+        if cur.is_empty() || candidate.chars().count() + tail <= width {
+            cur = candidate;
+        } else {
+            lines.push(format!("{cur} ›"));
+            cur = n.to_string();
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
 
 /// Pure editor state, tested without a terminal.
 #[derive(Clone, Debug, PartialEq)]
@@ -138,6 +165,7 @@ impl Editor {
 enum Mode {
     Edit,
     AskRestart,
+    AskDiscard,
     Restarting(std::sync::mpsc::Receiver<String>),
 }
 
@@ -266,6 +294,13 @@ impl Screen for Screens {
             self.mode = Mode::Edit;
             return Action::Back;
         }
+        if matches!(self.mode, Mode::AskDiscard) {
+            self.mode = Mode::Edit;
+            if matches!(key.code, KeyCode::Enter | KeyCode::Char('y')) {
+                return Action::Back;
+            }
+            return Action::None;
+        }
         if self.editor.picker().is_some() {
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') => self.editor.picker_move(-1),
@@ -328,7 +363,13 @@ impl Screen for Screens {
                 self.dirty = true;
             }
             KeyCode::Char('s') => return self.save(shared),
-            KeyCode::Esc | KeyCode::Char('q') => return Action::Back,
+            KeyCode::Esc | KeyCode::Char('q') => {
+                if self.dirty {
+                    self.mode = Mode::AskDiscard;
+                } else {
+                    return Action::Back;
+                }
+            }
             _ => {}
         }
         Action::None
@@ -355,49 +396,77 @@ impl Screen for Screens {
     fn draw(&self, f: &mut Frame, area: Rect, shared: &Shared, _now: Secs) {
         let th = &shared.theme;
         let g = th.glyphs();
-        let [_, list, roles, foot] = Layout::vertical([
-            Constraint::Length(1),
-            // one row per screen, the one-at-a-time line, then a blank row
-            Constraint::Length(self.editor.rows().len() as u16 + 2),
-            Constraint::Min(4),
-            Constraint::Length(2),
-        ])
-        .areas(area);
+        let timing_w = 12usize;
+        let prefix_w = 7usize; // "  ▸ 1  "
+                               // A `!` hint sits after the timing, so reserve a column for it when any row
+                               // has one; without the reservation the padded names push it off the edge.
+        let hint_w = if self
+            .editor
+            .rows()
+            .iter()
+            .any(|(rs, _)| rs.iter().any(|r| self.role_hint(*r).is_some()))
+        {
+            20
+        } else {
+            0
+        };
+        let roles_w = (area.width as usize)
+            .saturating_sub(prefix_w + timing_w + hint_w + 2)
+            .max(8);
+        // Rows per screen, wrapped, plus the one-at-a-time toggle and a blank row.
         let mut lines = Vec::new();
         for (i, (rs, secs)) in self.editor.rows().iter().enumerate() {
             let sel = i == self.editor.selected;
-            let names = rs.iter().map(|r| r.name()).collect::<Vec<_>>().join(" › ");
+            let names: Vec<&str> = rs.iter().map(|r| r.name()).collect();
+            let wrapped = wrap_roles(&names, roles_w);
             let timing = if rs.len() > 1 {
                 format!("every {secs} s")
             } else {
                 "static".to_string()
             };
             let warn = rs.iter().find_map(|r| self.role_hint(*r));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(
-                    format!("{} ", if sel { g.pointer } else { " " }),
-                    th.selected(),
-                ),
-                Span::styled(format!("{}  ", i + 1), th.muted()),
-                Span::styled(
-                    format!("{names:<30}"),
-                    if sel { th.selected() } else { th.normal() },
-                ),
-                Span::styled(timing, th.muted()),
-                Span::styled(
-                    warn.map(|w| format!("  ! {w}")).unwrap_or_default(),
-                    th.warning(),
-                ),
-            ]));
+            for (k, text) in wrapped.iter().enumerate() {
+                let mut spans = if k == 0 {
+                    vec![
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{} ", if sel { g.pointer } else { " " }),
+                            th.selected(),
+                        ),
+                        Span::styled(format!("{}  ", i + 1), Style::new().fg(th.panel_color(i))),
+                        Span::styled(
+                            format!("{text:<roles_w$}"),
+                            if sel { th.selected() } else { th.normal() },
+                        ),
+                        Span::styled(format!("  {timing}"), th.muted()),
+                    ]
+                } else {
+                    vec![
+                        Span::raw(" ".repeat(prefix_w)),
+                        Span::styled(text.clone(), if sel { th.selected() } else { th.normal() }),
+                    ]
+                };
+                if k == 0 {
+                    if let Some(w) = warn {
+                        spans.push(Span::styled(format!("  ! {w}"), th.warning()));
+                    }
+                }
+                let mut line = Line::from(spans);
+                if sel && k == 0 {
+                    line = line.style(th.highlighted());
+                }
+                lines.push(line);
+            }
         }
+        lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled("      one screen at a time: ", th.muted()),
+            Span::raw(" ".repeat(prefix_w)),
+            Span::styled("one screen at a time  ", th.muted()),
             Span::styled(
                 if self.editor.one_at_a_time() {
-                    "on"
+                    format!("{} on", g.done)
                 } else {
-                    "off"
+                    format!("{} off", g.pending)
                 },
                 if self.editor.one_at_a_time() {
                     th.good()
@@ -405,11 +474,19 @@ impl Screen for Screens {
                     th.muted()
                 },
             ),
-            Span::styled("  (o)", th.faint_style()),
+            Span::styled("   o", th.faint_style()),
         ]));
+        let list_h = (lines.len() as u16 + 1).min(area.height.saturating_sub(6).max(1));
+        let [_, list, roles, foot] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(list_h),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .areas(area);
         f.render_widget(Paragraph::new(lines), list);
 
-        let mut body = vec![Line::from(Span::styled("  Roles:", th.muted()))];
+        let mut body = vec![Line::from(Span::styled("  Roles", th.muted()))];
         if let Some(p) = self.editor.picker() {
             // `Role::ALL` is taller than the pane on a small terminal: scroll with the cursor.
             let visible = (roles.height as usize).saturating_sub(1).max(1);
@@ -421,7 +498,7 @@ impl Screen for Screens {
                     None => g.pending.to_string(),
                 };
                 let cur = i == p.cursor;
-                body.push(Line::from(vec![
+                let mut spans = vec![
                     Span::raw("    "),
                     Span::styled(
                         format!("{} ", if cur { g.pointer } else { " " }),
@@ -436,10 +513,18 @@ impl Screen for Screens {
                         },
                     ),
                     Span::styled(
-                        r.name().to_string(),
+                        format!("{:<14}", r.name()),
                         if cur { th.selected() } else { th.normal() },
                     ),
-                ]));
+                ];
+                if let Some(h) = self.role_hint(*r) {
+                    spans.push(Span::styled(format!("! {h}"), th.warning()));
+                }
+                let mut line = Line::from(spans);
+                if cur {
+                    line = line.style(th.highlighted());
+                }
+                body.push(line);
             }
         } else {
             body.push(Line::from(Span::styled(
@@ -455,7 +540,7 @@ impl Screen for Screens {
             )));
             body.push(Line::from(""));
             body.push(Line::from(vec![
-                Span::styled("  Presets: ", th.muted()),
+                Span::styled("  Presets  ", th.muted()),
                 Span::styled("c", th.selected()),
                 Span::styled(" cluster   ", th.muted()),
                 Span::styled("e", th.selected()),
@@ -468,10 +553,9 @@ impl Screen for Screens {
         }
         f.render_widget(Paragraph::new(body), roles);
 
-        let msg = match (&self.error, self.dirty) {
-            (Some(e), _) => Line::from(Span::styled(format!("  {e}"), th.bad())),
-            (None, true) => Line::from(Span::styled("  unsaved changes: s to save", th.warning())),
-            (None, false) => Line::from(Span::styled(
+        let msg = match &self.error {
+            Some(e) => Line::from(Span::styled(format!("  {e}"), th.bad())),
+            None => Line::from(Span::styled(
                 format!("  {}", shared.ctx.config_path.display()),
                 th.faint_style(),
             )),
@@ -488,17 +572,34 @@ impl Screen for Screens {
                 false,
             );
         }
+        if matches!(self.mode, Mode::AskDiscard) {
+            confirm_dialog(
+                f,
+                area,
+                th,
+                "Discard changes?",
+                &["You have unsaved changes. Leave without saving?".to_string()],
+                "y/⏎ discard   Esc keep editing",
+                true,
+            );
+        }
     }
 
     fn keys(&self) -> String {
         if self.editor.picker().is_some() {
             "↑↓ move  space toggle  J/K reorder  ⏎ done  Esc cancel".into()
+        } else if matches!(self.mode, Mode::AskDiscard) {
+            "y discard  Esc keep".into()
         } else {
             "↑↓ screen  ⏎ roles  +/- interval  c/e/m/w preset  o solo  s save  Esc back".into()
         }
     }
     fn subtitle(&self) -> String {
         "Screens".into()
+    }
+    fn status(&self, _shared: &Shared) -> Option<(String, StatusTone)> {
+        self.dirty
+            .then(|| ("unsaved".to_string(), StatusTone::Warn))
     }
 }
 
@@ -609,7 +710,7 @@ mod tests {
         assert!(term
             .backend()
             .to_string()
-            .contains("one screen at a time: on"));
+            .contains("one screen at a time  ✓ on"));
         s.handle(
             KeyEvent::from(KeyCode::Char('o')),
             &mut sh.clone_for_test(),
@@ -619,7 +720,7 @@ mod tests {
         assert!(s.dirty);
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
-        assert!(text.contains("one screen at a time: off"), "{text}");
+        assert!(text.contains("one screen at a time  ○ off"), "{text}");
         assert!(matches!(
             s.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0),
             Action::Back
@@ -718,5 +819,75 @@ mod tests {
             text.contains("▸ ○  deploys"),
             "scrolled to the cursor: {text}"
         );
+    }
+
+    #[test]
+    fn wrap_roles_breaks_after_a_separator() {
+        let names = ["cpu", "mem", "pods", "health", "thermal"];
+        assert_eq!(
+            wrap_roles(&names, 20),
+            vec![
+                "cpu › mem › pods ›".to_string(),
+                "health › thermal".to_string()
+            ]
+        );
+        assert_eq!(
+            wrap_roles(&names, 100),
+            vec!["cpu › mem › pods › health › thermal".to_string()]
+        );
+        assert_eq!(
+            wrap_roles(&["cpu"], 1),
+            vec!["cpu".to_string()],
+            "a name never splits"
+        );
+        assert_eq!(wrap_roles(&[], 10), Vec::<String>::new());
+    }
+
+    #[test]
+    fn pane_wraps_long_role_lists_and_marks_unsaved() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = test_shared(dir.path());
+        let mut screen = Screens::new(&sh);
+        screen.editor = Editor::new(vec![
+            (
+                vec![
+                    Role::Cpu,
+                    Role::Mem,
+                    Role::Pods,
+                    Role::Health,
+                    Role::Thermal,
+                    Role::Storage,
+                    Role::Net,
+                    Role::Ups,
+                    Role::Deploys,
+                ],
+                15,
+            ),
+            (vec![Role::Health], 15),
+        ]);
+        let mut term = Terminal::new(TestBackend::new(60, 20)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("cpu › mem"), "{t}");
+        assert!(
+            t.contains("deploys"),
+            "the tail of the list is on a later row: {t}"
+        );
+        assert!(t.contains("every 15 s"));
+        assert!(t.contains("static"));
+        assert_eq!(screen.status(&sh), None);
+        screen.handle(KeyEvent::from(KeyCode::Char('+')), &mut sh, 0.0);
+        assert_eq!(screen.status(&sh).unwrap().0, "unsaved");
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0),
+            Action::None
+        ));
+        assert!(matches!(screen.mode, Mode::AskDiscard));
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0),
+            Action::Back
+        ));
     }
 }
