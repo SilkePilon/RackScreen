@@ -63,7 +63,15 @@ pub fn deploys_scene(model: &Model, now: Secs) -> Scene {
     let mut s = Scene::new();
     s.push(ring(RING_R, app_states(apps, now)));
     s.push(icon_at("rocket", ICON_CY, ICON_SIZE, WHITE, 1.0));
-    let stroke = if ok == apps.len() { GREEN } else { AMBER };
+    // `0 == 0` is not healthy: an Argo CD reporting no applications at all is
+    // an absence, not a green wall.
+    let stroke = if apps.is_empty() {
+        GREY
+    } else if ok == apps.len() {
+        GREEN
+    } else {
+        AMBER
+    };
     s.push(badge(BADGE_CY, stroke, format!("{ok}/{}", apps.len())));
     if degraded {
         s.push(Drawable::Dots {
@@ -163,5 +171,18 @@ mod tests {
         m.apply(Event::Apps(apps), 1.0);
         let s = deploys_scene(&m, 1.5);
         assert!(s.items.iter().any(|d| matches!(d, Drawable::Dots { .. })));
+        // an Argo CD with nothing to report is grey, not a green 0/0
+        m.apply(Event::Apps(Vec::new()), 2.0);
+        let s = deploys_scene(&m, 2.5);
+        let (text, stroke) = s
+            .items
+            .iter()
+            .find_map(|d| match d {
+                Drawable::Badge { text, stroke, .. } => Some((text.clone(), *stroke)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text, "0/0");
+        assert_eq!(stroke, GREY);
     }
 }

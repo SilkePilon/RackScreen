@@ -4,9 +4,7 @@ use crate::anim::{pulse, Secs};
 use crate::model::Model;
 use crate::scene::{badge, badge_w, icon_at, ring, ring_states, Drawable, Scene, SegState};
 use crate::theme::layout::*;
-use crate::theme::{eaqi_color, outdoor_color, Color, AMBER, BLUE, DIM_GREY, OFF, WHITE};
-
-const MOON: Color = Color::hex(0xe8e8f0);
+use crate::theme::{eaqi_color, outdoor_color, Color, AMBER, BLUE, DIM_GREY, MOON, OFF, WHITE};
 
 /// Lucide icon for a WMO weather interpretation code.
 pub fn weather_icon(code: u16, is_day: bool) -> &'static str {

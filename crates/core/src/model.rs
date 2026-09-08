@@ -185,7 +185,10 @@ pub fn net_fill(bps: f64) -> f32 {
     (((bps / 1e5).log10() / 4.0) as f32).clamp(0.03, 1.0)
 }
 
-/// Laps per second of the net pulse at full fill (one lap every 6 s).
+/// Laps per second of the net pulse at full fill (one lap every 6 s). The
+/// fill is floored at 0.1 when it drives the phase, so the slowest lap is
+/// 60 s: the plan's global 6..60 s constraint, which the 0.03 idle floor
+/// would otherwise stretch to 200 s.
 const NET_LAPS_PER_SEC: f64 = 1.0 / 6.0;
 
 /// A smoothed share below this is treated as gone: no segment, no icon.
@@ -681,10 +684,12 @@ impl Model {
         self.track_mix_leader(now);
         let dt = self.net_last_tick.map_or(0.0, |l| (now - l).max(0.0));
         self.net_last_tick = Some(now);
-        self.net_rx_phase =
-            (self.net_rx_phase + dt * self.net_rx.value(now) as f64 * NET_LAPS_PER_SEC).fract();
-        self.net_tx_phase =
-            (self.net_tx_phase + dt * self.net_tx.value(now) as f64 * NET_LAPS_PER_SEC).fract();
+        self.net_rx_phase = (self.net_rx_phase
+            + dt * self.net_rx.value(now).max(0.1) as f64 * NET_LAPS_PER_SEC)
+            .fract();
+        self.net_tx_phase = (self.net_tx_phase
+            + dt * self.net_tx.value(now).max(0.1) as f64 * NET_LAPS_PER_SEC)
+            .fract();
         if let Some(p) = self.iss.pass {
             let inside = (p.start..p.end).contains(&self.unix_now);
             if p.visible && inside && self.iss_swept != Some(p.start) {

@@ -5,12 +5,11 @@ use crate::format::fmt_until;
 use crate::model::Model;
 use crate::scene::{badge, badge_w, icon_at, ring, ring_states, Drawable, Scene, SegState};
 use crate::theme::layout::*;
-use crate::theme::{Color, AMBER, GREY, VIOLET};
+use crate::theme::{Color, AMBER, GREY, MOON, VIOLET};
 
 pub const DAY: Color = AMBER;
 pub const NIGHT: Color = Color::hex(0x1b2a4a);
 pub const NOW: Color = Color::hex(0xfff2b0);
-pub const MOON: Color = Color::hex(0xe8e8f0);
 /// Seconds of dial per segment: 24 h over 60 segments.
 const SEG_SECS: i64 = 1440;
 /// Half-width of the twilight blend around sunrise and sunset.

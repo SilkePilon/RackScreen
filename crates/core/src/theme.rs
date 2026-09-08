@@ -46,6 +46,8 @@ pub const OFF: Color = Color::hex(0x1c1c1c);
 pub const BADGE_FILL: Color = Color::hex(0x0e0e0e);
 pub const WHITE: Color = Color::hex(0xffffff);
 pub const GREY: Color = Color::hex(0x888888);
+/// Moonlight: the moon ring, the moon icons and `Role::Moon`'s accent.
+pub const MOON: Color = Color::hex(0xe8e8f0);
 pub const DIM_GREY: Color = Color::hex(0x2a2a2a);
 pub const BLACK: Color = Color::hex(0x000000);
 
@@ -258,7 +260,7 @@ impl Role {
             Role::Aqi => Color::hex(0x50CCAA),
             Role::Rain => BLUE,
             Role::Sun => AMBER,
-            Role::Moon => Color::hex(0xe8e8f0),
+            Role::Moon => MOON,
             Role::Iss => VIOLET,
             Role::Ups => GREEN,
             Role::Net => BLUE,

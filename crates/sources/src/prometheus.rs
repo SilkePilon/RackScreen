@@ -147,8 +147,8 @@ const Q_UPS_RUNTIME: &str = "nut_battery_runtime_seconds";
 /// would count every pod packet twice. Two minutes so a 60 s scrape interval
 /// still yields two samples for `rate`.
 const Q_NET_RX: &str =
-    "sum(rate(node_network_receive_bytes_total{device=~\"eth.*|end.*|enp.*|eno.*|wlan.*\"}[2m]))*8";
-const Q_NET_TX: &str = "sum(rate(node_network_transmit_bytes_total{device=~\"eth.*|end.*|enp.*|eno.*|wlan.*\"}[2m]))*8";
+    "sum(rate(node_network_receive_bytes_total{device=~\"eth.*|end.*|enp.*|eno.*|enx.*|wlan.*|wlp.*|wlx.*\"}[2m]))*8";
+const Q_NET_TX: &str = "sum(rate(node_network_transmit_bytes_total{device=~\"eth.*|end.*|enp.*|eno.*|enx.*|wlan.*|wlp.*|wlx.*\"}[2m]))*8";
 
 /// The two common nut exporters disagree: one reports charge and load as
 /// 0..1, the other as 0..100. At or below 1 is a fraction.
