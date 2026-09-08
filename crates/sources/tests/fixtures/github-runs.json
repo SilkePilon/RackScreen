@@ -1,0 +1,8 @@
+{
+  "total_count": 3,
+  "workflow_runs": [
+    { "id": 301, "name": "ci", "status": "in_progress", "conclusion": null },
+    { "id": 300, "name": "ci", "status": "completed", "conclusion": "failure" },
+    { "id": 299, "name": "release", "status": "completed", "conclusion": "success" }
+  ]
+}
