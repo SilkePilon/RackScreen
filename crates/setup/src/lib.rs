@@ -257,13 +257,20 @@ impl App {
             }
             return true;
         }
-        match self.current.handle(key, &mut self.shared, now) {
-            Action::None => {
-                // A screen that ignores ← hands it to the shell as "back".
-                if key.code == KeyCode::Left && !self.current.consumes_left() {
-                    self.go(ScreenId::Menu, now);
-                }
-            }
+        let mut action = self.current.handle(key, &mut self.shared, now);
+        // A screen that ignores ← gets it again as Esc, so ← means exactly what Esc means
+        // there: a dirty editor asks first, a running install stays, Status closes its
+        // log view. The shell never drops a screen on its own.
+        if matches!(action, Action::None)
+            && key.code == KeyCode::Left
+            && !self.current.consumes_left()
+        {
+            action = self
+                .current
+                .handle(KeyEvent::from(KeyCode::Esc), &mut self.shared, now);
+        }
+        match action {
+            Action::None => {}
             Action::Go(id) => self.go(id, now),
             Action::Back => {
                 if self.current_id == ScreenId::Menu {
@@ -536,6 +543,43 @@ mod tests {
         app.go(ScreenId::Calibrate, 4.0);
         assert!(app.handle(KeyEvent::from(KeyCode::Left), 5.0));
         assert_eq!(app.current_id, ScreenId::Calibrate);
+    }
+
+    #[test]
+    fn left_on_a_dirty_screens_editor_asks_before_discarding() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, mut term) = new_app(dir.path(), 100, 30);
+        app.go(ScreenId::Screens, 0.0);
+        // `+` lengthens the cycle: the editor is now dirty
+        assert!(app.handle(KeyEvent::from(KeyCode::Char('+')), 1.0));
+        assert!(app.handle(KeyEvent::from(KeyCode::Left), 2.0));
+        assert_eq!(
+            app.current_id,
+            ScreenId::Screens,
+            "← never drops unsaved edits"
+        );
+        term.draw(|f| app.draw(f, 2.0)).unwrap();
+        let t = text(&term);
+        assert!(t.contains("Discard changes?"), "← acts as Esc: {t}");
+        // and ← while the dialog is up keeps editing, exactly like Esc
+        assert!(app.handle(KeyEvent::from(KeyCode::Left), 3.0));
+        assert_eq!(app.current_id, ScreenId::Screens);
+    }
+
+    #[test]
+    fn left_on_a_running_install_stays_put() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, _term) = new_app(dir.path(), 100, 30);
+        // `preview` builds an Install in `Phase::Running` without a worker thread
+        app.current = Box::new(screens::install::Install::preview(Vec::new()));
+        app.current_id = ScreenId::Install;
+        app.focus = Focus::Content;
+        assert!(app.handle(KeyEvent::from(KeyCode::Left), 1.0));
+        assert_eq!(
+            app.current_id,
+            ScreenId::Install,
+            "a running install is never abandoned"
+        );
     }
 
     #[test]

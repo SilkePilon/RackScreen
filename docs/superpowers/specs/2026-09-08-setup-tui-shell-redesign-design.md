@@ -57,10 +57,10 @@ One row, then a full-width rule. Left: `RackScreen` in the title style, then ` �
 Two focus areas: sidebar and content. `App` owns `focus: Focus` with `Focus::{Sidebar, Content}`; screens never read it.
 
 - On Home, focus is Sidebar. `↑↓`/`jk`/Tab move the bar, Enter opens the hovered screen and sets focus to Content. `q` quits.
-- In any other screen, focus is Content and keys go to the screen as today. Esc (and `q` where a screen already treats `q` as back) returns to Home with focus Sidebar. `←` also returns to Home when the screen reports `fn consumes_left(&self) -> bool` false. Configure and Calibrate use `←`, so they return true; everything else returns false.
+- In any other screen, focus is Content and keys go to the screen as today. Esc (and `q` where a screen already treats `q` as back) returns to Home with focus Sidebar. `←` acts as Esc when the screen reports `consumes_left()` false; screens that use `←` themselves (Configure, Calibrate) return true.
 - In Configure, `←→` change group. The sidebar bar follows the group. The sidebar itself never takes key focus inside Configure.
 
-A screen never has to know about the sidebar. Screens keep returning `Action::Back` for Esc as today; `App::handle` intercepts only `←`, and only after the screen returned `Action::None` for it, so screens that use Esc for "cancel edit" keep working.
+A screen never has to know about the sidebar. Screens keep returning `Action::Back` for Esc as today; `App::handle` intercepts only `←`, and only after the screen returned `Action::None` for it: it then re-dispatches the key as Esc and acts on that result, so a dirty editor's discard dialog, a running install's "let it finish" and Status's log view all behave the same for `←` as for Esc.
 
 ### Footer
 
