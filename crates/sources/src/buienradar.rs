@@ -62,11 +62,14 @@ pub fn parse_raintext<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Result<Eve
         mm.len()
     );
     let today = now.date_naive();
-    let mut from = now
-        .timezone()
-        .from_local_datetime(&today.and_time(first))
+    // The DST fall-back hour maps to two instants: take the first of them
+    // rather than failing the whole poll for an hour once a year.
+    let mapped = now.timezone().from_local_datetime(&today.and_time(first));
+    let mut from = mapped
+        .clone()
         .single()
-        .ok_or_else(|| anyhow!("ambiguous local time"))?;
+        .or_else(|| mapped.earliest())
+        .ok_or_else(|| anyhow!("no local time for {first}"))?;
     if from > now.clone() + ChronoDuration::hours(1) {
         from -= ChronoDuration::days(1);
     }
@@ -90,6 +93,10 @@ async fn fetch(url: &str) -> Result<String> {
     Ok(body)
 }
 
+/// Poll the nowcast. Buienradar covers NL and BE only and stamps its slots on
+/// the Dutch clock, so the zone is fixed at `Europe/Amsterdam` rather than
+/// taken from the Pi: a Pi left on UTC would otherwise decode every slot one
+/// or two hours off and read `DRY` forever.
 pub async fn run_rain(cfg: RainConfig, ctx: SourceCtx) {
     let url = raintext_url(&cfg);
     let mut failures = 0u32;
@@ -99,7 +106,12 @@ pub async fn run_rain(cfg: RainConfig, ctx: SourceCtx) {
         }
         match fetch(&url)
             .await
-            .and_then(|b| parse_raintext(&b, chrono::Local::now()))
+            .and_then(|b| {
+                parse_raintext(
+                    &b,
+                    chrono::Utc::now().with_timezone(&chrono_tz::Europe::Amsterdam),
+                )
+            })
         {
             Ok(ev) => {
                 failures = 0;
@@ -182,6 +194,19 @@ mod tests {
                 .unwrap()
                 .timestamp()
         );
+    }
+
+    #[test]
+    fn the_ambiguous_dst_fall_back_hour_still_parses() {
+        // 2026-10-25 02:30 Amsterdam happens twice; take the earlier instant.
+        let text = "000|02:30\n".to_string() + &"000|02:35\n".repeat(23);
+        let now = Amsterdam.with_ymd_and_hms(2026, 10, 25, 4, 0, 0).unwrap();
+        let ev = parse_raintext(&text, now).expect("ambiguous local time resolves");
+        let Event::Rain { from, .. } = ev else {
+            panic!("rain event")
+        };
+        // the earlier of the two 02:30s is still CEST (+2), i.e. 00:30 UTC
+        assert_eq!(from, 1_792_888_200);
     }
 
     #[test]

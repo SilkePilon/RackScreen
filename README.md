@@ -159,13 +159,13 @@ The mix colours and the source icons are the ones from the Electricity Maps web 
 - **Sun and moon** are computed on the Pi from the location and the clock, nothing to configure.
 - **ISS** fetches the station's orbital elements from [Celestrak](https://celestrak.org) once a day and predicts the next pass above `iss min elevation °` (10 by default); turn on `iss enabled`. A pass is marked visible when the sky is dark and the station is still sunlit, and a visible pass sweeps the whole rack violet when it starts.
 
-The sun dial and the rain ring use the Pi's local clock, so set the time zone once with `sudo timedatectl set-timezone Europe/Amsterdam`. Buienradar timestamps its slots on the Dutch clock, so the rain ring only lines up with "now" when the Pi is on `Europe/Amsterdam`.
+The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienradar covers NL and BE and stamps its slots in `Europe/Amsterdam`, so the ring lines up with "now" on a Pi left on UTC as well. The sun dial and the price ring do use the Pi's own zone, so still set it once with `sudo timedatectl set-timezone Europe/Amsterdam`.
 
 ## GitHub role
 
 `gh-activity` shows your contribution calendar: the outer ring is today against your best day of the last 30, the inner ring the last seven days in the calendar greens. Pushes, new stars, merged pull requests and finished CI runs splash on it, and a published release sweeps the rack green.
 
-Create a fine-grained personal access token at github.com with read access to contents, metadata and Actions on the repositories you care about (contributions and the events feed need no extra permission), turn on `github enabled` and paste it into `github token`. The calendar is refreshed every five minutes and the events feed every `github poll secs` (60, the minimum GitHub allows); together with the Actions checks for repositories pushed to recently that is a few hundred requests an hour, far below the limit. Without a token the role shows a key icon.
+Create a fine-grained personal access token at github.com with read access to contents, metadata and Actions on the repositories you care about (contributions and the events feed need no extra permission), turn on `github enabled` and paste it into `github token`. The calendar is refreshed every five minutes and the events feed every `github poll secs` (60, the minimum GitHub allows); together with the Actions checks for repositories pushed to recently that is a few hundred requests an hour, far below the limit. Without a token the role shows a key icon. Note that `/users/{login}/events` only ever returns *public* events to a fine-grained token, so pushes to private repositories still count on the calendar ring but never splash; use a classic token with `repo` scope if you want private activity to splash too.
 
 ## Configuration
 
