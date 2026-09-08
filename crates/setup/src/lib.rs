@@ -532,6 +532,10 @@ mod tests {
         app.go(ScreenId::Configure, 2.0);
         assert!(app.handle(KeyEvent::from(KeyCode::Left), 3.0));
         assert_eq!(app.current_id, ScreenId::Configure);
+        // Calibrate uses ← to select the previous panel: it stays too
+        app.go(ScreenId::Calibrate, 4.0);
+        assert!(app.handle(KeyEvent::from(KeyCode::Left), 5.0));
+        assert_eq!(app.current_id, ScreenId::Calibrate);
     }
 
     #[test]

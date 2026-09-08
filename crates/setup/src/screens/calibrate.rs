@@ -365,6 +365,9 @@ impl Screen for Calibrate {
     fn subtitle(&self) -> String {
         "Calibrate screens".into()
     }
+    fn consumes_left(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
