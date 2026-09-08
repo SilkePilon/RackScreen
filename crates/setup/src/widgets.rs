@@ -151,13 +151,18 @@ pub fn sidebar(
             Span::styled(format!("{pointer} "), th.selected()),
             Span::styled(item.label.clone(), label_style),
         ];
-        let used = 3 + item.label.chars().count();
+        let mut used = 3 + item.label.chars().count();
         if let Some((h, style)) = &item.hint {
             let hw = h.chars().count() + 1;
             if used + hw <= width {
                 spans.push(Span::raw(" ".repeat(width - used - hw)));
                 spans.push(Span::styled(h.clone(), *style));
+                used = width - 1;
             }
+        }
+        // Pad to the edge so the highlight reads as a bar, not a patch under the text.
+        if used < width {
+            spans.push(Span::raw(" ".repeat(width - used)));
         }
         let mut line = Line::from(spans);
         if hot && focused {
@@ -464,6 +469,18 @@ mod tests {
         let t = text(&term);
         assert!(t.contains("▸ Screens"), "{t}");
         assert!(!t.contains("▸ Home"));
+        // the highlight is a bar: it reaches the last sidebar column, not just the text
+        let buf = term.backend().buffer();
+        assert_eq!(
+            buf.cell((15, 2)).unwrap().bg,
+            th.highlight,
+            "hot row bg spans"
+        );
+        assert_ne!(
+            buf.cell((15, 1)).unwrap().bg,
+            th.highlight,
+            "other rows do not"
+        );
         term.draw(|f| {
             sidebar(
                 f,

@@ -1011,20 +1011,28 @@ impl Screen for Configure {
                         th.muted()
                     };
                     let pointer = if selected { g.pointer } else { " " };
-                    let mut line = Line::from(vec![
+                    lines.push(Line::from(vec![
                         Span::raw("  "),
                         Span::styled(format!("{pointer} "), th.selected()),
                         Span::styled(format!("{:<16}", s.label), label_style),
                         Span::styled(shown, value_style),
-                    ]);
-                    if selected {
-                        line = line.style(th.highlighted());
-                    }
-                    lines.push(line);
+                    ]));
                 }
             }
         }
         f.render_widget(Paragraph::new(lines), list);
+        // The highlight spans the whole list width, not just the drawn glyphs.
+        let focus_row = (focus_pos - scroll) as u16;
+        if focus_row < list.height {
+            f.buffer_mut().set_style(
+                Rect {
+                    y: list.y + focus_row,
+                    height: 1,
+                    ..list
+                },
+                th.highlighted(),
+            );
+        }
 
         match (&self.mode, &self.error, &self.note) {
             (Mode::Restarting, _, _) => f.render_widget(
@@ -1079,7 +1087,8 @@ impl Screen for Configure {
         }
     }
     fn subtitle(&self) -> String {
-        "Configure".into()
+        // The group is named here too, so narrow terminals without the sidebar show it.
+        format!("Configure › {}", self.group().name())
     }
     fn status(&self, _shared: &Shared) -> Option<(String, StatusTone)> {
         self.dirty

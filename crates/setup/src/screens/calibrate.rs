@@ -330,8 +330,12 @@ impl Screen for Calibrate {
             Constraint::Length(2),
         ])
         .areas(area);
+        // The info column needs ~38 columns for a full strip and key rows; the preview
+        // takes what is left (17 keeps the 13-column circle with its margins; `pixels`
+        // scales to any width).
+        let preview_w = body.width.saturating_sub(38).clamp(17, 34);
         let [preview, info] =
-            Layout::horizontal([Constraint::Length(34), Constraint::Min(20)]).areas(body);
+            Layout::horizontal([Constraint::Length(preview_w), Constraint::Min(20)]).areas(body);
         // Preview: the selected panel, sliding in from the right on a change.
         let inner = TRect {
             x: preview.x + 2,
@@ -369,6 +373,7 @@ impl Screen for Calibrate {
             }
         }
         // Info: strip of all panels, the selected one underlined, then keys and the goal.
+        let gap = if info.width < 30 { "  " } else { "    " };
         let mut strip = vec![Span::raw("  ")];
         let mut under = String::from("  ");
         let mark = if th.unicode { "▔" } else { "^" };
@@ -384,9 +389,9 @@ impl Screen for Calibrate {
             };
             let w = label.chars().count();
             strip.push(Span::styled(label, style));
-            strip.push(Span::raw("    "));
+            strip.push(Span::raw(gap));
             under.push_str(&if sel { mark.repeat(w) } else { " ".repeat(w) });
-            under.push_str("    ");
+            under.push_str(gap);
         }
         let mut lines = vec![
             Line::from(strip),
@@ -575,6 +580,39 @@ mod tests {
             t.contains("╭─────╮"),
             "drawn circle fallback without a pixmap: {t}"
         );
+    }
+
+    #[test]
+    fn info_column_fits_in_an_80_column_pane() {
+        // 80x24 with the sidebar leaves a 63-column pane: the strip and key rows must
+        // still be complete, so the preview gives way instead.
+        let sh = Shared {
+            ctx: Ctx {
+                config_path: "/etc/rackscreen/config.yaml".into(),
+                sim: true,
+                version: "0.5.0",
+            },
+            theme: Theme::new(true),
+            service_active: None,
+            banner: None,
+            log_sink: LogSink::new(10),
+            update: None,
+            redraw: false,
+        };
+        let four = vec![
+            Orientation {
+                rotate: 0,
+                hflip: false
+            };
+            4
+        ];
+        let screen = Calibrate::from_parts(Config::default(), four);
+        let mut term = Terminal::new(TestBackend::new(63, 20)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("4 ok"), "the whole strip is visible: {t}");
+        assert!(t.contains("f flip"), "the whole key row is visible: {t}");
+        assert!(t.contains("╭─────╮"), "the circle still fits: {t}");
     }
 
     #[test]

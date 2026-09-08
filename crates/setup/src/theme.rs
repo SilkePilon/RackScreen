@@ -146,7 +146,7 @@ impl Theme {
     pub fn selected(&self) -> Style {
         Style::new().fg(self.accent).add_modifier(Modifier::BOLD)
     }
-    /// The focused row: selected text on the highlight background.
+    /// The focused row's background only; the text keeps its own foreground style.
     pub fn highlighted(&self) -> Style {
         Style::new().bg(self.highlight)
     }

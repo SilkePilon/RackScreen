@@ -415,8 +415,12 @@ impl Screen for Screens {
             .max(8);
         // Rows per screen, wrapped, plus the one-at-a-time toggle and a blank row.
         let mut lines = Vec::new();
+        let mut sel_row = None;
         for (i, (rs, secs)) in self.editor.rows().iter().enumerate() {
             let sel = i == self.editor.selected;
+            if sel {
+                sel_row = Some(lines.len() as u16);
+            }
             let names: Vec<&str> = rs.iter().map(|r| r.name()).collect();
             let wrapped = wrap_roles(&names, roles_w);
             let timing = if rs.len() > 1 {
@@ -451,11 +455,7 @@ impl Screen for Screens {
                         spans.push(Span::styled(format!("  ! {w}"), th.warning()));
                     }
                 }
-                let mut line = Line::from(spans);
-                if sel && k == 0 {
-                    line = line.style(th.highlighted());
-                }
-                lines.push(line);
+                lines.push(Line::from(spans));
             }
         }
         lines.push(Line::from(""));
@@ -485,6 +485,17 @@ impl Screen for Screens {
         ])
         .areas(area);
         f.render_widget(Paragraph::new(lines), list);
+        // The highlight spans the whole list width, not just the drawn glyphs.
+        if let Some(row) = sel_row.filter(|r| *r < list.height) {
+            f.buffer_mut().set_style(
+                Rect {
+                    y: list.y + row,
+                    height: 1,
+                    ..list
+                },
+                th.highlighted(),
+            );
+        }
 
         let mut body = vec![Line::from(Span::styled("  Roles", th.muted()))];
         if let Some(p) = self.editor.picker() {
@@ -520,11 +531,18 @@ impl Screen for Screens {
                 if let Some(h) = self.role_hint(*r) {
                     spans.push(Span::styled(format!("! {h}"), th.warning()));
                 }
-                let mut line = Line::from(spans);
-                if cur {
-                    line = line.style(th.highlighted());
-                }
-                body.push(line);
+                body.push(Line::from(spans));
+            }
+            let cur_row = (p.cursor - first) as u16 + 1; // after the "Roles" header
+            if cur_row < roles.height {
+                f.buffer_mut().set_style(
+                    Rect {
+                        y: roles.y + cur_row,
+                        height: 1,
+                        ..roles
+                    },
+                    th.highlighted(),
+                );
             }
         } else {
             body.push(Line::from(Span::styled(

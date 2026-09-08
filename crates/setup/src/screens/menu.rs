@@ -224,25 +224,38 @@ impl Screen for Home {
                         ),
                     ],
                 ));
-                let link = |d: Dot, name: &str| {
-                    vec![
-                        Span::styled(g.dot.to_string(), dot_style(d, th)),
-                        Span::styled(format!(" {name}  "), th.normal()),
-                    ]
-                };
-                let mut row1 = Vec::new();
-                row1.extend(link(s.links.api, "k8s"));
-                row1.extend(link(s.links.prometheus, "prometheus"));
-                row1.extend(link(s.links.qbittorrent, "qbittorrent"));
-                row1.extend(link(s.links.argocd, "argocd"));
-                lines.push(labelled(th, "Links", row1));
-                let mut row2 = Vec::new();
-                row2.extend(link(s.links.weather, "weather"));
-                row2.extend(link(s.links.rain, "rain"));
-                row2.extend(link(s.links.github, "github"));
-                row2.extend(link(s.links.electricity, "electricity"));
-                row2.extend(link(s.links.prices, "prices"));
-                lines.push(labelled(th, "", row2));
+                // Links flow into as many rows as the pane needs, breaking before a
+                // link that would not fit (two rows at 100 columns, three at 80).
+                let links = [
+                    (s.links.api, "k8s"),
+                    (s.links.prometheus, "prometheus"),
+                    (s.links.qbittorrent, "qbittorrent"),
+                    (s.links.argocd, "argocd"),
+                    (s.links.weather, "weather"),
+                    (s.links.rain, "rain"),
+                    (s.links.github, "github"),
+                    (s.links.electricity, "electricity"),
+                    (s.links.prices, "prices"),
+                ];
+                let links_w = (area.width as usize).saturating_sub(2 + LABEL_W);
+                let mut row: Vec<Span> = Vec::new();
+                let mut used = 0usize;
+                let mut first = true;
+                for (d, name) in links {
+                    let w = name.chars().count() + 4; // "● name  "
+                    if !row.is_empty() && used + w > links_w {
+                        let label = if first { "Links" } else { "" };
+                        lines.push(labelled(th, label, std::mem::take(&mut row)));
+                        first = false;
+                        used = 0;
+                    }
+                    row.push(Span::styled(g.dot.to_string(), dot_style(d, th)));
+                    row.push(Span::styled(format!(" {name}  "), th.normal()));
+                    used += w;
+                }
+                if !row.is_empty() {
+                    lines.push(labelled(th, if first { "Links" } else { "" }, row));
+                }
             }
             None => {
                 let msg = if shared.ctx.sim {
@@ -473,6 +486,30 @@ mod tests {
             }
         }
         assert!(found, "a truncated row with +N was drawn");
+    }
+
+    #[test]
+    fn links_flow_into_more_rows_when_the_pane_is_narrow() {
+        let sh = shared();
+        let home = Home::with_snapshot(Vec::new(), Some(snapshot()));
+        // 80x24 with the sidebar leaves 63 columns: the last link must not be cut off
+        let mut term = Terminal::new(TestBackend::new(63, 20)).unwrap();
+        term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("● prices"), "last link complete: {t}");
+        assert!(t.contains("● k8s"));
+        let link_rows = t.lines().filter(|l| l.contains("● ")).count();
+        // Service, Boot, and the links in three rows
+        assert!(link_rows >= 5, "links wrap onto extra rows: {t}");
+        // wide pane: the same nine links fit in two rows
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("● prices"), "{t}");
+        assert!(
+            t.contains("● k8s  ● prometheus  ● qbittorrent  ● argocd"),
+            "{t}"
+        );
     }
 
     #[test]
