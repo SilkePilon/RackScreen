@@ -6,6 +6,7 @@ use crate::anim::{Secs, Smooth};
 use crate::electricity::{partition, Section, Source};
 use crate::event::{App, Event, LinkTarget, Robustness, Torrent};
 use crate::fx::Fx;
+use crate::scene_rain::{current_slots, first_wet_minutes, SOON_MINUTES, WET_MM};
 use crate::screens::ScreenState;
 use crate::theme::eaqi_band;
 use crate::theme::layout::{SEG_N, TORRENT_RADII};
@@ -132,6 +133,13 @@ pub struct AirState {
     pub have: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RainState {
+    pub from: i64,
+    pub mm_per_h: Vec<f32>,
+    pub have: bool,
+}
+
 /// WMO codes 95, 96 and 99 are thunderstorms.
 fn is_thunder(code: u16) -> bool {
     (95..=99).contains(&code)
@@ -252,6 +260,9 @@ pub struct Model {
     github: GithubState,
     weather: WeatherState,
     air: AirState,
+    rain: RainState,
+    /// Minutes to rain as of the previous nowcast, for the umbrella edge.
+    rain_prev_wet: Option<u32>,
     temp: Smooth,
     eaqi: Smooth,
     wind: Smooth,
@@ -344,6 +355,8 @@ impl Model {
             github: GithubState::default(),
             weather: WeatherState::default(),
             air: AirState::default(),
+            rain: RainState::default(),
+            rain_prev_wet: None,
             temp: Smooth::new(0.0, SMOOTH_SECS),
             eaqi: Smooth::new(0.0, SMOOTH_SECS),
             wind: Smooth::new(0.0, SMOOTH_SECS),
@@ -439,6 +452,9 @@ impl Model {
     }
     pub fn air(&self) -> &AirState {
         &self.air
+    }
+    pub fn rain(&self) -> &RainState {
+        &self.rain
     }
     pub fn smooth_temp(&self, now: Secs) -> f32 {
         self.temp.value(now)
@@ -1077,7 +1093,22 @@ impl Model {
                 self.eaqi.set(eaqi, now);
                 self.air = AirState { eaqi, have: true };
             }
-            Event::Rain { .. } | Event::Sky { .. } | Event::IssPass(_) => {}
+            Event::Rain { from, mm_per_h } => {
+                let slots = current_slots(from, &mm_per_h, self.unix_now);
+                let wet = first_wet_minutes(&slots);
+                let dry_now = slots.first().is_none_or(|v| *v < WET_MM);
+                let inside = |w: Option<u32>| w.is_some_and(|m| m <= SOON_MINUTES);
+                if self.rain.have && dry_now && inside(wet) && !inside(self.rain_prev_wet) {
+                    self.fx.push(FxRequest::RainSoon);
+                }
+                self.rain_prev_wet = wet;
+                self.rain = RainState {
+                    from,
+                    mm_per_h,
+                    have: true,
+                };
+            }
+            Event::Sky { .. } | Event::IssPass(_) => {}
             Event::GithubActivity { days } => {
                 self.github = GithubState { days, have: true };
                 self.gh_today.set(self.github.today() as f32, now);
@@ -1823,6 +1854,64 @@ mod tests {
         assert_eq!(m.pending_fx(), &[FxRequest::AirWorse]);
         m.apply(Event::AirQuality { eaqi: 10.0 }, 3.0);
         assert_eq!(m.pending_fx().len(), 1, "improving is quiet");
+    }
+
+    #[test]
+    fn rain_folds_and_splashes_when_rain_moves_inside_fifteen_minutes() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_unix_now(1_000_000);
+        let mut far = vec![0.0f32; 24];
+        far[6] = 2.0; // 30 minutes out
+        m.apply(
+            Event::Rain {
+                from: 1_000_000,
+                mm_per_h: far.clone(),
+            },
+            0.0,
+        );
+        assert!(m.rain().have);
+        assert!(m.pending_fx().is_empty(), "first sample is quiet");
+        let mut soon = vec![0.0f32; 24];
+        soon[2] = 2.0; // 10 minutes out
+        m.apply(
+            Event::Rain {
+                from: 1_000_000,
+                mm_per_h: soon.clone(),
+            },
+            1.0,
+        );
+        assert_eq!(m.pending_fx(), &[FxRequest::RainSoon]);
+        m.apply(
+            Event::Rain {
+                from: 1_000_300,
+                mm_per_h: soon,
+            },
+            2.0,
+        );
+        assert_eq!(
+            m.pending_fx().len(),
+            1,
+            "already inside the window: no repeat"
+        );
+        // raining now: no umbrella, it is too late for one
+        let mut wet_now = vec![0.0f32; 24];
+        wet_now[0] = 1.0;
+        m.take_fx();
+        m.apply(
+            Event::Rain {
+                from: 1_000_000,
+                mm_per_h: far,
+            },
+            3.0,
+        );
+        m.apply(
+            Event::Rain {
+                from: 1_000_000,
+                mm_per_h: wet_now,
+            },
+            4.0,
+        );
+        assert!(m.pending_fx().is_empty());
     }
 
     #[test]

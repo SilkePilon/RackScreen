@@ -170,7 +170,8 @@ impl crate::model::Model {
             Role::GhActivity => !(link.github && self.github().have),
             Role::Weather | Role::Wind => !(link.weather && self.weather().have),
             Role::Aqi => !(link.weather && self.air().have),
-            Role::Rain | Role::Sun | Role::Moon | Role::Iss => true,
+            Role::Rain => !(link.rain && self.rain().have),
+            Role::Sun | Role::Moon | Role::Iss => true,
         }
     }
 
