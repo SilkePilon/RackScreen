@@ -307,6 +307,8 @@ impl RunTracker {
 pub struct EventsPage {
     /// `None` on 304: nothing new since the ETag.
     pub events: Option<Vec<GhEvent>>,
+    /// The ETag of a page that actually arrived; only stored when `events` is
+    /// `Some`, since a 304 returns the ETag the caller already holds.
     pub etag: Option<String>,
     pub poll_secs: Option<u64>,
 }
@@ -450,7 +452,9 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
             for repo in repos.clone() {
                 match http.runs(&repo).await {
                     Ok(page) => ctx.emit_all(runs.diff(&repo, &page)),
-                    Err(e) => tracing::warn!("github: runs for {repo}: {e:#}"),
+                    // no `github:` prefix: a per-repo miss does not take the
+                    // link down, and the Status dot keys off that needle.
+                    Err(e) => tracing::warn!("github runs for {repo}: {e:#}"),
                 }
             }
             Ok(())
@@ -467,8 +471,9 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
             }
             Err(e) => {
                 failures += 1;
-                let rejected = token_rejected(&e).is_some();
-                match token_rejected(&e) {
+                let rejection = token_rejected(&e);
+                let rejected = rejection.is_some();
+                match rejection {
                     Some(status) if !warned_about_token => {
                         warned_about_token = true;
                         tracing::warn!(

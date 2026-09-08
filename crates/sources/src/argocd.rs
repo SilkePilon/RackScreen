@@ -144,7 +144,9 @@ pub async fn run_argocd(client: Client, cfg: ArgoConfig, ctx: SourceCtx) {
         let wait = match api.list(&ListParams::default().limit(1)).await {
             Ok(_) => None,
             Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                tracing::info!(
+                // warn, not info: the Status dot reads the level, and from
+                // the deploys role's point of view this is a degraded state.
+                tracing::warn!(
                     "argocd: no applications.argoproj.io in {}; deploys stays on no-data, retry in {}s",
                     cfg.namespace,
                     CRD_RETRY.as_secs()

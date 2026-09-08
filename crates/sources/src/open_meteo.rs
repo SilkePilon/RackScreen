@@ -102,7 +102,9 @@ pub async fn run_weather(cfg: WeatherConfig, ctx: SourceCtx) {
                     .and_then(|b| parse_air_quality(&b))
                 {
                     Ok(eaqi) => ctx.emit(Event::AirQuality { eaqi }),
-                    Err(e) => tracing::warn!("weather: air quality: {e:#}"),
+                    // no `weather:` prefix: the link is deliberately still up,
+                    // and the Status dot keys off that needle.
+                    Err(e) => tracing::warn!("air quality: {e:#}"),
                 }
             }
             Err(e) => {

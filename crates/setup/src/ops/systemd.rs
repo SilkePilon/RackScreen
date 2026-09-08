@@ -291,5 +291,16 @@ mod tests {
         let d = links_from_logs(&["WARN argocd: watch: 410 Gone".to_string()]);
         assert_eq!(d.argocd, Dot::Down);
         assert_eq!(d.weather, Dot::Unknown);
+        // a cluster without the CRD is a degraded deploys role, not a healthy one
+        let d = links_from_logs(&[
+            "WARN argocd: no applications.argoproj.io in argocd; deploys stays on no-data, retry in 600s"
+                .to_string(),
+        ]);
+        assert_eq!(d.argocd, Dot::Down);
+        // failures that leave their link up must miss the dot's needle
+        let d = links_from_logs(&["WARN air quality: request timed out".to_string()]);
+        assert_eq!(d.weather, Dot::Unknown);
+        let d = links_from_logs(&["WARN github runs for x/y: HTTP 404".to_string()]);
+        assert_eq!(d.github, Dot::Unknown);
     }
 }
