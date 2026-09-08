@@ -13,6 +13,7 @@ pub mod scene_fx;
 pub mod scene_github;
 pub mod scene_net;
 pub mod scene_rain;
+pub mod scene_sky;
 pub mod scene_storage;
 pub mod scene_thermal;
 pub mod scene_ups;

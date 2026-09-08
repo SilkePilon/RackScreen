@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
 use crate::electricity::{partition, Section, Source};
-use crate::event::{App, Event, LinkTarget, Robustness, Torrent};
+use crate::event::{App, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::scene_rain::{current_slots, first_wet_minutes, SOON_MINUTES, WET_MM};
 use crate::screens::ScreenState;
@@ -140,6 +140,37 @@ pub struct RainState {
     pub have: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkyState {
+    pub sunrise: Option<i64>,
+    pub sunset: Option<i64>,
+    pub sun_elevation_deg: f32,
+    pub moon_illumination: f32,
+    pub moon_waxing: bool,
+    pub moon_phase: MoonPhase,
+    pub have: bool,
+}
+
+impl Default for SkyState {
+    fn default() -> Self {
+        Self {
+            sunrise: None,
+            sunset: None,
+            sun_elevation_deg: 0.0,
+            moon_illumination: 0.0,
+            moon_waxing: true,
+            moon_phase: MoonPhase::New,
+            have: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct IssState {
+    pub pass: Option<IssPass>,
+    pub have: bool,
+}
+
 /// WMO codes 95, 96 and 99 are thunderstorms.
 fn is_thunder(code: u16) -> bool {
     (95..=99).contains(&code)
@@ -263,6 +294,10 @@ pub struct Model {
     rain: RainState,
     /// Minutes to rain as of the previous nowcast, for the umbrella edge.
     rain_prev_wet: Option<u32>,
+    sky: SkyState,
+    iss: IssState,
+    /// Start time of the pass whose sweep has played.
+    iss_swept: Option<i64>,
     temp: Smooth,
     eaqi: Smooth,
     wind: Smooth,
@@ -357,6 +392,9 @@ impl Model {
             air: AirState::default(),
             rain: RainState::default(),
             rain_prev_wet: None,
+            sky: SkyState::default(),
+            iss: IssState::default(),
+            iss_swept: None,
             temp: Smooth::new(0.0, SMOOTH_SECS),
             eaqi: Smooth::new(0.0, SMOOTH_SECS),
             wind: Smooth::new(0.0, SMOOTH_SECS),
@@ -455,6 +493,12 @@ impl Model {
     }
     pub fn rain(&self) -> &RainState {
         &self.rain
+    }
+    pub fn sky(&self) -> &SkyState {
+        &self.sky
+    }
+    pub fn iss(&self) -> &IssState {
+        &self.iss
     }
     pub fn smooth_temp(&self, now: Secs) -> f32 {
         self.temp.value(now)
@@ -641,6 +685,13 @@ impl Model {
             (self.net_rx_phase + dt * self.net_rx.value(now) as f64 * NET_LAPS_PER_SEC).fract();
         self.net_tx_phase =
             (self.net_tx_phase + dt * self.net_tx.value(now) as f64 * NET_LAPS_PER_SEC).fract();
+        if let Some(p) = self.iss.pass {
+            let inside = (p.start..p.end).contains(&self.unix_now);
+            if p.visible && inside && self.iss_swept != Some(p.start) {
+                self.iss_swept = Some(p.start);
+                self.fx.push(FxRequest::IssPass);
+            }
+        }
         for req in std::mem::take(&mut self.fx) {
             self.fx_state.apply(req, now);
         }
@@ -1108,7 +1159,27 @@ impl Model {
                     have: true,
                 };
             }
-            Event::Sky { .. } | Event::IssPass(_) => {}
+            Event::Sky {
+                sunrise,
+                sunset,
+                sun_elevation_deg,
+                moon_illumination,
+                moon_waxing,
+                moon_phase,
+            } => {
+                self.sky = SkyState {
+                    sunrise,
+                    sunset,
+                    sun_elevation_deg,
+                    moon_illumination,
+                    moon_waxing,
+                    moon_phase,
+                    have: true,
+                };
+            }
+            Event::IssPass(pass) => {
+                self.iss = IssState { pass, have: true };
+            }
             Event::GithubActivity { days } => {
                 self.github = GithubState { days, have: true };
                 self.gh_today.set(self.github.today() as f32, now);
@@ -1912,6 +1983,57 @@ mod tests {
             4.0,
         );
         assert!(m.pending_fx().is_empty());
+    }
+
+    #[test]
+    fn sky_and_iss_fold_and_a_visible_pass_sweeps_once() {
+        use crate::event::{IssPass, MoonPhase};
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Sky {
+                sunrise: Some(100),
+                sunset: Some(200),
+                sun_elevation_deg: 30.0,
+                moon_illumination: 0.63,
+                moon_waxing: true,
+                moon_phase: MoonPhase::WaxingGibbous,
+            },
+            0.0,
+        );
+        assert!(m.sky().have);
+        assert_eq!(m.sky().sunset, Some(200));
+        let pass = IssPass {
+            start: 1_000,
+            end: 1_400,
+            max_elevation_deg: 62.0,
+            visible: true,
+        };
+        m.apply(Event::IssPass(Some(pass)), 0.0);
+        assert!(m.iss().have);
+        m.set_unix_now(900);
+        m.tick(1.0);
+        assert!(m.fx().sweeps.active().is_none(), "not yet");
+        m.set_unix_now(1_000);
+        m.tick(2.0);
+        assert_eq!(
+            m.fx().sweeps.active().map(|s| s.kind),
+            Some(crate::fx::SweepKind::IssPass)
+        );
+        m.set_unix_now(1_010);
+        m.tick(3.0);
+        assert!(m.pending_fx().is_empty(), "one sweep per pass");
+        // a pass that is not visible stays quiet
+        let mut m2 = Model::new(Thresholds::default());
+        m2.apply(
+            Event::IssPass(Some(IssPass {
+                visible: false,
+                ..pass
+            })),
+            0.0,
+        );
+        m2.set_unix_now(1_000);
+        m2.tick(1.0);
+        assert!(m2.fx().sweeps.active().is_none());
     }
 
     #[test]

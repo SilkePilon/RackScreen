@@ -455,7 +455,9 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         Role::Wind => crate::scene_weather::wind_scene(model, now),
         Role::Aqi => crate::scene_weather::aqi_scene(model, now),
         Role::Rain => crate::scene_rain::rain_scene(model, now),
-        Role::Sun | Role::Moon | Role::Iss => no_data_scene(now),
+        Role::Sun => crate::scene_sky::sun_scene(model, now),
+        Role::Moon => crate::scene_sky::moon_scene(model, now),
+        Role::Iss => crate::scene_sky::iss_scene(model, now),
     }
 }
 

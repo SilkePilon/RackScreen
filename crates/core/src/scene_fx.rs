@@ -171,7 +171,8 @@ impl crate::model::Model {
             Role::Weather | Role::Wind => !(link.weather && self.weather().have),
             Role::Aqi => !(link.weather && self.air().have),
             Role::Rain => !(link.rain && self.rain().have),
-            Role::Sun | Role::Moon | Role::Iss => true,
+            Role::Sun | Role::Moon => !self.sky().have,
+            Role::Iss => !self.iss().have,
         }
     }
 
