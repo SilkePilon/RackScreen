@@ -245,6 +245,9 @@ impl Screens {
                 "none" => Some("no price source"),
                 _ => None,
             },
+            r if r.is_sky() => c.location().is_none().then_some("no location"),
+            Role::GhActivity => c.github.token.is_empty().then_some("no token"),
+            Role::Deploys => (!c.argocd.enabled).then_some("argocd off"),
             _ => None,
         }
     }
@@ -309,6 +312,16 @@ impl Screen for Screens {
             KeyCode::Char('m') => {
                 self.editor.apply_preset(Preset::Mixed);
                 self.dirty = true;
+            }
+            KeyCode::Char('w') => {
+                self.editor.apply_preset(Preset::Sky);
+                self.dirty = true;
+                if let Ok(cfg) = &self.cfg {
+                    if cfg.location().is_none() {
+                        self.error =
+                            Some("sky preset needs a location: set lat/lon under Configure".into());
+                    }
+                }
             }
             KeyCode::Char('o') => {
                 self.editor.toggle_one_at_a_time();
@@ -398,7 +411,10 @@ impl Screen for Screens {
 
         let mut body = vec![Line::from(Span::styled("  Roles:", th.muted()))];
         if let Some(p) = self.editor.picker() {
-            for (i, r) in Role::ALL.iter().enumerate() {
+            // `Role::ALL` is taller than the pane on a small terminal: scroll with the cursor.
+            let visible = (roles.height as usize).saturating_sub(1).max(1);
+            let first = (p.cursor + 1).saturating_sub(visible);
+            for (i, r) in Role::ALL.iter().enumerate().skip(first).take(visible) {
                 let on = p.chosen.iter().position(|x| x == r);
                 let mark = match on {
                     Some(k) => format!("{}{}", g.done, k + 1),
@@ -445,7 +461,9 @@ impl Screen for Screens {
                 Span::styled("e", th.selected()),
                 Span::styled(" electricity   ", th.muted()),
                 Span::styled("m", th.selected()),
-                Span::styled(" mixed", th.muted()),
+                Span::styled(" mixed   ", th.muted()),
+                Span::styled("w", th.selected()),
+                Span::styled(" sky", th.muted()),
             ]));
         }
         f.render_widget(Paragraph::new(body), roles);
@@ -476,7 +494,7 @@ impl Screen for Screens {
         if self.editor.picker().is_some() {
             "↑↓ move  space toggle  J/K reorder  ⏎ done  Esc cancel".into()
         } else {
-            "↑↓ screen  ⏎ roles  +/- interval  c/e/m preset  o solo  s save  Esc back".into()
+            "↑↓ screen  ⏎ roles  +/- interval  c/e/m/w preset  o solo  s save  Esc back".into()
         }
     }
     fn subtitle(&self) -> String {
@@ -649,5 +667,56 @@ mod tests {
         let text = term.backend().to_string();
         assert!(text.contains("power-mix"));
         assert!(text.contains("✓1 cpu") || text.contains("✓1  cpu"));
+    }
+
+    #[test]
+    fn sky_and_github_hints() {
+        let dir = tempfile::tempdir().unwrap();
+        let sh = test_shared(dir.path());
+        let mut s = Screens::new(&sh);
+        // defaults: no location, no GitHub token, Argo CD on
+        assert_eq!(s.role_hint(Role::Weather), Some("no location"));
+        assert_eq!(s.role_hint(Role::Moon), Some("no location"));
+        assert_eq!(s.role_hint(Role::GhActivity), Some("no token"));
+        assert_eq!(s.role_hint(Role::Deploys), None);
+        {
+            let cfg = s.cfg.as_mut().unwrap();
+            cfg.location.lat = Some(52.37);
+            cfg.location.lon = Some(4.89);
+            cfg.github.token = "t".into();
+            cfg.argocd.enabled = false;
+        }
+        assert_eq!(s.role_hint(Role::Weather), None);
+        assert_eq!(s.role_hint(Role::GhActivity), None);
+        assert_eq!(s.role_hint(Role::Deploys), Some("argocd off"));
+    }
+
+    #[test]
+    fn picker_scrolls_to_keep_the_cursor_visible() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let dir = tempfile::tempdir().unwrap();
+        let sh = test_shared(dir.path());
+        let mut s = Screens::new(&sh);
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        s.handle(
+            KeyEvent::from(KeyCode::Enter),
+            &mut sh.clone_for_test(),
+            0.0,
+        );
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(
+            text.contains("▸ ✓1 cpu"),
+            "the list starts at the top: {text}"
+        );
+        // wrap the cursor onto the last role: the pane is shorter than Role::ALL
+        s.handle(KeyEvent::from(KeyCode::Up), &mut sh.clone_for_test(), 0.0);
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(
+            text.contains("▸ ○  deploys"),
+            "scrolled to the cursor: {text}"
+        );
     }
 }

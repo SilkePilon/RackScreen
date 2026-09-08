@@ -42,6 +42,7 @@ pub enum Preset {
     Cluster,
     Electricity,
     Mixed,
+    Sky,
 }
 
 impl Preset {
@@ -56,6 +57,12 @@ impl Preset {
                 vec![Mem, Price],
                 vec![Pods, Carbon],
                 vec![Health, Renewable],
+            ],
+            Preset::Sky => vec![
+                vec![Weather, Aqi],
+                vec![Rain, Wind],
+                vec![Sun, Moon],
+                vec![Iss, GhActivity],
             ],
         }
     }
@@ -119,5 +126,18 @@ mod tests {
         let path = dir.path().join("etc/rackscreen/config.yaml");
         save_config(&Config::default(), &path).unwrap();
         assert_eq!(Config::load_or_default(&path).unwrap(), Config::default());
+    }
+
+    #[test]
+    fn sky_preset_fills_four_screens() {
+        use rackscreen_core::theme::Role;
+        let rows = Preset::Sky.rows();
+        assert_eq!(rows[0], vec![Role::Weather, Role::Aqi]);
+        assert_eq!(rows[1], vec![Role::Rain, Role::Wind]);
+        assert_eq!(rows[2], vec![Role::Sun, Role::Moon]);
+        assert_eq!(rows[3], vec![Role::Iss, Role::GhActivity]);
+        let mut c = Config::default();
+        apply_preset(&mut c, Preset::Sky);
+        assert_eq!(c.screens[3].roles, vec!["iss", "gh-activity"]);
     }
 }

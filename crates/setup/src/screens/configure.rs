@@ -70,9 +70,22 @@ pub enum Field {
     IncludeVat,
     PricePoll,
     HotTemp,
+    LocLat,
+    LocLon,
+    WeatherEnabled,
+    WeatherPoll,
+    RainEnabled,
+    RainPoll,
+    IssEnabled,
+    IssMinElevation,
+    GithubEnabled,
+    GithubToken,
+    GithubPoll,
+    ArgoEnabled,
+    ArgoNamespace,
 }
 
-pub const FIELDS: [(Field, &str, FieldKind); 31] = [
+pub const FIELDS: [(Field, &str, FieldKind); 44] = [
     (Field::Kubeconfig, "kubeconfig path", FieldKind::Text),
     (
         Field::PromNamespace,
@@ -112,6 +125,23 @@ pub const FIELDS: [(Field, &str, FieldKind); 31] = [
     (Field::IncludeVat, "price incl. VAT", FieldKind::Bool),
     (Field::PricePoll, "price poll secs", FieldKind::Number),
     (Field::HotTemp, "hot node temp °C", FieldKind::Number),
+    (Field::LocLat, "location lat", FieldKind::Number),
+    (Field::LocLon, "location lon", FieldKind::Number),
+    (Field::WeatherEnabled, "weather enabled", FieldKind::Bool),
+    (Field::WeatherPoll, "weather poll secs", FieldKind::Number),
+    (Field::RainEnabled, "rain enabled (NL/BE)", FieldKind::Bool),
+    (Field::RainPoll, "rain poll secs", FieldKind::Number),
+    (Field::IssEnabled, "iss enabled", FieldKind::Bool),
+    (
+        Field::IssMinElevation,
+        "iss min elevation °",
+        FieldKind::Number,
+    ),
+    (Field::GithubEnabled, "github enabled", FieldKind::Bool),
+    (Field::GithubToken, "github token", FieldKind::Secret),
+    (Field::GithubPoll, "github poll secs", FieldKind::Number),
+    (Field::ArgoEnabled, "argocd enabled", FieldKind::Bool),
+    (Field::ArgoNamespace, "argocd namespace", FieldKind::Text),
 ];
 
 pub fn get(cfg: &Config, f: Field) -> String {
@@ -147,6 +177,19 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::IncludeVat => cfg.price.include_vat.to_string(),
         Field::PricePoll => cfg.price.poll_secs.to_string(),
         Field::HotTemp => format!("{}", cfg.thresholds.hot_temp),
+        Field::LocLat => cfg.location.lat.map(|v| v.to_string()).unwrap_or_default(),
+        Field::LocLon => cfg.location.lon.map(|v| v.to_string()).unwrap_or_default(),
+        Field::WeatherEnabled => cfg.weather.enabled.to_string(),
+        Field::WeatherPoll => cfg.weather.poll_secs.to_string(),
+        Field::RainEnabled => cfg.rain.enabled.to_string(),
+        Field::RainPoll => cfg.rain.poll_secs.to_string(),
+        Field::IssEnabled => cfg.iss.enabled.to_string(),
+        Field::IssMinElevation => format!("{}", cfg.iss.min_elevation),
+        Field::GithubEnabled => cfg.github.enabled.to_string(),
+        Field::GithubToken => cfg.github.token.clone(),
+        Field::GithubPoll => cfg.github.poll_secs.to_string(),
+        Field::ArgoEnabled => cfg.argocd.enabled.to_string(),
+        Field::ArgoNamespace => cfg.argocd.namespace.clone(),
     }
 }
 
@@ -154,6 +197,18 @@ fn num<T: std::str::FromStr>(s: &str, what: &str) -> Result<T, String> {
     s.trim()
         .parse::<T>()
         .map_err(|_| format!("{what}: not a number"))
+}
+
+/// An optional coordinate: blank clears it, anything outside ±`limit` is rejected.
+fn coord(t: &str, what: &str, limit: f64) -> Result<Option<f64>, String> {
+    if t.is_empty() {
+        return Ok(None);
+    }
+    let v: f64 = num(t, what)?;
+    if v.abs() > limit {
+        return Err(format!("{what} must be between -{limit} and {limit}"));
+    }
+    Ok(Some(v))
 }
 
 pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
@@ -210,6 +265,25 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         Field::IncludeVat => cfg.price.include_vat = t == "true",
         Field::PricePoll => cfg.price.poll_secs = num::<u64>(t, "poll secs")?.max(60),
         Field::HotTemp => cfg.thresholds.hot_temp = num(t, "temp °C")?,
+        Field::LocLat => cfg.location.lat = coord(t, "lat", 90.0)?,
+        Field::LocLon => cfg.location.lon = coord(t, "lon", 180.0)?,
+        Field::WeatherEnabled => cfg.weather.enabled = t == "true",
+        Field::WeatherPoll => cfg.weather.poll_secs = num::<u64>(t, "poll secs")?.max(60),
+        Field::RainEnabled => cfg.rain.enabled = t == "true",
+        Field::RainPoll => cfg.rain.poll_secs = num::<u64>(t, "poll secs")?.max(60),
+        Field::IssEnabled => cfg.iss.enabled = t == "true",
+        Field::IssMinElevation => {
+            let e: f32 = num(t, "elevation")?;
+            if !(0.0..=90.0).contains(&e) {
+                return Err("elevation must be between 0 and 90".into());
+            }
+            cfg.iss.min_elevation = e;
+        }
+        Field::GithubEnabled => cfg.github.enabled = t == "true",
+        Field::GithubToken => cfg.github.token = text.into(),
+        Field::GithubPoll => cfg.github.poll_secs = num::<u64>(t, "poll secs")?.max(60),
+        Field::ArgoEnabled => cfg.argocd.enabled = t == "true",
+        Field::ArgoNamespace => cfg.argocd.namespace = t.into(),
     }
     Ok(())
 }
@@ -608,7 +682,6 @@ mod tests {
     #[test]
     fn electricity_price_and_temp_fields() {
         let mut c = Config::default();
-        assert_eq!(FIELDS.len(), 31);
         assert_eq!(get(&c, Field::ElecZone), "NL");
         assert_eq!(get(&c, Field::PriceSource), "energyzero");
         assert_eq!(get(&c, Field::HotTemp), "70");
@@ -659,5 +732,33 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Char(' ')), &mut sh, 0.0);
         assert_eq!(screen.cfg.price.source, "energyzero");
         assert!(matches!(screen.mode, Mode::Browse), "no edit buffer opened");
+    }
+
+    #[test]
+    fn new_fields_round_trip() {
+        let mut cfg = Config::default();
+        assert_eq!(get(&cfg, Field::LocLat), "");
+        set(&mut cfg, Field::LocLat, "52.37").unwrap();
+        set(&mut cfg, Field::LocLon, "4.89").unwrap();
+        assert_eq!(cfg.location(), Some((52.37, 4.89)));
+        assert_eq!(get(&cfg, Field::LocLat), "52.37");
+        set(&mut cfg, Field::LocLat, "").unwrap();
+        assert_eq!(cfg.location.lat, None, "blank clears it");
+        assert!(set(&mut cfg, Field::LocLon, "east").is_err());
+        assert!(set(&mut cfg, Field::LocLat, "95").is_err());
+        set(&mut cfg, Field::WeatherEnabled, "true").unwrap();
+        set(&mut cfg, Field::WeatherPoll, "30").unwrap();
+        assert_eq!(cfg.weather.poll_secs, 60, "clamped to the API floor");
+        set(&mut cfg, Field::IssMinElevation, "25").unwrap();
+        assert_eq!(cfg.iss.min_elevation, 25.0);
+        assert!(set(&mut cfg, Field::IssMinElevation, "100").is_err());
+        set(&mut cfg, Field::GithubToken, "ghp_x").unwrap();
+        assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
+        set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
+        assert_eq!(cfg.argocd.namespace, "argo");
+        assert_eq!(FIELDS.len(), 44);
+        assert!(FIELDS
+            .iter()
+            .any(|(f, _, k)| *f == Field::GithubToken && *k == FieldKind::Secret));
     }
 }

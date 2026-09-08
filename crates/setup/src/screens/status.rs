@@ -318,10 +318,21 @@ impl Screen for Status {
             Span::styled(" prometheus   ", th.normal()),
             Span::styled(g.dot, dot_style(s.links.qbittorrent, th)),
             Span::styled(" qbittorrent   ", th.normal()),
+            Span::styled(g.dot, dot_style(s.links.argocd, th)),
+            Span::styled(" argocd", th.normal()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("  "),
             Span::styled(g.dot, dot_style(s.links.electricity, th)),
             Span::styled(" electricity   ", th.normal()),
             Span::styled(g.dot, dot_style(s.links.prices, th)),
-            Span::styled(" prices", th.normal()),
+            Span::styled(" prices   ", th.normal()),
+            Span::styled(g.dot, dot_style(s.links.weather, th)),
+            Span::styled(" weather   ", th.normal()),
+            Span::styled(g.dot, dot_style(s.links.rain, th)),
+            Span::styled(" rain   ", th.normal()),
+            Span::styled(g.dot, dot_style(s.links.github, th)),
+            Span::styled(" github", th.normal()),
         ]));
         if let Some(n) = &self.restart_note {
             lines.push(Line::from(Span::styled(format!("  {n}"), th.warning())));
@@ -412,6 +423,10 @@ mod tests {
                 qbittorrent: Dot::Unknown,
                 electricity: Dot::Unknown,
                 prices: Dot::Unknown,
+                weather: Dot::Unknown,
+                rain: Dot::Unknown,
+                github: Dot::Unknown,
+                argocd: Dot::Unknown,
             },
         };
         let sh = Shared {
@@ -440,6 +455,10 @@ mod tests {
         assert!(text.contains("binary v0.2.0"));
         assert!(text.contains("v0.3.1 available"));
         assert!(text.contains("line two"));
+        assert!(text.contains("qbittorrent"));
+        assert!(text.contains("argocd"), "second dots line: {text}");
+        assert!(text.contains("weather"));
+        assert!(text.contains("github"));
         assert_eq!(fmt_uptime(90_000), "1d 1h");
     }
 
@@ -466,6 +485,10 @@ mod tests {
                 qbittorrent: Dot::Unknown,
                 electricity: Dot::Unknown,
                 prices: Dot::Unknown,
+                weather: Dot::Unknown,
+                rain: Dot::Unknown,
+                github: Dot::Unknown,
+                argocd: Dot::Unknown,
             },
         };
         let mut sh = Shared {

@@ -135,6 +135,10 @@ pub struct LinkDots {
     pub qbittorrent: Dot,
     pub electricity: Dot,
     pub prices: Dot,
+    pub weather: Dot,
+    pub rain: Dot,
+    pub github: Dot,
+    pub argocd: Dot,
 }
 
 /// Newest matching log line decides each dot. Lines come oldest first.
@@ -145,6 +149,10 @@ pub fn links_from_logs(lines: &[String]) -> LinkDots {
         qbittorrent: Dot::Unknown,
         electricity: Dot::Unknown,
         prices: Dot::Unknown,
+        weather: Dot::Unknown,
+        rain: Dot::Unknown,
+        github: Dot::Unknown,
+        argocd: Dot::Unknown,
     };
     for l in lines {
         let lower = l.to_ascii_lowercase();
@@ -164,6 +172,16 @@ pub fn links_from_logs(lines: &[String]) -> LinkDots {
         }
         if lower.contains("prices:") {
             d.prices = if warn { Dot::Down } else { Dot::Up };
+        }
+        for (needle, dot) in [
+            ("weather:", &mut d.weather),
+            ("rain:", &mut d.rain),
+            ("github:", &mut d.github),
+            ("argocd:", &mut d.argocd),
+        ] {
+            if lower.contains(needle) {
+                *dot = if warn { Dot::Down } else { Dot::Up };
+            }
         }
         if lower.contains("pod watch") && warn {
             d.api = Dot::Down;
@@ -242,6 +260,10 @@ mod tests {
                 qbittorrent: Dot::Down,
                 electricity: Dot::Up,
                 prices: Dot::Down,
+                weather: Dot::Unknown,
+                rain: Dot::Unknown,
+                github: Dot::Unknown,
+                argocd: Dot::Unknown,
             }
         );
         // the newest line wins for each dot
@@ -252,5 +274,22 @@ mod tests {
         assert_eq!(later.electricity, Dot::Down);
         assert_eq!(later.prices, Dot::Up);
         assert_eq!(links_from_logs(&[]).api, Dot::Unknown);
+    }
+
+    #[test]
+    fn new_link_dots_follow_their_log_prefixes() {
+        let d = links_from_logs(&[
+            "INFO weather: poll ok (21.2 °C, code 3)".to_string(),
+            "WARN rain: request: timed out".to_string(),
+            "INFO github: calendar ok (28 today, 230 this window)".to_string(),
+            "INFO argocd: watching applications in argocd".to_string(),
+        ]);
+        assert_eq!(d.weather, Dot::Up);
+        assert_eq!(d.rain, Dot::Down);
+        assert_eq!(d.github, Dot::Up);
+        assert_eq!(d.argocd, Dot::Up);
+        let d = links_from_logs(&["WARN argocd: watch: 410 Gone".to_string()]);
+        assert_eq!(d.argocd, Dot::Down);
+        assert_eq!(d.weather, Dot::Unknown);
     }
 }
