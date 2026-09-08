@@ -198,6 +198,12 @@ async fn fetch_tle() -> Result<(String, String)> {
     parse_tle(&body)
 }
 
+/// Refresh the TLE, then recompute the next pass on a timer. With no usable
+/// TLE the loop emits nothing at all: `Event::IssPass(None)` would set
+/// `IssState::have`, which is what the role's no-data state keys off, so a Pi
+/// with no internet would claim "no pass in the next 24 h" instead of showing
+/// `cloud-off`. A TLE that has gone stale keeps serving its last computed
+/// pass until a fetch succeeds or `TLE_MAX_AGE` drops it.
 pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
     let mut tle: Option<(String, String)> = None;
     let mut fetched = std::time::Instant::now();
@@ -223,7 +229,9 @@ pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
         }
         let mut wait = RECOMPUTE;
         match &tle {
-            None => ctx.emit(Event::IssPass(None)),
+            // no TLE: stay silent so the role keeps `have: false` and renders
+            // its no-data icon rather than an empty ring
+            None => {}
             Some((l1, l2)) => {
                 let now = chrono::Utc::now().timestamp();
                 match next_pass(l1, l2, cfg.lat, cfg.lon, cfg.min_elevation, now) {
