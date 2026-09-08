@@ -104,15 +104,12 @@ pub async fn run_rain(cfg: RainConfig, ctx: SourceCtx) {
         if ctx.shutdown.is_cancelled() {
             return;
         }
-        match fetch(&url)
-            .await
-            .and_then(|b| {
-                parse_raintext(
-                    &b,
-                    chrono::Utc::now().with_timezone(&chrono_tz::Europe::Amsterdam),
-                )
-            })
-        {
+        match fetch(&url).await.and_then(|b| {
+            parse_raintext(
+                &b,
+                chrono::Utc::now().with_timezone(&chrono_tz::Europe::Amsterdam),
+            )
+        }) {
             Ok(ev) => {
                 failures = 0;
                 if let Event::Rain { mm_per_h, .. } = &ev {
