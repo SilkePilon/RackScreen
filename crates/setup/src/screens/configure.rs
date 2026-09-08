@@ -15,7 +15,7 @@ use crate::ops::config_file::save_config;
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
-use crate::widgets::confirm_dialog;
+use crate::widgets::{confirm_dialog, help_line, SidebarView, StatusTone};
 use crate::{Action, Screen, Shared};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -685,6 +685,8 @@ enum Mode {
     Browse,
     Edit(String),
     AskRestart,
+    /// Esc with unsaved changes: confirm before leaving.
+    AskDiscard,
     /// `systemctl restart` is running on a worker thread; keys wait for its result.
     Restarting,
 }
@@ -697,7 +699,6 @@ pub struct Configure {
     /// Non-error status shown in the footer (e.g. the restart result).
     note: Option<String>,
     dirty: bool,
-    scroll: usize,
     /// The file on disk could not be loaded: `cfg` holds defaults for display only and
     /// `s` must never overwrite the user's file with them.
     unreadable: bool,
@@ -726,10 +727,26 @@ impl Configure {
             error,
             note: None,
             dirty: false,
-            scroll: 0,
             unreadable,
             restart_rx: None,
         }
+    }
+
+    pub fn group(&self) -> Group {
+        FIELDS[self.row].group
+    }
+
+    fn move_row(&mut self, delta: i32) {
+        let idx = group_indices(self.group());
+        let pos = idx.iter().position(|i| *i == self.row).unwrap_or(0) as i32;
+        let n = idx.len() as i32;
+        self.row = idx[(pos + delta).rem_euclid(n) as usize];
+    }
+
+    fn move_group(&mut self, delta: i32) {
+        let n = Group::ALL.len() as i32;
+        let g = Group::ALL[(self.group().index() as i32 + delta).rem_euclid(n) as usize];
+        self.row = group_indices(g)[0];
     }
 
     fn save(&mut self, shared: &mut Shared) -> Action {
@@ -789,22 +806,16 @@ impl Configure {
 }
 
 impl Screen for Configure {
-    fn consumes_left(&self) -> bool {
-        true
-    }
-
     fn handle(&mut self, key: KeyEvent, shared: &mut Shared, _now: Secs) -> Action {
         let (field, kind) = (FIELDS[self.row].field, FIELDS[self.row].kind);
         // Take the mode out so the arms can replace it without a live borrow.
         let mode = std::mem::replace(&mut self.mode, Mode::Browse);
         match mode {
             Mode::Browse => match key.code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.row = (self.row + FIELDS.len() - 1) % FIELDS.len()
-                }
-                KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
-                    self.row = (self.row + 1) % FIELDS.len()
-                }
+                KeyCode::Up | KeyCode::Char('k') => self.move_row(-1),
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => self.move_row(1),
+                KeyCode::Left | KeyCode::Char('h') => self.move_group(-1),
+                KeyCode::Right | KeyCode::Char('l') => self.move_group(1),
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     if kind == FieldKind::Bool {
                         let cur = get(&self.cfg, field) == "true";
@@ -819,7 +830,13 @@ impl Screen for Configure {
                     }
                 }
                 KeyCode::Char('s') => return self.save(shared),
-                KeyCode::Esc | KeyCode::Char('q') => return Action::Back,
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    if self.dirty {
+                        self.mode = Mode::AskDiscard;
+                    } else {
+                        return Action::Back;
+                    }
+                }
                 _ => {}
             },
             Mode::Edit(mut buf) => match key.code {
@@ -851,6 +868,12 @@ impl Screen for Configure {
                 }
                 return Action::Back;
             }
+            Mode::AskDiscard => {
+                if matches!(key.code, KeyCode::Enter | KeyCode::Char('y')) {
+                    return Action::Back;
+                }
+                // any other key keeps the changes and returns to browsing
+            }
             Mode::Restarting => {
                 // Leaving early is allowed; the restart finishes on its own.
                 if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
@@ -880,73 +903,148 @@ impl Screen for Configure {
     fn draw(&self, f: &mut Frame, area: Rect, shared: &Shared, _now: Secs) {
         let th = &shared.theme;
         let g = th.glyphs();
-        let [_, list, foot] = Layout::vertical([
+        let [_, list, help] = Layout::vertical([
             Constraint::Length(1),
-            Constraint::Min(4),
-            Constraint::Length(2),
+            Constraint::Min(3),
+            Constraint::Length(1),
         ])
         .areas(area);
+
+        enum Row {
+            Section(&'static str, Option<bool>),
+            Field(usize),
+            Blank,
+        }
+        let mut rows: Vec<Row> = Vec::new();
+        let mut section = "";
+        for i in group_indices(self.group()) {
+            let s = &FIELDS[i];
+            if s.section != section {
+                if !rows.is_empty() {
+                    rows.push(Row::Blank);
+                }
+                rows.push(Row::Section(
+                    s.section,
+                    section_enabled(&self.cfg, s.section),
+                ));
+                section = s.section;
+            }
+            rows.push(Row::Field(i));
+        }
+        let focus_pos = rows
+            .iter()
+            .position(|r| matches!(r, Row::Field(i) if *i == self.row))
+            .unwrap_or(0);
         let visible = list.height as usize;
-        let scroll = if self.row >= visible {
-            self.row + 1 - visible
+        let scroll = if focus_pos >= visible {
+            focus_pos + 1 - visible
         } else {
             0
         };
-        let _ = self.scroll;
+        let width = list.width as usize;
         let mut lines = Vec::new();
-        for (i, s) in FIELDS.iter().enumerate().skip(scroll).take(visible) {
-            let (field, label, kind) = (s.field, s.label, s.kind);
-            let selected = i == self.row;
-            let raw = get(&self.cfg, field);
-            let shown = match (&self.mode, selected, kind) {
-                (Mode::Edit(buf), true, FieldKind::Secret) => {
-                    format!("{}_", "*".repeat(buf.chars().count()))
-                }
-                (Mode::Edit(buf), true, _) => format!("{buf}_"),
-                (_, _, FieldKind::Secret) => "*".repeat(raw.chars().count()),
-                (_, _, FieldKind::Bool) => {
-                    if raw == "true" {
-                        format!("{} on", g.done)
-                    } else {
-                        format!("{} off", g.pending)
+        for row in rows.iter().skip(scroll).take(visible) {
+            match row {
+                Row::Blank => lines.push(Line::from("")),
+                Row::Section(name, enabled) => {
+                    let mut spans = vec![Span::styled(format!("  {name}"), th.normal())];
+                    if let Some(on) = enabled {
+                        let badge = if *on {
+                            format!("{} on", g.dot)
+                        } else {
+                            format!("{} off", g.pending)
+                        };
+                        let used = 2 + name.chars().count();
+                        let bw = badge.chars().count() + 2;
+                        if used + bw <= width {
+                            spans.push(Span::raw(" ".repeat(width - used - bw)));
+                        }
+                        spans.push(Span::styled(
+                            badge,
+                            if *on { th.good() } else { th.muted() },
+                        ));
                     }
+                    lines.push(Line::from(spans));
                 }
-                _ => raw,
-            };
-            let pointer = if selected { g.pointer } else { " " };
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(format!("{pointer} "), th.selected()),
-                Span::styled(
-                    format!("{label:<24}"),
-                    if selected { th.selected() } else { th.normal() },
-                ),
-                Span::styled(
-                    shown,
-                    if matches!(self.mode, Mode::Edit(_)) && selected {
+                Row::Field(i) => {
+                    let s = &FIELDS[*i];
+                    let selected = *i == self.row;
+                    let raw = get(&self.cfg, s.field);
+                    // Read before `shown`'s match, which consumes `raw` in some arms.
+                    let on = raw == "true";
+                    let off = section_enabled(&self.cfg, s.section) == Some(false)
+                        && s.label != "enabled";
+                    let shown = match (&self.mode, selected, s.kind) {
+                        (Mode::Edit(buf), true, FieldKind::Secret) => {
+                            format!("{}_", "•".repeat(buf.chars().count()))
+                        }
+                        (Mode::Edit(buf), true, _) => format!("{buf}_"),
+                        (_, _, FieldKind::Secret) => "•".repeat(raw.chars().count()),
+                        (_, _, FieldKind::Bool) => {
+                            if raw == "true" {
+                                format!("{} on", g.done)
+                            } else {
+                                format!("{} off", g.pending)
+                            }
+                        }
+                        (_, _, FieldKind::Choice) => format!("‹ {raw} ›"),
+                        (_, _, FieldKind::Number) if s.label == "poll" => {
+                            raw.parse::<u64>().map(humanise_poll).unwrap_or(raw)
+                        }
+                        _ => raw,
+                    };
+                    let editing = matches!(self.mode, Mode::Edit(_)) && selected;
+                    let label_style = if selected {
+                        th.selected()
+                    } else if off {
+                        th.faint_style()
+                    } else {
+                        th.normal()
+                    };
+                    let value_style = if editing {
                         th.title()
+                    } else if s.kind == FieldKind::Bool && on && !off {
+                        th.good()
+                    } else if off {
+                        th.faint_style()
                     } else {
                         th.muted()
-                    },
-                ),
-            ]));
+                    };
+                    let pointer = if selected { g.pointer } else { " " };
+                    let mut line = Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(format!("{pointer} "), th.selected()),
+                        Span::styled(format!("{:<16}", s.label), label_style),
+                        Span::styled(shown, value_style),
+                    ]);
+                    if selected {
+                        line = line.style(th.highlighted());
+                    }
+                    lines.push(line);
+                }
+            }
         }
         f.render_widget(Paragraph::new(lines), list);
-        let msg = match (&self.mode, &self.error, &self.note, self.dirty) {
-            (Mode::Restarting, _, _, _) => {
-                Line::from(Span::styled("  restarting service...", th.warning()))
-            }
-            (_, Some(e), _, _) => Line::from(Span::styled(format!("  {e}"), th.bad())),
-            (_, None, _, true) => {
-                Line::from(Span::styled("  unsaved changes: s to save", th.warning()))
-            }
-            (_, None, Some(n), false) => Line::from(Span::styled(format!("  {n}"), th.good())),
-            (_, None, None, false) => Line::from(Span::styled(
-                format!("  {}", shared.ctx.config_path.display()),
-                th.faint_style(),
-            )),
-        };
-        f.render_widget(Paragraph::new(msg), foot);
+
+        match (&self.mode, &self.error, &self.note) {
+            (Mode::Restarting, _, _) => f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "  restarting service...",
+                    th.warning(),
+                ))),
+                help,
+            ),
+            (_, Some(e), _) => f.render_widget(
+                Paragraph::new(Line::from(Span::styled(format!("  {e}"), th.bad()))),
+                help,
+            ),
+            (_, None, Some(n)) => f.render_widget(
+                Paragraph::new(Line::from(Span::styled(format!("  {n}"), th.good()))),
+                help,
+            ),
+            (_, None, None) => help_line(f, help, th, FIELDS[self.row].help),
+        }
+
         if matches!(self.mode, Mode::AskRestart) {
             confirm_dialog(
                 f,
@@ -958,18 +1056,44 @@ impl Screen for Configure {
                 false,
             );
         }
+        if matches!(self.mode, Mode::AskDiscard) {
+            confirm_dialog(
+                f,
+                area,
+                th,
+                "Discard changes?",
+                &["You have unsaved changes. Leave without saving?".to_string()],
+                "y/⏎ discard   Esc keep editing",
+                true,
+            );
+        }
     }
 
     fn keys(&self) -> String {
         match self.mode {
-            Mode::Browse => "↑↓ move  ⏎ edit/toggle  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  ←→ group  ⏎ edit/toggle  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
+            Mode::AskDiscard => "y discard  Esc keep".into(),
             Mode::Restarting => "restarting...  Esc back".into(),
         }
     }
     fn subtitle(&self) -> String {
         "Configure".into()
+    }
+    fn status(&self, _shared: &Shared) -> Option<(String, StatusTone)> {
+        self.dirty
+            .then(|| ("unsaved".to_string(), StatusTone::Warn))
+    }
+    fn consumes_left(&self) -> bool {
+        true
+    }
+    fn sidebar(&self) -> Option<SidebarView> {
+        Some(SidebarView {
+            title: "Configure".into(),
+            items: Group::ALL.iter().map(|g| g.name().to_string()).collect(),
+            selected: self.group().index(),
+        })
     }
 }
 
@@ -979,6 +1103,8 @@ mod tests {
     use crate::theme::Theme;
     use crate::Ctx;
     use rackscreen_app::logs::LogSink;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
     use std::path::Path;
 
     fn shared_at(path: &Path) -> Shared {
@@ -1207,5 +1333,87 @@ mod tests {
         assert_eq!(humanise_poll(60), "every 1 min");
         assert_eq!(humanise_poll(600), "every 10 min");
         assert_eq!(humanise_poll(90), "every 90 s");
+    }
+
+    #[test]
+    fn up_down_stay_in_the_group_and_left_right_switch_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        assert_eq!(screen.group(), Group::Cluster);
+        screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Cluster, "wraps inside the group");
+        assert_eq!(FIELDS[screen.row].field, Field::PromPoll);
+        screen.handle(KeyEvent::from(KeyCode::Right), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Services);
+        assert_eq!(
+            FIELDS[screen.row].field,
+            Field::QbitEnabled,
+            "first field of the group"
+        );
+        screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Thresholds, "groups wrap");
+        assert!(screen.consumes_left());
+        assert_eq!(
+            screen.sidebar().unwrap().selected,
+            Group::Thresholds.index()
+        );
+        assert_eq!(screen.sidebar().unwrap().items.len(), 6);
+    }
+
+    #[test]
+    fn esc_with_changes_asks_before_discarding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0),
+            Action::Back
+        ));
+        screen.handle(KeyEvent::from(KeyCode::Right), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Char(' ')), &mut sh, 0.0);
+        assert!(screen.dirty);
+        assert_eq!(screen.status(&sh).unwrap().0, "unsaved");
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0),
+            Action::None
+        ));
+        assert!(matches!(screen.mode, Mode::AskDiscard));
+        // anything but y/Enter keeps editing
+        screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Browse));
+        screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0);
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Char('y')), &mut sh, 0.0),
+            Action::Back
+        ));
+    }
+
+    #[test]
+    fn pane_shows_sections_badges_help_and_humanised_poll() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        let mut term = Terminal::new(TestBackend::new(70, 20)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("Kubernetes"), "{t}");
+        assert!(t.contains("Prometheus"));
+        assert!(
+            t.contains("every 5 s"),
+            "default Prometheus poll, humanised: {t}"
+        );
+        assert!(
+            t.contains("ⓘ Path to the kubeconfig"),
+            "help for the focused field: {t}"
+        );
+        screen.handle(KeyEvent::from(KeyCode::Right), &mut sh, 0.0);
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("qBittorrent"));
+        assert!(t.contains("● on"), "qBittorrent is on by default: {t}");
+        assert!(t.contains("○ off"), "GitHub is off by default: {t}");
+        assert!(!t.contains("Kubernetes"), "other groups are not drawn");
     }
 }
