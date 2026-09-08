@@ -25,6 +25,18 @@ pub struct Config {
     #[serde(default)]
     pub price: PriceCfg,
     #[serde(default)]
+    pub location: LocationCfg,
+    #[serde(default)]
+    pub weather: WeatherCfg,
+    #[serde(default)]
+    pub rain: RainCfg,
+    #[serde(default)]
+    pub iss: IssCfg,
+    #[serde(default)]
+    pub github: GithubCfg,
+    #[serde(default)]
+    pub argocd: ArgocdCfg,
+    #[serde(default)]
     pub screens: Vec<ScreenCfg>,
 }
 
@@ -102,6 +114,57 @@ pub struct PriceCfg {
     pub entsoe_zone: String,
     pub include_vat: bool,
     pub poll_secs: u64,
+}
+
+/// Where the rack lives; needed by the sky roles.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[serde(default)]
+pub struct LocationCfg {
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+}
+
+/// Open-Meteo current conditions and air quality, no key.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct WeatherCfg {
+    pub enabled: bool,
+    pub poll_secs: u64,
+}
+
+/// Buienradar rain nowcast (Netherlands and Belgium), no key.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct RainCfg {
+    pub enabled: bool,
+    pub poll_secs: u64,
+}
+
+/// ISS passes from the Celestrak TLE, computed on the Pi.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct IssCfg {
+    pub enabled: bool,
+    /// Degrees above the horizon that count as a pass.
+    pub min_elevation: f32,
+}
+
+/// GitHub activity: a fine-grained token with read access to contributions,
+/// events and Actions.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct GithubCfg {
+    pub enabled: bool,
+    pub token: String,
+    pub poll_secs: u64,
+}
+
+/// Argo CD applications for the deploys role.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct ArgocdCfg {
+    pub enabled: bool,
+    pub namespace: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -215,6 +278,47 @@ impl Default for PriceCfg {
             entsoe_zone: String::new(),
             include_vat: true,
             poll_secs: 900,
+        }
+    }
+}
+impl Default for WeatherCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            poll_secs: 600,
+        }
+    }
+}
+impl Default for RainCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            poll_secs: 300,
+        }
+    }
+}
+impl Default for IssCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_elevation: 10.0,
+        }
+    }
+}
+impl Default for GithubCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: String::new(),
+            poll_secs: 60,
+        }
+    }
+}
+impl Default for ArgocdCfg {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            namespace: "argocd".into(),
         }
     }
 }
@@ -344,6 +448,14 @@ impl Config {
             .with_context(|| format!("rename {} to {}", tmp.display(), path.display()))
     }
 
+    /// `(lat, lon)` when both are set.
+    pub fn location(&self) -> Option<(f64, f64)> {
+        match (self.location.lat, self.location.lon) {
+            (Some(lat), Some(lon)) => Some((lat, lon)),
+            _ => None,
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(
             !self.screens.is_empty(),
@@ -374,6 +486,36 @@ impl Config {
             !self.electricity.enabled || !self.electricity.zone.trim().is_empty(),
             "electricity.zone must be set when electricity is enabled"
         );
+        anyhow::ensure!(
+            self.location.lat.is_some() == self.location.lon.is_some(),
+            "location needs both lat and lon, or neither"
+        );
+        if let Some((lat, lon)) = self.location() {
+            anyhow::ensure!(
+                (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon),
+                "location.lat must be -90..90 and location.lon -180..180 (got {lat}, {lon})"
+            );
+        }
+        let sky_on = self.weather.enabled || self.rain.enabled || self.iss.enabled;
+        anyhow::ensure!(
+            !sky_on || self.location().is_some(),
+            "weather, rain and iss need location.lat and location.lon"
+        );
+        anyhow::ensure!(
+            (0.0..=90.0).contains(&self.iss.min_elevation),
+            "iss.min_elevation must be 0..90 (got {})",
+            self.iss.min_elevation
+        );
+        for (name, secs) in [
+            ("weather", self.weather.poll_secs),
+            ("rain", self.rain.poll_secs),
+            ("github", self.github.poll_secs),
+        ] {
+            anyhow::ensure!(
+                secs >= 60,
+                "{name}.poll_secs must be at least 60 (got {secs})"
+            );
+        }
         Ok(())
     }
 }
@@ -576,6 +718,48 @@ mod tests {
         assert!(c.price.include_vat);
         assert_eq!(c.price.poll_secs, 900);
         assert_eq!(c.thresholds.hot_temp, 70.0);
+    }
+
+    #[test]
+    fn new_sections_default_off_and_location_unset() {
+        let c = Config::default();
+        assert_eq!(c.location(), None);
+        assert!(!c.weather.enabled && c.weather.poll_secs == 600);
+        assert!(!c.rain.enabled && c.rain.poll_secs == 300);
+        assert!(!c.iss.enabled && c.iss.min_elevation == 10.0);
+        assert!(!c.github.enabled && c.github.token.is_empty() && c.github.poll_secs == 60);
+        assert!(c.argocd.enabled && c.argocd.namespace == "argocd");
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn location_and_sky_validation() {
+        let mut c = Config::default();
+        c.weather.enabled = true;
+        assert!(c.validate().unwrap_err().to_string().contains("location"));
+        c.location.lat = Some(52.37);
+        assert!(c.validate().unwrap_err().to_string().contains("both"));
+        c.location.lon = Some(4.89);
+        assert_eq!(c.location(), Some((52.37, 4.89)));
+        c.validate().unwrap();
+        c.location.lat = Some(95.0);
+        assert!(c.validate().is_err());
+        c.location.lat = Some(52.37);
+        c.iss.min_elevation = 91.0;
+        assert!(c.validate().is_err());
+        c.iss.min_elevation = 10.0;
+        c.weather.poll_secs = 5;
+        assert!(c.validate().unwrap_err().to_string().contains("poll_secs"));
+        c.weather.poll_secs = 60;
+        // github on without a token is allowed: the role shows the key icon
+        c.github.enabled = true;
+        c.validate().unwrap();
+        let yaml = "location: { lat: 1.5, lon: -2.25 }\nweather: { enabled: true }\nscreens:\n  - { roles: [weather], spi: 0, cs: 0, dc: 6, rst: 5 }\n";
+        let c = Config::from_yaml(yaml).unwrap();
+        assert_eq!(c.location(), Some((1.5, -2.25)));
+        assert!(c.weather.enabled);
+        assert_eq!(c.weather.poll_secs, 600);
+        c.validate().unwrap();
     }
 
     #[test]

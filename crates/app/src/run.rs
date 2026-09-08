@@ -101,6 +101,7 @@ impl Monitor {
         // source mode polls the real APIs.
         if !matches!(source, SourceKind::Fake) {
             spawn_energy_sources(&runtime, cfg, &ctx);
+            spawn_external_sources(&runtime, cfg, &ctx);
         }
 
         // displays
@@ -138,6 +139,9 @@ impl Monitor {
             stop: stop.clone(),
             token_present: matches!(source, SourceKind::Fake)
                 || (cfg.electricity.enabled && !cfg.electricity.token.is_empty()),
+            location_present: matches!(source, SourceKind::Fake) || cfg.location().is_some(),
+            github_token_present: matches!(source, SourceKind::Fake)
+                || (cfg.github.enabled && !cfg.github.token.is_empty()),
             one_at_a_time: cfg.display.one_at_a_time,
         };
         let render_thread = std::thread::Builder::new()
@@ -225,6 +229,70 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
     }
 }
 
+/// Sky and GitHub sources: public APIs and local maths, independent of the cluster.
+fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
+    let location = cfg.location();
+    let needs_location = cfg.weather.enabled || cfg.rain.enabled || cfg.iss.enabled;
+    let Some((lat, lon)) = location else {
+        if needs_location {
+            tracing::warn!("weather/rain/iss enabled but no location set; sky screens show a pin");
+        }
+        if cfg.github.enabled {
+            spawn_github(runtime, cfg, ctx);
+        }
+        return;
+    };
+    // sun and moon cost nothing and every sky role wants them
+    runtime.spawn(rackscreen_sources::astro::run_astro(lat, lon, ctx.clone()));
+    if cfg.weather.enabled {
+        runtime.spawn(rackscreen_sources::open_meteo::run_weather(
+            rackscreen_sources::open_meteo::WeatherConfig {
+                lat,
+                lon,
+                poll_secs: cfg.weather.poll_secs,
+            },
+            ctx.clone(),
+        ));
+    }
+    if cfg.rain.enabled {
+        runtime.spawn(rackscreen_sources::buienradar::run_rain(
+            rackscreen_sources::buienradar::RainConfig {
+                lat,
+                lon,
+                poll_secs: cfg.rain.poll_secs,
+            },
+            ctx.clone(),
+        ));
+    }
+    if cfg.iss.enabled {
+        runtime.spawn(rackscreen_sources::iss::run_iss(
+            rackscreen_sources::iss::IssConfig {
+                lat,
+                lon,
+                min_elevation: cfg.iss.min_elevation,
+            },
+            ctx.clone(),
+        ));
+    }
+    if cfg.github.enabled {
+        spawn_github(runtime, cfg, ctx);
+    }
+}
+
+fn spawn_github(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
+    if cfg.github.token.is_empty() {
+        tracing::warn!("github enabled but no token set; gh-activity stays on the key icon");
+        return;
+    }
+    runtime.spawn(rackscreen_sources::github::run_github(
+        rackscreen_sources::github::GithubConfig {
+            token: cfg.github.token.clone(),
+            poll_secs: cfg.github.poll_secs,
+        },
+        ctx.clone(),
+    ));
+}
+
 /// `None` when prices are off, or when ENTSO-E is picked without a token or a
 /// resolvable bidding zone (warns in that case).
 fn price_source(cfg: &Config) -> Option<rackscreen_sources::prices::PriceSource> {
@@ -287,6 +355,15 @@ fn spawn_k8s_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: Sourc
             prom,
             ctx.clone(),
         ));
+        if cfg2.argocd.enabled {
+            tokio::spawn(rackscreen_sources::argocd::run_argocd(
+                client.clone(),
+                rackscreen_sources::argocd::ArgoConfig {
+                    namespace: cfg2.argocd.namespace.clone(),
+                },
+                ctx.clone(),
+            ));
+        }
         if cfg2.qbittorrent.enabled {
             let q = rackscreen_sources::qbittorrent::QbitConfig {
                 namespace: cfg2.qbittorrent.namespace.clone(),

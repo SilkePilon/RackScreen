@@ -83,10 +83,16 @@ pub fn darken(px: &mut Pixmap, k: f32) {
     }
 }
 
-/// Local wall clock as `(hour, minutes since midnight)`; one clock read per tick.
-fn local_hour_and_minutes() -> (u32, u32) {
+/// Local wall clock as `(hour, minutes since midnight, unix seconds, seconds east of UTC)`;
+/// one clock read per tick.
+fn clock() -> (u32, u32, i64, i32) {
     let t = chrono::Local::now();
-    (t.hour(), t.hour() * 60 + t.minute())
+    (
+        t.hour(),
+        t.hour() * 60 + t.minute(),
+        t.timestamp(),
+        t.offset().local_minus_utc(),
+    )
 }
 
 /// Sends `Quit` to every display thread and raises `stop` when dropped, so an
@@ -127,6 +133,10 @@ pub struct RenderLoop {
     /// Whether an Electricity Maps token is configured; without one the
     /// electricity screens show "no token" instead of "waiting for data".
     pub token_present: bool,
+    /// `location.lat`/`lon` are set; without them the sky screens show a pin.
+    pub location_present: bool,
+    /// A GitHub token is configured; without one `gh-activity` shows a key.
+    pub github_token_present: bool,
     /// Only one screen may iris at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
 }
@@ -152,6 +162,8 @@ impl RenderLoop {
                 | 1,
         );
         model.set_token_present(self.token_present);
+        model.set_location_present(self.location_present);
+        model.set_github_token_present(self.github_token_present);
         model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
@@ -163,8 +175,10 @@ impl RenderLoop {
             while let Ok(ev) = self.rx.try_recv() {
                 model.apply(ev, now);
             }
-            let (hour, minutes) = local_hour_and_minutes();
+            let (hour, minutes, unix, offset) = clock();
             model.set_local_hour(hour);
+            model.set_unix_now(unix);
+            model.set_utc_offset_secs(offset);
             model.tick(now);
 
             let night = match model.night_override() {

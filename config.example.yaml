@@ -42,6 +42,31 @@ price:
   include_vat: true
   poll_secs: 900
 
+location:
+  lat: null                # decimal degrees; needed by weather, wind, aqi, rain, sun, moon and iss
+  lon: null
+
+weather:
+  enabled: false           # Open-Meteo current conditions + air quality, no key
+  poll_secs: 600
+
+rain:
+  enabled: false           # Buienradar two-hour nowcast (NL/BE), no key
+  poll_secs: 300
+
+iss:
+  enabled: false           # next ISS pass, computed from the Celestrak TLE
+  min_elevation: 10        # degrees above the horizon that count as a pass
+
+github:
+  enabled: false           # fine-grained token: read access to contributions, events and Actions
+  token: ""
+  poll_secs: 60
+
+argocd:
+  enabled: true            # watch applications.argoproj.io for the deploys role
+  namespace: argocd
+
 display:
   brightness: 1.0
   fps: 30
@@ -49,7 +74,8 @@ display:
   one_at_a_time: true      # one screen irises at a time, in random order (kinder to the SPI bus)
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
-# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable
+# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
+#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys
 screens:
   - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
   - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
