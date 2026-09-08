@@ -54,13 +54,13 @@ One row, then a full-width rule. Left: `RackScreen` in the title style, then ` �
 
 ### Focus
 
-Two focus areas: sidebar and content. `Shared` gains `pub focus: Focus` with `Focus::{Sidebar, Content}`.
+Two focus areas: sidebar and content. `App` owns `focus: Focus` with `Focus::{Sidebar, Content}`; screens never read it.
 
 - On Home, focus is Sidebar. `↑↓`/`jk`/Tab move the bar, Enter opens the hovered screen and sets focus to Content. `q` quits.
 - In any other screen, focus is Content and keys go to the screen as today. Esc (and `q` where a screen already treats `q` as back) returns to Home with focus Sidebar. `←` also returns to Home when the screen reports `fn consumes_left(&self) -> bool` false. Configure and Calibrate use `←`, so they return true; everything else returns false.
 - In Configure, `←→` change group. The sidebar bar follows the group. The sidebar itself never takes key focus inside Configure.
 
-A screen never has to know about the sidebar. `App::handle` intercepts Esc/`←` only after the screen returned `Action::None` for them, so screens that use Esc for "cancel edit" keep working.
+A screen never has to know about the sidebar. Screens keep returning `Action::Back` for Esc as today; `App::handle` intercepts only `←`, and only after the screen returned `Action::None` for it, so screens that use Esc for "cancel edit" keep working.
 
 ### Footer
 
@@ -166,7 +166,7 @@ The header shows `● unsaved` while `dirty`. The dot pulses (see Motion).
 - The selected panel's oriented frame is drawn with `widgets::pixels(f, area, &pixmap)`: each cell shows two vertical pixels using `▀` with the top pixel as foreground colour and the bottom pixel as background colour (`Color::Rgb`). The 240×240 pixmap is sampled with nearest neighbour into `w × 2h` pixels where `w` and `2h` are chosen to keep a 2:1 cell aspect (a 30×15 area shows a 30×30 sample). Black outside the disc is left as the terminal background so the preview reads as round.
 - `Calibrate` keeps one oriented `Pixmap` per panel (`shown: Vec<Pixmap>`) instead of reusing `scratch`, so the preview can be drawn on every frame without re-rendering. `push(i)` renders into `frames[i]`, orients into `shown[i]`, and sends a clone to the mailbox as today.
 - The strip lists every panel: number, `ok` (green) when rotate is 0 and hflip false, otherwise the change in amber (`rot 90`, `flip`, `rot 180 flip`). The selected entry is underlined with `▔` on the next row.
-- The preview slides in from the direction of travel when the selection changes (`Slide`, 0.2 s, horizontal offset within the preview area). This reuses `anim::Slide`.
+- The preview slides in from the right when the selection changes (`Slide`, 0.2 s, horizontal offset within the preview area). This reuses `anim::Slide`. Always from the right: sliding from the left would need a second clipping path for no visible gain.
 - With `screens: []` or when panels failed to open, the preview area shows the error text and the strip is empty; keys behave as today.
 
 ### Fallback
@@ -229,7 +229,6 @@ All animations are time based and only force 60 Hz while something moves (`Scree
 | Header ring | header | `ring_glyph` 2.4 s loop, exists |
 | Unsaved dot | header | opacity pulse: colour mixes amber toward dim on a 1.2 s sine, `anim::pulse(now) -> f32` |
 | Calibrate preview | Calibrate | `Slide` 0.2 s horizontal offset on selection change |
-| Toggle flash | Configure, Screens | a toggled bool draws its `●` in white for 0.15 s before settling to green or muted |
 | Progress gauge | Install, Update, Uninstall | `Slide` on ratio, exists |
 | Spinner | step list, restart | `spinner_frame`, exists |
 
