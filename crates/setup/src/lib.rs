@@ -566,8 +566,15 @@ mod tests {
         term.draw(|f| app.draw(f, 2.0)).unwrap();
         let t = text(&term);
         assert!(t.contains("Discard changes?"), "← acts as Esc: {t}");
-        // and ← while the dialog is up keeps editing, exactly like Esc
+        // and ← while the dialog is up dismisses it, exactly like Esc: not a second Esc
+        // re-opening what the first one just closed
         assert!(app.handle(KeyEvent::from(KeyCode::Left), 3.0));
+        term.draw(|f| app.draw(f, 3.0)).unwrap();
+        let t = text(&term);
+        assert!(
+            !t.contains("Discard changes?"),
+            "← dismisses the dialog like Esc: {t}"
+        );
         assert_eq!(app.current_id, ScreenId::Screens);
     }
 

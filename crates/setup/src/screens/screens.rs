@@ -295,10 +295,18 @@ impl Screen for Screens {
             return Action::Back;
         }
         if matches!(self.mode, Mode::AskDiscard) {
-            self.mode = Mode::Edit;
             if matches!(key.code, KeyCode::Enter | KeyCode::Char('y')) {
+                self.mode = Mode::Edit;
                 return Action::Back;
             }
+            // Leave `←` alone: it is not a real answer to the dialog, and the shell will
+            // re-dispatch it as Esc (since `consumes_left()` is false here), which the
+            // branch below actually closes. Answering it here first would let a single
+            // `←` close the dialog and then immediately reopen it via the synthesised Esc.
+            if key.code == KeyCode::Left {
+                return Action::None;
+            }
+            self.mode = Mode::Edit;
             return Action::None;
         }
         if self.editor.picker().is_some() {

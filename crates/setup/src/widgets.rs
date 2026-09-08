@@ -157,7 +157,7 @@ pub fn sidebar(
             if used + hw <= width {
                 spans.push(Span::raw(" ".repeat(width - used - hw)));
                 spans.push(Span::styled(h.clone(), *style));
-                used = width - 1;
+                used = width;
             }
         }
         // Pad to the edge so the highlight reads as a bar, not a patch under the text.
