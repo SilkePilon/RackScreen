@@ -77,7 +77,14 @@ pub fn sun_scene(model: &Model, now: Secs) -> Scene {
     let local_secs = local.rem_euclid(86_400);
     let day_start = local - local_secs;
     let on_dial = |t: Option<i64>| t.map(|t| (t + offset - day_start).rem_euclid(86_400));
-    let daytime = sky.sun_elevation_deg > 0.0;
+    // Sunrise and sunset are defined at zenith 90.833°, i.e. elevation about
+    // -0.83°, so the elevation sign disagrees with them for several minutes
+    // either side of each event. Decide from the times and keep the elevation
+    // only for the polar case, where there are no times to compare against.
+    let daytime = match (sky.sunrise, sky.sunset) {
+        (Some(r), Some(s)) => unix >= r && unix < s,
+        _ => sky.sun_elevation_deg > 0.0,
+    };
     let mut s = Scene::new();
     s.push(ring(
         RING_R,
@@ -276,6 +283,36 @@ mod tests {
             0.0,
         );
         assert_eq!(badge_of(&sun_scene(&none, 1.0)).0, "--");
+    }
+
+    #[test]
+    fn sun_scene_uses_the_times_not_the_elevation_around_the_edges() {
+        let day = 1_788_782_400;
+        let rise = day - 5 * 3600;
+        let set = day + 6 * 3600;
+        // five minutes before sunset the sun is already below the horizon
+        let m = sky_model(set - 300, 7200, rise, set, -0.5);
+        assert_eq!(icon_of(&sun_scene(&m, 1.0)), "sunset");
+        assert_eq!(badge_of(&sun_scene(&m, 1.0)).0, "-5m");
+        // one minute after sunrise it is still below the horizon, but it is day
+        let m = sky_model(rise + 60, 7200, rise, set, -0.7);
+        let s = sun_scene(&m, 1.0);
+        assert_eq!(icon_of(&s), "sunset");
+        assert_eq!(badge_of(&s).0, fmt_until(set - (rise + 60)));
+        // no times at all: the elevation still decides
+        let mut polar = sky_model(day, 7200, rise, set, 5.0);
+        polar.apply(
+            Event::Sky {
+                sunrise: None,
+                sunset: None,
+                sun_elevation_deg: 5.0,
+                moon_illumination: 0.0,
+                moon_waxing: true,
+                moon_phase: MoonPhase::New,
+            },
+            0.0,
+        );
+        assert_eq!(icon_of(&sun_scene(&polar, 1.0)), "sunset");
     }
 
     #[test]
