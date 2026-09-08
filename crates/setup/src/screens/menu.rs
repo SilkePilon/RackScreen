@@ -46,9 +46,11 @@ use crate::screens::status::{collect, Snapshot};
 
 const SNAPSHOT_SECS: u64 = 10;
 
-/// Join role names with ` › ` and drop whole names from the end until the text (plus a
+/// The roles that fit and how many were dropped; `fit_roles` is the joined form.
+///
+/// Joins role names with ` › ` and drops whole names from the end until the text (plus a
 /// ` +N` count for the dropped ones) fits in `width`.
-pub fn fit_roles(names: &[&str], width: usize) -> String {
+pub fn fit_roles_parts(names: &[&str], width: usize) -> (String, usize) {
     let mut out = String::new();
     for (i, n) in names.iter().enumerate() {
         let candidate = if i == 0 {
@@ -64,15 +66,21 @@ pub fn fit_roles(names: &[&str], width: usize) -> String {
         };
         if candidate.chars().count() + tail > width {
             let dropped = names.len() - i;
-            return if out.is_empty() {
-                format!("+{dropped}")
-            } else {
-                format!("{out} +{dropped}")
-            };
+            return (out, dropped);
         }
         out = candidate;
     }
-    out
+    (out, 0)
+}
+
+/// Join role names with ` › ` and drop whole names from the end until the text (plus a
+/// ` +N` count for the dropped ones) fits in `width`.
+pub fn fit_roles(names: &[&str], width: usize) -> String {
+    match fit_roles_parts(names, width) {
+        (shown, 0) => shown,
+        (shown, n) if shown.is_empty() => format!("+{n}"),
+        (shown, n) => format!("{shown} +{n}"),
+    }
 }
 
 pub struct Home {
@@ -251,21 +259,29 @@ impl Screen for Home {
         let roles_w = (area.width as usize).saturating_sub(2 + LABEL_W + 3 + timing_w + 2);
         for (i, (roles, secs)) in self.rows.iter().enumerate() {
             let names: Vec<&str> = roles.iter().map(|r| r.name()).collect();
-            let fitted = fit_roles(&names, roles_w);
+            let (shown, dropped) = fit_roles_parts(&names, roles_w);
             let timing = if roles.len() > 1 {
                 format!("{secs} s")
             } else {
                 "static".to_string()
             };
-            lines.push(labelled(
-                th,
-                if i == 0 { "Screens" } else { "" },
-                vec![
-                    Span::styled(format!("{} ", i + 1), Style::new().fg(th.panel_color(i))),
-                    Span::styled(format!("{fitted:<roles_w$}"), th.normal()),
-                    Span::styled(format!("  {timing}"), th.muted()),
-                ],
-            ));
+            let mut visible_w = shown.chars().count();
+            let mut spans = vec![
+                Span::styled(format!("{} ", i + 1), Style::new().fg(th.panel_color(i))),
+                Span::styled(shown.clone(), th.normal()),
+            ];
+            if dropped > 0 {
+                let count = if shown.is_empty() {
+                    format!("+{dropped}")
+                } else {
+                    format!(" +{dropped}")
+                };
+                visible_w += count.chars().count();
+                spans.push(Span::styled(count, th.faint_style()));
+            }
+            spans.push(Span::raw(" ".repeat(roles_w.saturating_sub(visible_w))));
+            spans.push(Span::styled(format!("  {timing}"), th.muted()));
+            lines.push(labelled(th, if i == 0 { "Screens" } else { "" }, spans));
         }
         if self.rows.is_empty() {
             lines.push(labelled(
@@ -374,6 +390,11 @@ mod tests {
         assert_eq!(fit_roles(&names, 11), "cpu +2");
         assert_eq!(fit_roles(&names, 5), "+3");
         assert_eq!(fit_roles(&[], 10), "");
+        assert_eq!(
+            fit_roles_parts(&["cpu", "mem", "pods"], 12),
+            ("cpu › mem".to_string(), 1)
+        );
+        assert_eq!(fit_roles_parts(&["cpu"], 1), (String::new(), 1));
     }
 
     #[test]
@@ -415,6 +436,43 @@ mod tests {
             !t.contains("12:00:31 rain"),
             "only the last three log lines"
         );
+    }
+
+    #[test]
+    fn dropped_count_is_faint_and_roles_are_not() {
+        let sh = shared();
+        let rows = vec![(
+            vec![
+                Role::Cpu,
+                Role::Mem,
+                Role::Pods,
+                Role::Health,
+                Role::Thermal,
+                Role::Storage,
+                Role::Net,
+                Role::Ups,
+                Role::Deploys,
+            ],
+            15,
+        )];
+        let home = Home::with_snapshot(rows, Some(snapshot()));
+        let mut term = Terminal::new(TestBackend::new(50, 12)).unwrap();
+        term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let buf = term.backend().buffer();
+        // find the row with the '+' and check its cell colours
+        let mut found = false;
+        for y in 0..12u16 {
+            for x in 0..50u16 {
+                let c = buf.cell((x, y)).unwrap();
+                if c.symbol() == "+" {
+                    assert_eq!(c.fg, sh.theme.faint, "+N is faint");
+                    let first_role = buf.cell((x.saturating_sub(6), y)).unwrap();
+                    assert_eq!(first_role.fg, sh.theme.text, "roles stay normal");
+                    found = true;
+                }
+            }
+        }
+        assert!(found, "a truncated row with +N was drawn");
     }
 
     #[test]
