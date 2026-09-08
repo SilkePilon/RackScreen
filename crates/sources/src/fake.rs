@@ -211,6 +211,7 @@ pub struct FakeState {
 
 impl FakeState {
     pub fn new(seed: u64) -> Self {
+        let now = chrono::Local::now();
         let mut s = Self {
             rng: fastrand::Rng::with_seed(seed),
             cpu: 42.0,
@@ -236,8 +237,8 @@ impl FakeState {
             carbon: 214.0,
             prices_ok: true,
             price_rot: 0,
-            unix_start: chrono::Local::now().timestamp(),
-            utc_offset: chrono::Local::now().offset().local_minus_utc(),
+            unix_start: now.timestamp(),
+            utc_offset: now.offset().local_minus_utc(),
             weather_idx: 1,
             temp: 18.0,
             wind_from: 232.0,
@@ -1117,6 +1118,8 @@ mod tests {
     fn tick_is_deterministic_and_emits_metrics() {
         let mut a = FakeState::new(7);
         let mut b = FakeState::new(7);
+        a.set_clock(1_788_782_400, 7200);
+        b.set_clock(1_788_782_400, 7200);
         for _ in 0..30 {
             assert_eq!(a.tick(), b.tick());
         }
