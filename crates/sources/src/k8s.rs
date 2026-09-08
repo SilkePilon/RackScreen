@@ -253,6 +253,7 @@ pub const LINK_GRACE: Duration = Duration::from_secs(10);
 /// the first completed list after that (or the very first one).
 #[derive(Debug)]
 pub struct LinkEdge {
+    target: LinkTarget,
     grace: Duration,
     up: bool,
     first_err: Option<Instant>,
@@ -260,7 +261,12 @@ pub struct LinkEdge {
 
 impl LinkEdge {
     pub fn new(grace: Duration) -> Self {
+        Self::new_for(LinkTarget::K8sApi, grace)
+    }
+
+    pub fn new_for(target: LinkTarget, grace: Duration) -> Self {
         Self {
+            target,
             grace,
             up: false,
             first_err: None,
@@ -276,7 +282,7 @@ impl LinkEdge {
         if self.up && now.duration_since(first) > self.grace {
             self.up = false;
             return Some(Event::Link {
-                target: LinkTarget::K8sApi,
+                target: self.target,
                 up: false,
             });
         }
@@ -290,7 +296,7 @@ impl LinkEdge {
         if synced && !self.up {
             self.up = true;
             return Some(Event::Link {
-                target: LinkTarget::K8sApi,
+                target: self.target,
                 up: true,
             });
         }

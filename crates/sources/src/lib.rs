@@ -4,6 +4,7 @@
 use rackscreen_core::event::Event;
 use tokio_util::sync::CancellationToken;
 
+pub mod argocd;
 pub mod electricity;
 pub mod fake;
 pub mod http;

@@ -1,0 +1,11 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Application",
+  "metadata": { "name": "arr-stack", "namespace": "argocd" },
+  "spec": { "project": "default" },
+  "status": {
+    "sync": { "status": "Synced", "revision": "abc123" },
+    "health": { "status": "Healthy" },
+    "operationState": { "phase": "Succeeded", "finishedAt": "2026-09-05T16:53:45Z" }
+  }
+}
