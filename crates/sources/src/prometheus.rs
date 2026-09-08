@@ -1,5 +1,5 @@
 //! Prometheus poller: cluster CPU/MEM, hot nodes, firing alerts, node
-//! temperatures and Longhorn volume health.
+//! temperatures, Longhorn volume health, UPS state and network throughput.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -139,6 +139,75 @@ const Q_TEMPS_FALLBACK: &str =
 const Q_LH_ROBUST: &str = "longhorn_volume_robustness";
 const Q_LH_USED: &str = "sum(longhorn_volume_actual_size_bytes)";
 const Q_LH_CAP: &str = "sum(longhorn_volume_capacity_bytes)";
+const Q_UPS_STATUS: &str = "nut_ups_status";
+const Q_UPS_CHARGE: &str = "nut_battery_charge";
+const Q_UPS_LOAD: &str = "nut_load";
+const Q_UPS_RUNTIME: &str = "nut_battery_runtime_seconds";
+/// Physical interfaces only: no veth, cni, flannel or bridge traffic, which
+/// would count every pod packet twice. Two minutes so a 60 s scrape interval
+/// still yields two samples for `rate`.
+const Q_NET_RX: &str =
+    "sum(rate(node_network_receive_bytes_total{device=~\"eth.*|end.*|enp.*|eno.*|wlan.*\"}[2m]))*8";
+const Q_NET_TX: &str = "sum(rate(node_network_transmit_bytes_total{device=~\"eth.*|end.*|enp.*|eno.*|wlan.*\"}[2m]))*8";
+
+/// The two common nut exporters disagree: one reports charge and load as
+/// 0..1, the other as 0..100. At or below 1 is a fraction.
+pub fn as_percent(v: f64) -> f32 {
+    if v <= 1.0 {
+        (v * 100.0) as f32
+    } else {
+        v as f32
+    }
+}
+
+/// One `Event::Ups` from the status vector and the three gauges; `None`
+/// when no UPS is exported at all.
+pub fn ups_from(
+    status: &[(HashMap<String, String>, f64)],
+    charge: Option<f64>,
+    load: Option<f64>,
+    runtime: Option<f64>,
+) -> Option<Event> {
+    if status.is_empty() {
+        return None;
+    }
+    let flag = |f: &str| {
+        status
+            .iter()
+            .any(|(m, v)| m.get("status").map(String::as_str) == Some(f) && *v > 0.0)
+    };
+    Some(Event::Ups {
+        on_battery: flag("OB"),
+        low_battery: flag("LB"),
+        charge_pct: charge.map(as_percent).unwrap_or(0.0),
+        load_pct: load.map(as_percent).unwrap_or(0.0),
+        runtime_secs: runtime.unwrap_or(0.0).max(0.0) as u32,
+    })
+}
+
+/// On-battery edges between polls; the first poll only primes so a restart
+/// during an outage does not replay the red sweep.
+#[derive(Debug, Default)]
+pub struct UpsTracker {
+    primed: bool,
+    on_battery: bool,
+}
+
+impl UpsTracker {
+    pub fn diff(&mut self, on_battery: bool) -> Vec<Event> {
+        let mut out = Vec::new();
+        if self.primed && on_battery != self.on_battery {
+            out.push(if on_battery {
+                Event::UpsOnBattery
+            } else {
+                Event::UpsOnline
+            });
+        }
+        self.on_battery = on_battery;
+        self.primed = true;
+        out
+    }
+}
 
 /// Node temperatures keyed by the `nodename` label the `node_uname_info` join
 /// carries over. Samples outside a plausible range are dropped rather than
@@ -284,6 +353,7 @@ async fn poll(
     t: &mut Tunnel,
     alerts: &mut AlertTracker,
     storage: &mut StorageTracker,
+    ups: &mut UpsTracker,
 ) -> Result<Vec<Event>> {
     let cpu = parse_scalar(&query(t, Q_CPU).await?);
     let cpu_by = parse_vector(&query(t, Q_CPU_BY).await?);
@@ -319,12 +389,30 @@ async fn poll(
             capacity_bytes: cap,
         });
     }
+    let status = parse_vector(&query(t, Q_UPS_STATUS).await?);
+    if !status.is_empty() {
+        let charge = parse_scalar(&query(t, Q_UPS_CHARGE).await?);
+        let load = parse_scalar(&query(t, Q_UPS_LOAD).await?);
+        let runtime = parse_scalar(&query(t, Q_UPS_RUNTIME).await?);
+        if let Some(ev) = ups_from(&status, charge, load, runtime) {
+            if let Event::Ups { on_battery, .. } = &ev {
+                out.extend(ups.diff(*on_battery));
+            }
+            out.push(ev);
+        }
+    }
+    let rx = parse_scalar(&query(t, Q_NET_RX).await?);
+    let tx = parse_scalar(&query(t, Q_NET_TX).await?);
+    if let (Some(rx_bps), Some(tx_bps)) = (rx, tx) {
+        out.push(Event::Network { rx_bps, tx_bps });
+    }
     Ok(out)
 }
 
 pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
     let mut alerts = AlertTracker::new(&cfg.ignore_alerts);
     let mut storage = StorageTracker::new();
+    let mut ups = UpsTracker::default();
     let mut backoff = 5u64;
     loop {
         if ctx.shutdown.is_cancelled() {
@@ -365,7 +453,7 @@ pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
         backoff = 5;
         let mut failures = 0;
         loop {
-            match poll(&mut t, &mut alerts, &mut storage).await {
+            match poll(&mut t, &mut alerts, &mut storage, &mut ups).await {
                 Ok(evs) => {
                     failures = 0;
                     ctx.emit(Event::Link {
@@ -577,6 +665,72 @@ mod tests {
                 ("pvc-b".into(), Robustness::Degraded)
             ]
         );
+    }
+
+    fn status(flags: &[(&str, f64)]) -> Vec<(HashMap<String, String>, f64)> {
+        flags
+            .iter()
+            .map(|(f, v)| {
+                let mut m = HashMap::new();
+                m.insert("status".to_string(), f.to_string());
+                m.insert("ups".to_string(), "apc".to_string());
+                (m, *v)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ups_event_reads_flags_and_normalises_fractions() {
+        let ev = ups_from(
+            &status(&[("OL", 1.0), ("OB", 0.0), ("LB", 0.0)]),
+            Some(1.0),
+            Some(0.06),
+            Some(3014.0),
+        )
+        .unwrap();
+        assert_eq!(
+            ev,
+            Event::Ups {
+                on_battery: false,
+                low_battery: false,
+                charge_pct: 100.0,
+                load_pct: 6.0,
+                runtime_secs: 3014,
+            }
+        );
+        let ev = ups_from(
+            &status(&[("OL", 0.0), ("OB", 1.0), ("LB", 1.0)]),
+            Some(18.0),
+            Some(42.0),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            ev,
+            Event::Ups {
+                on_battery: true,
+                low_battery: true,
+                charge_pct: 18.0,
+                load_pct: 42.0,
+                runtime_secs: 0,
+            }
+        );
+        assert!(
+            ups_from(&[], Some(1.0), None, None).is_none(),
+            "no UPS, no event"
+        );
+        assert_eq!(as_percent(0.5), 50.0);
+        assert_eq!(as_percent(1.0), 100.0);
+        assert_eq!(as_percent(75.0), 75.0);
+    }
+
+    #[test]
+    fn ups_tracker_edges_after_priming() {
+        let mut t = UpsTracker::default();
+        assert!(t.diff(true).is_empty(), "first poll only primes");
+        assert!(t.diff(true).is_empty());
+        assert_eq!(t.diff(false), vec![Event::UpsOnline]);
+        assert_eq!(t.diff(true), vec![Event::UpsOnBattery]);
     }
 
     #[test]
