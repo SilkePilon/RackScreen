@@ -26,6 +26,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 quick-xml = "0.42"
 chrono = { version = "0.4", features = ["clock"] }
+sgp4 = "2"
 
 [dev-dependencies]
 chrono-tz = "0.10"
