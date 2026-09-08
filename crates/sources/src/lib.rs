@@ -5,10 +5,12 @@ use rackscreen_core::event::Event;
 use tokio_util::sync::CancellationToken;
 
 pub mod argocd;
+pub mod buienradar;
 pub mod electricity;
 pub mod fake;
 pub mod http;
 pub mod k8s;
+pub mod open_meteo;
 pub mod prices;
 pub mod prometheus;
 pub mod qbittorrent;

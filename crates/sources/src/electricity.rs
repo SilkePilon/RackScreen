@@ -75,7 +75,7 @@ pub struct HttpStatus {
 
 /// 401/403: the token is wrong, disabled or out of quota. Retrying faster will
 /// not fix it, and the user has to edit the config.
-fn token_rejected(e: &anyhow::Error) -> Option<u16> {
+pub fn token_rejected(e: &anyhow::Error) -> Option<u16> {
     e.downcast_ref::<HttpStatus>()
         .map(|h| h.status)
         .filter(|s| *s == 401 || *s == 403)
@@ -84,7 +84,7 @@ fn token_rejected(e: &anyhow::Error) -> Option<u16> {
 /// Seconds until the next poll. One quick retry covers a hiccup; once the link
 /// is down, or the token has been rejected, back off to the normal interval
 /// instead of hammering the API.
-fn backoff_secs(poll_secs: u64, failures: u32, rejected: bool) -> u64 {
+pub fn backoff_secs(poll_secs: u64, failures: u32, rejected: bool) -> u64 {
     let normal = poll_secs.max(60);
     if failures == 1 && !rejected {
         60.min(normal)

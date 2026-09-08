@@ -1,0 +1,5 @@
+{
+  "latitude": 52.4, "longitude": 4.9, "utc_offset_seconds": 0, "timezone": "GMT",
+  "current_units": {"time": "iso8601", "european_aqi": "EAQI"},
+  "current": {"time": "2026-09-07T19:00", "interval": 3600, "european_aqi": 40}
+}
