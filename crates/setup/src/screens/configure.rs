@@ -396,6 +396,10 @@ impl Configure {
 }
 
 impl Screen for Configure {
+    fn consumes_left(&self) -> bool {
+        true
+    }
+
     fn handle(&mut self, key: KeyEvent, shared: &mut Shared, _now: Secs) -> Action {
         let (field, _, kind) = FIELDS[self.row];
         // Take the mode out so the arms can replace it without a live borrow.

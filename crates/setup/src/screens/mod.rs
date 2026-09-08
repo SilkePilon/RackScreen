@@ -14,7 +14,7 @@ use crate::{Screen, ScreenId, Shared};
 
 pub fn make(id: ScreenId, shared: &Shared) -> Box<dyn Screen> {
     match id {
-        ScreenId::Menu => Box::new(menu::Menu::new(shared)),
+        ScreenId::Menu => Box::new(menu::Home::new(shared)),
         ScreenId::Install => Box::new(install::Install::new(shared)),
         ScreenId::Calibrate => Box::new(calibrate::Calibrate::new(shared)),
         ScreenId::Screens => Box::new(screens::Screens::new(shared)),
