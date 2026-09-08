@@ -85,64 +85,457 @@ pub enum Field {
     ArgoNamespace,
 }
 
-pub const FIELDS: [(Field, &str, FieldKind); 44] = [
-    (Field::Kubeconfig, "kubeconfig path", FieldKind::Text),
-    (
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    Cluster,
+    Services,
+    Energy,
+    Sky,
+    Display,
+    Thresholds,
+}
+
+impl Group {
+    pub const ALL: [Group; 6] = [
+        Group::Cluster,
+        Group::Services,
+        Group::Energy,
+        Group::Sky,
+        Group::Display,
+        Group::Thresholds,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            Group::Cluster => "Cluster",
+            Group::Services => "Services",
+            Group::Energy => "Energy",
+            Group::Sky => "Sky",
+            Group::Display => "Display",
+            Group::Thresholds => "Thresholds",
+        }
+    }
+    pub fn index(self) -> usize {
+        Group::ALL
+            .iter()
+            .position(|g| *g == self)
+            .expect("group in ALL")
+    }
+}
+
+/// One row of the Configure form.
+pub struct FieldSpec {
+    pub field: Field,
+    pub group: Group,
+    /// Module header the field sits under (`Prometheus`, `Night`).
+    pub section: &'static str,
+    pub label: &'static str,
+    pub kind: FieldKind,
+    /// One sentence for the help line, under 60 characters.
+    pub help: &'static str,
+}
+
+const fn spec(
+    field: Field,
+    group: Group,
+    section: &'static str,
+    label: &'static str,
+    kind: FieldKind,
+    help: &'static str,
+) -> FieldSpec {
+    FieldSpec {
+        field,
+        group,
+        section,
+        label,
+        kind,
+        help,
+    }
+}
+
+use FieldKind::{Bool, Choice, Number, Secret, Text};
+use Group::{Cluster, Display, Energy, Services, Sky, Thresholds};
+
+pub const FIELDS: [FieldSpec; 44] = [
+    spec(
+        Field::Kubeconfig,
+        Cluster,
+        "Kubernetes",
+        "kubeconfig",
+        Text,
+        "Path to the kubeconfig; blank uses in-cluster access.",
+    ),
+    spec(
         Field::PromNamespace,
-        "prometheus namespace",
-        FieldKind::Text,
+        Cluster,
+        "Prometheus",
+        "namespace",
+        Text,
+        "Namespace the Prometheus service runs in.",
     ),
-    (Field::PromService, "prometheus service", FieldKind::Text),
-    (Field::PromPort, "prometheus port", FieldKind::Number),
-    (Field::PromPoll, "prometheus poll secs", FieldKind::Number),
-    (Field::QbitEnabled, "qbittorrent enabled", FieldKind::Bool),
-    (
+    spec(
+        Field::PromService,
+        Cluster,
+        "Prometheus",
+        "service",
+        Text,
+        "Name of the Prometheus service.",
+    ),
+    spec(
+        Field::PromPort,
+        Cluster,
+        "Prometheus",
+        "port",
+        Number,
+        "Port of the Prometheus service inside the cluster.",
+    ),
+    spec(
+        Field::PromPoll,
+        Cluster,
+        "Prometheus",
+        "poll",
+        Number,
+        "Seconds between Prometheus queries, at least 1.",
+    ),
+    spec(
+        Field::QbitEnabled,
+        Services,
+        "qBittorrent",
+        "enabled",
+        Bool,
+        "Show torrent traffic on the ring.",
+    ),
+    spec(
         Field::QbitNamespace,
-        "qbittorrent namespace",
-        FieldKind::Text,
+        Services,
+        "qBittorrent",
+        "namespace",
+        Text,
+        "Namespace of the qBittorrent service.",
     ),
-    (Field::QbitService, "qbittorrent service", FieldKind::Text),
-    (Field::QbitPort, "qbittorrent port", FieldKind::Number),
-    (Field::QbitUser, "qbittorrent user", FieldKind::Text),
-    (Field::QbitPass, "qbittorrent password", FieldKind::Secret),
-    (Field::QbitPoll, "qbittorrent poll secs", FieldKind::Number),
-    (Field::NightEnabled, "night mode", FieldKind::Bool),
-    (Field::NightStart, "night start (HH:MM)", FieldKind::Text),
-    (Field::NightEnd, "night end (HH:MM)", FieldKind::Text),
-    (Field::HotCpu, "hot node cpu %", FieldKind::Number),
-    (Field::HotMem, "hot node mem %", FieldKind::Number),
-    (Field::Brightness, "brightness 0.1-1.0", FieldKind::Number),
-    (Field::Fps, "fps", FieldKind::Number),
-    (Field::SpiChunk, "spi chunk bytes", FieldKind::Number),
-    (Field::OneAtATime, "screens one at a time", FieldKind::Bool),
-    (Field::ElecEnabled, "electricity enabled", FieldKind::Bool),
-    (Field::ElecZone, "electricity zone", FieldKind::Text),
-    (Field::ElecToken, "electricity api token", FieldKind::Secret),
-    (Field::ElecPoll, "electricity poll secs", FieldKind::Number),
-    (Field::PriceSource, "price source", FieldKind::Choice),
-    (Field::EntsoeToken, "entsoe token", FieldKind::Secret),
-    (Field::EntsoeZone, "entsoe zone (EIC)", FieldKind::Text),
-    (Field::IncludeVat, "price incl. VAT", FieldKind::Bool),
-    (Field::PricePoll, "price poll secs", FieldKind::Number),
-    (Field::HotTemp, "hot node temp °C", FieldKind::Number),
-    (Field::LocLat, "location lat", FieldKind::Number),
-    (Field::LocLon, "location lon", FieldKind::Number),
-    (Field::WeatherEnabled, "weather enabled", FieldKind::Bool),
-    (Field::WeatherPoll, "weather poll secs", FieldKind::Number),
-    (Field::RainEnabled, "rain enabled (NL/BE)", FieldKind::Bool),
-    (Field::RainPoll, "rain poll secs", FieldKind::Number),
-    (Field::IssEnabled, "iss enabled", FieldKind::Bool),
-    (
+    spec(
+        Field::QbitService,
+        Services,
+        "qBittorrent",
+        "service",
+        Text,
+        "Name of the qBittorrent service.",
+    ),
+    spec(
+        Field::QbitPort,
+        Services,
+        "qBittorrent",
+        "port",
+        Number,
+        "Web UI port of qBittorrent.",
+    ),
+    spec(
+        Field::QbitUser,
+        Services,
+        "qBittorrent",
+        "user",
+        Text,
+        "Web UI user name.",
+    ),
+    spec(
+        Field::QbitPass,
+        Services,
+        "qBittorrent",
+        "password",
+        Secret,
+        "Web UI password, stored in the config file.",
+    ),
+    spec(
+        Field::QbitPoll,
+        Services,
+        "qBittorrent",
+        "poll",
+        Number,
+        "Seconds between qBittorrent polls, at least 1.",
+    ),
+    spec(
+        Field::ArgoEnabled,
+        Services,
+        "Argo CD",
+        "enabled",
+        Bool,
+        "Read Applications for the deploys role.",
+    ),
+    spec(
+        Field::ArgoNamespace,
+        Services,
+        "Argo CD",
+        "namespace",
+        Text,
+        "Namespace where Argo CD runs.",
+    ),
+    spec(
+        Field::GithubEnabled,
+        Services,
+        "GitHub",
+        "enabled",
+        Bool,
+        "Fetch your contribution graph.",
+    ),
+    spec(
+        Field::GithubToken,
+        Services,
+        "GitHub",
+        "token",
+        Secret,
+        "Personal access token with read:user.",
+    ),
+    spec(
+        Field::GithubPoll,
+        Services,
+        "GitHub",
+        "poll",
+        Number,
+        "Seconds between GitHub polls, at least 60.",
+    ),
+    spec(
+        Field::ElecEnabled,
+        Energy,
+        "Electricity Maps",
+        "enabled",
+        Bool,
+        "Power mix, carbon and renewable roles.",
+    ),
+    spec(
+        Field::ElecZone,
+        Energy,
+        "Electricity Maps",
+        "zone",
+        Text,
+        "Electricity Maps zone, for example NL.",
+    ),
+    spec(
+        Field::ElecToken,
+        Energy,
+        "Electricity Maps",
+        "api token",
+        Secret,
+        "Electricity Maps API token.",
+    ),
+    spec(
+        Field::ElecPoll,
+        Energy,
+        "Electricity Maps",
+        "poll",
+        Number,
+        "Seconds between polls, at least 60.",
+    ),
+    spec(
+        Field::PriceSource,
+        Energy,
+        "Prices",
+        "source",
+        Choice,
+        "energyzero, entsoe or none; Enter cycles.",
+    ),
+    spec(
+        Field::EntsoeToken,
+        Energy,
+        "Prices",
+        "entsoe token",
+        Secret,
+        "ENTSO-E transparency platform token.",
+    ),
+    spec(
+        Field::EntsoeZone,
+        Energy,
+        "Prices",
+        "entsoe zone",
+        Text,
+        "Bidding zone EIC code for ENTSO-E.",
+    ),
+    spec(
+        Field::IncludeVat,
+        Energy,
+        "Prices",
+        "incl. VAT",
+        Bool,
+        "Show prices including VAT.",
+    ),
+    spec(
+        Field::PricePoll,
+        Energy,
+        "Prices",
+        "poll",
+        Number,
+        "Seconds between price polls, at least 60.",
+    ),
+    spec(
+        Field::LocLat,
+        Sky,
+        "Location",
+        "latitude",
+        Number,
+        "Decimal degrees, -90 to 90; blank clears.",
+    ),
+    spec(
+        Field::LocLon,
+        Sky,
+        "Location",
+        "longitude",
+        Number,
+        "Decimal degrees, -180 to 180; blank clears.",
+    ),
+    spec(
+        Field::WeatherEnabled,
+        Sky,
+        "Weather",
+        "enabled",
+        Bool,
+        "Weather, wind and air quality roles.",
+    ),
+    spec(
+        Field::WeatherPoll,
+        Sky,
+        "Weather",
+        "poll",
+        Number,
+        "Seconds between Open-Meteo polls, at least 60.",
+    ),
+    spec(
+        Field::RainEnabled,
+        Sky,
+        "Rain",
+        "enabled",
+        Bool,
+        "Buienradar nowcast; Netherlands and Belgium.",
+    ),
+    spec(
+        Field::RainPoll,
+        Sky,
+        "Rain",
+        "poll",
+        Number,
+        "Seconds between rain polls, at least 60.",
+    ),
+    spec(
+        Field::IssEnabled,
+        Sky,
+        "ISS",
+        "enabled",
+        Bool,
+        "Countdown to the next ISS pass.",
+    ),
+    spec(
         Field::IssMinElevation,
-        "iss min elevation °",
-        FieldKind::Number,
+        Sky,
+        "ISS",
+        "min elevation",
+        Number,
+        "Lowest pass elevation to count, 0 to 90°.",
     ),
-    (Field::GithubEnabled, "github enabled", FieldKind::Bool),
-    (Field::GithubToken, "github token", FieldKind::Secret),
-    (Field::GithubPoll, "github poll secs", FieldKind::Number),
-    (Field::ArgoEnabled, "argocd enabled", FieldKind::Bool),
-    (Field::ArgoNamespace, "argocd namespace", FieldKind::Text),
+    spec(
+        Field::Brightness,
+        Display,
+        "Panels",
+        "brightness",
+        Number,
+        "0.1 to 1.0; night mode dims further.",
+    ),
+    spec(
+        Field::Fps,
+        Display,
+        "Panels",
+        "fps",
+        Number,
+        "Frames per second, 1 to 60.",
+    ),
+    spec(
+        Field::SpiChunk,
+        Display,
+        "Panels",
+        "spi chunk",
+        Number,
+        "Bytes per SPI transfer, at least 64.",
+    ),
+    spec(
+        Field::OneAtATime,
+        Display,
+        "Panels",
+        "one at a time",
+        Bool,
+        "Only one screen irises at a time.",
+    ),
+    spec(
+        Field::NightEnabled,
+        Display,
+        "Night",
+        "enabled",
+        Bool,
+        "Dim the panels at night.",
+    ),
+    spec(
+        Field::NightStart,
+        Display,
+        "Night",
+        "start",
+        Text,
+        "HH:MM when night begins.",
+    ),
+    spec(
+        Field::NightEnd,
+        Display,
+        "Night",
+        "end",
+        Text,
+        "HH:MM when night ends.",
+    ),
+    spec(
+        Field::HotCpu,
+        Thresholds,
+        "Hot node",
+        "cpu %",
+        Number,
+        "CPU percent that marks a node hot.",
+    ),
+    spec(
+        Field::HotMem,
+        Thresholds,
+        "Hot node",
+        "mem %",
+        Number,
+        "Memory percent that marks a node hot.",
+    ),
+    spec(
+        Field::HotTemp,
+        Thresholds,
+        "Hot node",
+        "temp °C",
+        Number,
+        "Temperature that marks a node hot.",
+    ),
 ];
+
+/// Indices into `FIELDS` for one group, in display order.
+pub fn group_indices(g: Group) -> Vec<usize> {
+    FIELDS
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.group == g)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The `enabled` toggle of a section, if it has one.
+pub fn section_enabled(cfg: &Config, section: &str) -> Option<bool> {
+    FIELDS
+        .iter()
+        .find(|s| s.section == section && s.kind == FieldKind::Bool && s.label == "enabled")
+        .map(|s| get(cfg, s.field) == "true")
+}
+
+/// `every 15 s`, or `every 10 min` for whole minutes.
+pub fn humanise_poll(secs: u64) -> String {
+    if secs >= 60 && secs.is_multiple_of(60) {
+        format!("every {} min", secs / 60)
+    } else {
+        format!("every {secs} s")
+    }
+}
 
 pub fn get(cfg: &Config, f: Field) -> String {
     match f {
@@ -401,7 +794,7 @@ impl Screen for Configure {
     }
 
     fn handle(&mut self, key: KeyEvent, shared: &mut Shared, _now: Secs) -> Action {
-        let (field, _, kind) = FIELDS[self.row];
+        let (field, kind) = (FIELDS[self.row].field, FIELDS[self.row].kind);
         // Take the mode out so the arms can replace it without a live borrow.
         let mode = std::mem::replace(&mut self.mode, Mode::Browse);
         match mode {
@@ -501,9 +894,10 @@ impl Screen for Configure {
         };
         let _ = self.scroll;
         let mut lines = Vec::new();
-        for (i, (field, label, kind)) in FIELDS.iter().enumerate().skip(scroll).take(visible) {
+        for (i, s) in FIELDS.iter().enumerate().skip(scroll).take(visible) {
+            let (field, label, kind) = (s.field, s.label, s.kind);
             let selected = i == self.row;
-            let raw = get(&self.cfg, *field);
+            let raw = get(&self.cfg, field);
             let shown = match (&self.mode, selected, kind) {
                 (Mode::Edit(buf), true, FieldKind::Secret) => {
                     format!("{}_", "*".repeat(buf.chars().count()))
@@ -677,9 +1071,13 @@ mod tests {
         assert!(!c.display.one_at_a_time);
         set(&mut c, Field::OneAtATime, "true").unwrap();
         assert!(c.display.one_at_a_time);
-        for (f, _, _) in FIELDS {
-            let v = get(&c, f);
-            assert!(set(&mut c, f, &v).is_ok(), "{f:?} round trip with {v:?}");
+        for s in FIELDS.iter() {
+            let v = get(&c, s.field);
+            assert!(
+                set(&mut c, s.field, &v).is_ok(),
+                "{:?} round trip with {v:?}",
+                s.field
+            );
         }
     }
 
@@ -723,7 +1121,7 @@ mod tests {
         let mut screen = Configure::from_load(Ok(Config::default()));
         screen.row = FIELDS
             .iter()
-            .position(|(f, _, _)| *f == Field::PriceSource)
+            .position(|s| s.field == Field::PriceSource)
             .unwrap();
         assert_eq!(screen.cfg.price.source, "energyzero");
         for want in ["entsoe", "none", "energyzero"] {
@@ -763,6 +1161,51 @@ mod tests {
         assert_eq!(FIELDS.len(), 44);
         assert!(FIELDS
             .iter()
-            .any(|(f, _, k)| *f == Field::GithubToken && *k == FieldKind::Secret));
+            .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
+    }
+
+    #[test]
+    fn every_field_is_in_exactly_one_group_in_order() {
+        assert_eq!(FIELDS.len(), 44);
+        let mut seen: Vec<Field> = Vec::new();
+        for s in FIELDS.iter() {
+            assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);
+            seen.push(s.field);
+            assert!(!s.help.is_empty(), "{:?} has no help", s.field);
+            assert!(s.help.chars().count() <= 60, "{:?} help too long", s.field);
+        }
+        // groups are contiguous in FIELDS, in Group::ALL order
+        let mut last = 0usize;
+        for s in FIELDS.iter() {
+            assert!(s.group.index() >= last, "{:?} out of group order", s.field);
+            last = s.group.index();
+        }
+        for g in Group::ALL {
+            assert!(!group_indices(g).is_empty(), "{g:?} is empty");
+        }
+        assert_eq!(group_indices(Group::Cluster), vec![0, 1, 2, 3, 4]);
+        assert_eq!(group_indices(Group::Thresholds).len(), 3);
+    }
+
+    #[test]
+    fn section_enabled_reads_the_bool_of_that_section() {
+        let mut c = Config::default();
+        assert_eq!(
+            section_enabled(&c, "Prometheus"),
+            None,
+            "always on, no toggle"
+        );
+        assert_eq!(section_enabled(&c, "Weather"), Some(false));
+        c.weather.enabled = true;
+        assert_eq!(section_enabled(&c, "Weather"), Some(true));
+        assert_eq!(section_enabled(&c, "Nope"), None);
+    }
+
+    #[test]
+    fn poll_is_humanised() {
+        assert_eq!(humanise_poll(15), "every 15 s");
+        assert_eq!(humanise_poll(60), "every 1 min");
+        assert_eq!(humanise_poll(600), "every 10 min");
+        assert_eq!(humanise_poll(90), "every 90 s");
     }
 }
