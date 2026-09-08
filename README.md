@@ -88,13 +88,14 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 
 ## Setup TUI
 
-`rackscreen setup` (what the installer opens) is a ratatui menu:
+`rackscreen setup` (what the installer opens) is a ratatui shell: a sidebar on the left with the eight actions, a pane on the right, and a help row at the bottom. `↑↓` move the sidebar bar, `⏎` opens, `Esc` or `←` returns to Home. Below 72 columns the sidebar folds away and Home shows the menu itself.
 
+- **Home** — a live overview: service state and uptime, boot enablement, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `argocd`, `weather`, `rain`, `github`, `electricity`, `prices`), what each screen cycles through (long lists end in `+N`), and the last three log lines.
 - **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
-- **Calibrate screens** — fix rotation / mirroring: a test pattern per panel; press `r`/`f` until the arrow points up and the dot is top-right, then `s` to write `rotate` and `hflip`.
+- **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels, needs a true-colour terminal; otherwise a drawn circle), the other panels are a strip underneath. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
-- **Configure** — cluster, night and display settings in a form, with a restart offer when you save.
-- **Status** — the service state, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `argocd`, `electricity`, `prices`, `weather`, `rain`, `github`) and the latest logs.
+- **Configure** — every setting in six groups (Cluster, Services, Energy, Sky, Display, Thresholds) picked with `←→` in the sidebar; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
+- **Status** — the full service detail, links, boot files and the log tail; `l` for the log view, `r` to restart.
 - **Run here** — run the daemon in the foreground with its logs, without touching the service.
 - **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
 - **Uninstall** — remove the binary, config and service; the boot file lines stay.

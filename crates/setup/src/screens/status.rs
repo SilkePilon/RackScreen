@@ -15,6 +15,7 @@ use crate::ops::boot::{readiness, Readiness};
 use crate::ops::paths::{service_user, Paths};
 use crate::ops::shell::{RealShell, Shell};
 use crate::ops::systemd::{links_from_logs, Dot, LinkDots, ServiceInfo, Systemd};
+use crate::widgets::StatusTone;
 use crate::{Action, Screen, Shared};
 
 #[derive(Clone, Debug)]
@@ -361,6 +362,12 @@ impl Screen for Status {
     fn subtitle(&self) -> String {
         "Status".into()
     }
+
+    fn status(&self, _shared: &Shared) -> Option<(String, StatusTone)> {
+        self.restart_rx
+            .is_some()
+            .then(|| ("restarting".to_string(), StatusTone::Warn))
+    }
 }
 
 #[cfg(test)]
@@ -372,6 +379,36 @@ mod tests {
     use rackscreen_app::logs::LogSink;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    fn snapshot_for_test() -> Snapshot {
+        Snapshot {
+            info: ServiceInfo {
+                active: "active".into(),
+                sub: "running".into(),
+                uptime_secs: Some(4000),
+            },
+            enabled: true,
+            binary_present: true,
+            config_present: true,
+            ready: Some(Readiness {
+                spi_on: true,
+                spi1_overlay: false,
+                bufsiz: true,
+            }),
+            logs: vec!["line one".into(), "line two".into()],
+            links: LinkDots {
+                api: Dot::Up,
+                prometheus: Dot::Down,
+                qbittorrent: Dot::Unknown,
+                electricity: Dot::Unknown,
+                prices: Dot::Unknown,
+                weather: Dot::Unknown,
+                rain: Dot::Unknown,
+                github: Dot::Unknown,
+                argocd: Dot::Unknown,
+            },
+        }
+    }
 
     #[test]
     fn collect_uses_shell_and_files() {
@@ -402,33 +439,6 @@ mod tests {
 
     #[test]
     fn renders_snapshot() {
-        let snap = Snapshot {
-            info: ServiceInfo {
-                active: "active".into(),
-                sub: "running".into(),
-                uptime_secs: Some(4000),
-            },
-            enabled: true,
-            binary_present: true,
-            config_present: true,
-            ready: Some(Readiness {
-                spi_on: true,
-                spi1_overlay: false,
-                bufsiz: true,
-            }),
-            logs: vec!["line one".into(), "line two".into()],
-            links: LinkDots {
-                api: Dot::Up,
-                prometheus: Dot::Down,
-                qbittorrent: Dot::Unknown,
-                electricity: Dot::Unknown,
-                prices: Dot::Unknown,
-                weather: Dot::Unknown,
-                rain: Dot::Unknown,
-                github: Dot::Unknown,
-                argocd: Dot::Unknown,
-            },
-        };
         let sh = Shared {
             ctx: Ctx {
                 config_path: "/etc/rackscreen/config.yaml".into(),
@@ -445,7 +455,7 @@ mod tests {
             }),
             redraw: false,
         };
-        let screen = Status::with_snapshot(snap);
+        let screen = Status::with_snapshot(snapshot_for_test());
         let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();
         term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
@@ -464,33 +474,6 @@ mod tests {
 
     #[test]
     fn log_scroll_is_clamped_to_available_lines() {
-        let snap = Snapshot {
-            info: ServiceInfo {
-                active: "active".into(),
-                sub: "running".into(),
-                uptime_secs: Some(4000),
-            },
-            enabled: true,
-            binary_present: true,
-            config_present: true,
-            ready: Some(Readiness {
-                spi_on: true,
-                spi1_overlay: false,
-                bufsiz: true,
-            }),
-            logs: vec!["line one".into(), "line two".into()],
-            links: LinkDots {
-                api: Dot::Up,
-                prometheus: Dot::Down,
-                qbittorrent: Dot::Unknown,
-                electricity: Dot::Unknown,
-                prices: Dot::Unknown,
-                weather: Dot::Unknown,
-                rain: Dot::Unknown,
-                github: Dot::Unknown,
-                argocd: Dot::Unknown,
-            },
-        };
         let mut sh = Shared {
             ctx: Ctx {
                 config_path: "/etc/rackscreen/config.yaml".into(),
@@ -504,10 +487,32 @@ mod tests {
             update: None,
             redraw: false,
         };
-        let mut screen = Status::with_snapshot(snap);
+        let mut screen = Status::with_snapshot(snapshot_for_test());
         for _ in 0..100 {
             screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
             assert!(screen.scroll <= 1);
         }
+    }
+
+    #[test]
+    fn restart_shows_in_the_header_status() {
+        let sh = crate::Shared {
+            ctx: crate::Ctx {
+                config_path: "/etc/rackscreen/config.yaml".into(),
+                sim: true,
+                version: "0.5.0",
+            },
+            theme: crate::theme::Theme::new(true),
+            service_active: None,
+            banner: None,
+            log_sink: rackscreen_app::logs::LogSink::new(10),
+            update: None,
+            redraw: false,
+        };
+        let mut s = Status::with_snapshot(snapshot_for_test());
+        assert_eq!(s.status(&sh), None);
+        let (_tx, rx) = mpsc::channel();
+        s.restart_rx = Some(rx);
+        assert_eq!(s.status(&sh).unwrap().0, "restarting");
     }
 }
