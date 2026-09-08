@@ -227,6 +227,11 @@ impl App {
     }
 
     fn go(&mut self, id: ScreenId, now: Secs) {
+        // A banner is a one-off note for Home; once the user moves on it makes way for
+        // the Recent logs again.
+        if self.current_id == ScreenId::Menu && id != ScreenId::Menu {
+            self.shared.banner = None;
+        }
         self.current = screens::make(id, &self.shared);
         self.current_id = id;
         if let Some(i) = Self::item_index(id) {
@@ -580,6 +585,20 @@ mod tests {
             ScreenId::Install,
             "a running install is never abandoned"
         );
+    }
+
+    #[test]
+    fn banner_shows_on_home_once_and_is_cleared_on_leaving() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, _term) = new_app(dir.path(), 100, 30);
+        app.go(ScreenId::Screens, 0.0);
+        // a screen leaves a note, Home shows it
+        app.shared.banner = Some("screens saved".into());
+        app.go(ScreenId::Menu, 1.0);
+        assert_eq!(app.shared.banner.as_deref(), Some("screens saved"));
+        // opening any screen from Home clears it, so the Recent logs come back
+        app.go(ScreenId::Status, 2.0);
+        assert_eq!(app.shared.banner, None);
     }
 
     #[test]

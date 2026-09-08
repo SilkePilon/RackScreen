@@ -77,14 +77,38 @@ impl Theme {
         let unicode = lang.to_ascii_uppercase().contains("UTF-8")
             || lang.to_ascii_uppercase().contains("UTF8");
         let mut th = Theme::new(unicode);
-        th.truecolor = Theme::truecolor_from(&std::env::var("COLORTERM").unwrap_or_default());
+        let override_ = std::env::var("RACKSCREEN_TRUECOLOR").ok();
+        th.truecolor = Theme::truecolor_from(
+            &std::env::var("COLORTERM").unwrap_or_default(),
+            &std::env::var("TERM").unwrap_or_default(),
+            override_.as_deref(),
+        );
         th
     }
 
-    /// `COLORTERM` advertises 24-bit colour as `truecolor` or `24bit`.
-    pub fn truecolor_from(colorterm: &str) -> bool {
+    /// Whether the terminal takes 24-bit colour. `RACKSCREEN_TRUECOLOR=0|1` decides
+    /// outright; otherwise `COLORTERM` saying `truecolor`/`24bit` or a `TERM` ending in
+    /// `-direct` is a yes, a handful of `TERM`s known to be 8/256-colour are a no, and
+    /// anything else defaults to yes. The default leans towards yes because sshd does not
+    /// forward `COLORTERM`, and a wrongly assumed 24-bit only tints the preview slightly
+    /// while a wrongly assumed 256-colour removes it.
+    pub fn truecolor_from(colorterm: &str, term: &str, override_: Option<&str>) -> bool {
+        match override_ {
+            Some("1") => return true,
+            Some("0") => return false,
+            _ => {}
+        }
         let c = colorterm.to_ascii_lowercase();
-        c.contains("truecolor") || c.contains("24bit")
+        if c.contains("truecolor") || c.contains("24bit") {
+            return true;
+        }
+        if term.ends_with("-direct") {
+            return true;
+        }
+        !matches!(
+            term,
+            "linux" | "dumb" | "vt100" | "vt220" | "xterm" | "screen"
+        )
     }
 
     pub fn new(unicode: bool) -> Theme {
@@ -195,10 +219,31 @@ mod tests {
     }
 
     #[test]
-    fn truecolor_comes_from_colorterm() {
-        assert!(Theme::truecolor_from("truecolor"));
-        assert!(Theme::truecolor_from("24bit"));
-        assert!(!Theme::truecolor_from(""));
-        assert!(!Theme::truecolor_from("xterm-256color"));
+    fn truecolor_comes_from_colorterm_then_term_with_an_override() {
+        // COLORTERM is authoritative when it advertises 24-bit
+        assert!(Theme::truecolor_from("truecolor", "linux", None));
+        assert!(Theme::truecolor_from("24bit", "xterm", None));
+        assert!(Theme::truecolor_from("TrueColor", "dumb", None));
+        // no COLORTERM (sshd does not forward it): decide from TERM, defaulting to yes
+        assert!(Theme::truecolor_from("", "xterm-256color", None));
+        assert!(Theme::truecolor_from("", "screen-256color", None));
+        assert!(Theme::truecolor_from("", "tmux-256color", None));
+        assert!(Theme::truecolor_from("", "xterm-kitty", None));
+        assert!(Theme::truecolor_from("", "", None));
+        assert!(Theme::truecolor_from("", "xterm-direct", None));
+        assert!(Theme::truecolor_from("", "vt100-direct", None));
+        // the few terminals known not to do 24-bit
+        for term in ["linux", "dumb", "vt100", "vt220", "xterm", "screen"] {
+            assert!(!Theme::truecolor_from("", term, None), "{term}");
+        }
+        // the explicit override wins over everything
+        assert!(!Theme::truecolor_from(
+            "truecolor",
+            "xterm-direct",
+            Some("0")
+        ));
+        assert!(Theme::truecolor_from("", "linux", Some("1")));
+        // anything else in the override is ignored
+        assert!(!Theme::truecolor_from("", "linux", Some("maybe")));
     }
 }

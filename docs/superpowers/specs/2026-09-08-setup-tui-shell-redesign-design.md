@@ -171,7 +171,7 @@ The header shows `● unsaved` while `dirty`. The dot pulses (see Motion).
 
 ### Fallback
 
-`Theme` gains `pub truecolor: bool`, detected from `COLORTERM` containing `truecolor` or `24bit`. When `!unicode || !truecolor`, the preview area shows the drawn circle instead:
+`Theme` gains `pub truecolor: bool`: `RACKSCREEN_TRUECOLOR=0|1` decides outright; else `COLORTERM` containing `truecolor`/`24bit` or a `TERM` ending in `-direct` is true; else `TERM` exactly `linux`, `dumb`, `vt100`, `vt220`, `xterm` or `screen` is false; anything else defaults to true (sshd does not forward `COLORTERM`). When `!unicode || !truecolor`, the preview area shows the drawn circle instead:
 
 ```
       ╭─────╮

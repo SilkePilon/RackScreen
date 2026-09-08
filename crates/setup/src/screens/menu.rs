@@ -181,6 +181,12 @@ impl Screen for Home {
         let th = &shared.theme;
         let g = th.glyphs();
         let mut lines: Vec<Line> = vec![Line::from("")];
+        // The update hint sits on the Service row whether or not a snapshot exists yet.
+        let update_hint = shared
+            .update
+            .as_ref()
+            .filter(|u| u.newer)
+            .map(|u| Span::styled(format!("     {} {}", g.arrow_up, u.latest), th.warning()));
         match &self.snap {
             Some(s) => {
                 let (style, word) = match s.info.active.as_str() {
@@ -200,14 +206,7 @@ impl Screen for Home {
                         th.muted(),
                     ),
                 ];
-                if let Some(u) = &shared.update {
-                    if u.newer {
-                        svc.push(Span::styled(
-                            format!("     {} {}", g.arrow_up, u.latest),
-                            th.warning(),
-                        ));
-                    }
-                }
+                svc.extend(update_hint);
                 lines.push(labelled(th, "Service", svc));
                 lines.push(labelled(
                     th,
@@ -263,7 +262,9 @@ impl Screen for Home {
                 } else {
                     "collecting…"
                 };
-                lines.push(labelled(th, "Service", vec![Span::styled(msg, th.muted())]));
+                let mut svc = vec![Span::styled(msg, th.muted())];
+                svc.extend(update_hint);
+                lines.push(labelled(th, "Service", svc));
             }
         }
         lines.push(Line::from(""));
@@ -538,5 +539,20 @@ mod tests {
         let t = term.backend().to_string();
         assert!(t.contains("↑ v9.9.9"), "{t}");
         assert!(t.contains("config saved"));
+    }
+
+    #[test]
+    fn update_hint_does_not_wait_for_a_snapshot() {
+        let mut sh = shared();
+        sh.update = Some(crate::ops::update::UpdateInfo {
+            latest: "v9.9.9".into(),
+            newer: true,
+        });
+        let home = Home::with_snapshot(Vec::new(), None);
+        let mut term = Terminal::new(TestBackend::new(70, 20)).unwrap();
+        term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("not available (sim)"), "{t}");
+        assert!(t.contains("↑ v9.9.9"), "hint shows while collecting: {t}");
     }
 }
