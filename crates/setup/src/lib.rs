@@ -186,9 +186,9 @@ impl App {
     fn draw(&self, f: &mut Frame, now: Secs) {
         let area = f.area();
         let [head, body, foot] = Layout::vertical([
-            Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(3),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .areas(area);
         widgets::header(
@@ -197,7 +197,8 @@ impl App {
             &self.shared.theme,
             now,
             self.shared.ctx.version,
-            &self.current.subtitle(),
+            Some(&self.current.subtitle()),
+            None,
         );
         let offset = (self.slide.value(now) * body.width as f32) as u16;
         let shifted = Rect {
