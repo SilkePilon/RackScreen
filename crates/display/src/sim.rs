@@ -68,6 +68,14 @@ fn key_char(key: Key) -> Option<char> {
         Key::B => 'b',
         Key::H => 'h',
         Key::P => 'p',
+        Key::U => 'u',
+        Key::D => 'd',
+        Key::G => 'g',
+        Key::R => 'r',
+        Key::F => 'f',
+        Key::L => 'l',
+        Key::W => 'w',
+        Key::I => 'i',
         _ => return None,
     })
 }
@@ -147,7 +155,7 @@ impl SimHub {
             }
             frames += 1;
             if last.elapsed() >= Duration::from_secs(1) {
-                self.window.set_title(&format!("RackScreen sim  {frames} fps  [1-8 events, 9/0 volume, h hot, p price outage, t torrent, n night, b boot, Esc quit]"));
+                self.window.set_title(&format!("RackScreen sim  {frames} fps  [1-8 events, 9/0 volume, h hot, p price outage, t torrent, n night, b boot, u ups, d app, g push, r star, f ci, l thunder, w rain, i iss, Esc quit]"));
                 frames = 0;
                 last = Instant::now();
             }
@@ -234,6 +242,14 @@ mod tests {
             (Key::T, 't'),
             (Key::N, 'n'),
             (Key::B, 'b'),
+            (Key::U, 'u'),
+            (Key::D, 'd'),
+            (Key::G, 'g'),
+            (Key::R, 'r'),
+            (Key::F, 'f'),
+            (Key::L, 'l'),
+            (Key::W, 'w'),
+            (Key::I, 'i'),
         ] {
             assert_eq!(key_char(key), Some(ch));
         }

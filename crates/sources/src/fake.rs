@@ -4,8 +4,11 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use rackscreen_core::electricity::Source;
-use rackscreen_core::event::{Event, LinkTarget, Robustness, Torrent};
+use rackscreen_core::event::{
+    App, AppHealth, AppSync, Event, IssPass, LinkTarget, Robustness, Torrent,
+};
 
+use crate::astro::sky_event;
 use crate::SourceCtx;
 
 /// Cluster nodes and their idle temperature in degrees Celsius.
@@ -53,6 +56,45 @@ const PRICE_CURVE: [f32; 24] = [
 ];
 const PRICE_DATE: &str = "2026-09-06";
 
+/// Simulated observer: Amsterdam.
+const FAKE_LAT: f64 = 52.37;
+const FAKE_LON: f64 = 4.89;
+/// WMO codes the demo weather cycles through: clear, partly cloudy, rain, thunder.
+const WEATHER_CYCLE: [u16; 4] = [0, 2, 61, 95];
+/// Rain nowcast seed, mm/h per five-minute slot: dry, a shower, dry.
+const RAIN_SEED: [f32; 24] = [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 1.0, 2.5, 5.5, 6.5, 6.0, 4.0, 3.0, 2.0, 1.5, 0.8, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0,
+];
+/// Contribution counts for the last 30 days, today last.
+const GH_SEED: [u32; 30] = [
+    3, 7, 0, 12, 5, 9, 2, 0, 14, 6, 8, 1, 4, 11, 3, 0, 9, 17, 6, 2, 5, 8, 0, 3, 13, 7, 9, 4, 43, 28,
+];
+/// Argo CD applications, named like the real cluster.
+const APP_NAMES: [&str; 16] = [
+    "arr-stack",
+    "cloudflared",
+    "hermes",
+    "homeassistant",
+    "longhorn",
+    "monitoring",
+    "n8n",
+    "node-maintenance",
+    "open-webui",
+    "pihole",
+    "plane",
+    "portfolio",
+    "root",
+    "stirling-pdf",
+    "tailscale",
+    "twenty",
+];
+/// The app the `d` key degrades.
+const DEGRADED_APP: usize = 5;
+/// Minutes until the demo ISS pass, and its length.
+const ISS_PASS_IN_SECS: i64 = 42 * 60;
+const ISS_PASS_SECS: i64 = 6 * 60;
+
 /// Sources Electricity Maps counts as renewable; fossil-free adds nuclear.
 fn is_renewable(s: Source) -> bool {
     matches!(
@@ -83,6 +125,14 @@ pub enum FakeCmd {
     HealVolume,
     HotTemp,
     PriceOutage,
+    UpsToggle,
+    AppToggle,
+    GithubPush,
+    GithubStar,
+    CiFailure,
+    Thunder,
+    RainSoon,
+    IssPassNow,
 }
 
 impl FakeCmd {
@@ -103,6 +153,14 @@ impl FakeCmd {
             '0' => FakeCmd::HealVolume,
             'h' => FakeCmd::HotTemp,
             'p' => FakeCmd::PriceOutage,
+            'u' => FakeCmd::UpsToggle,
+            'd' => FakeCmd::AppToggle,
+            'g' => FakeCmd::GithubPush,
+            'r' => FakeCmd::GithubStar,
+            'f' => FakeCmd::CiFailure,
+            'l' => FakeCmd::Thunder,
+            'w' => FakeCmd::RainSoon,
+            'i' => FakeCmd::IssPassNow,
             _ => return None,
         })
     }
@@ -132,12 +190,28 @@ pub struct FakeState {
     prices_ok: bool,
     /// Hours the price curve is rotated by, so the current-hour marker moves.
     price_rot: usize,
+    /// Wall clock the sky, rain and ISS events are built against; advances with ticks.
+    unix_start: i64,
+    utc_offset: i32,
+    weather_idx: usize,
+    temp: f32,
+    wind_from: f32,
+    wind: f32,
+    eaqi: f32,
+    rain: Vec<f32>,
+    ups_on_battery: bool,
+    ups_charge: f32,
+    net_rx: f64,
+    net_tx: f64,
+    apps: Vec<App>,
+    gh_days: Vec<u32>,
+    iss_start: i64,
     ticks: u64,
 }
 
 impl FakeState {
     pub fn new(seed: u64) -> Self {
-        Self {
+        let mut s = Self {
             rng: fastrand::Rng::with_seed(seed),
             cpu: 42.0,
             mem: 67.0,
@@ -162,8 +236,44 @@ impl FakeState {
             carbon: 214.0,
             prices_ok: true,
             price_rot: 0,
+            unix_start: chrono::Local::now().timestamp(),
+            utc_offset: chrono::Local::now().offset().local_minus_utc(),
+            weather_idx: 1,
+            temp: 18.0,
+            wind_from: 232.0,
+            wind: 19.0,
+            eaqi: 32.0,
+            rain: RAIN_SEED.to_vec(),
+            ups_on_battery: false,
+            ups_charge: 100.0,
+            net_rx: 41e6,
+            net_tx: 4e6,
+            apps: APP_NAMES
+                .iter()
+                .map(|n| App {
+                    name: (*n).to_string(),
+                    sync: AppSync::Synced,
+                    health: AppHealth::Healthy,
+                    operating: false,
+                })
+                .collect(),
+            gh_days: GH_SEED.to_vec(),
+            iss_start: 0,
             ticks: 0,
-        }
+        };
+        s.iss_start = s.unix_start + ISS_PASS_IN_SECS;
+        s
+    }
+
+    /// Pin the clock (the GIF generator and tests want reproducible skies).
+    pub fn set_clock(&mut self, unix: i64, utc_offset_secs: i32) {
+        self.unix_start = unix;
+        self.utc_offset = utc_offset_secs;
+        self.iss_start = unix + ISS_PASS_IN_SECS;
+    }
+
+    pub fn unix_now(&self) -> i64 {
+        self.unix_start + self.ticks as i64
     }
 
     fn total(&self) -> u32 {
@@ -257,6 +367,84 @@ impl FakeState {
         }
     }
 
+    fn weather(&self) -> Event {
+        Event::Weather {
+            temp_c: self.temp,
+            code: WEATHER_CYCLE[self.weather_idx % WEATHER_CYCLE.len()],
+            is_day: true,
+            wind_kmh: self.wind,
+            gust_kmh: self.wind * 1.8,
+            wind_from_deg: self.wind_from,
+            at: self.updated_at(),
+        }
+    }
+
+    fn air(&self) -> Event {
+        Event::AirQuality { eaqi: self.eaqi }
+    }
+
+    fn rain(&self) -> Event {
+        Event::Rain {
+            from: self.unix_now(),
+            mm_per_h: self.rain.clone(),
+        }
+    }
+
+    fn sky(&self) -> Event {
+        sky_event(FAKE_LAT, FAKE_LON, self.unix_now(), self.utc_offset)
+    }
+
+    fn iss(&self) -> Event {
+        Event::IssPass(Some(IssPass {
+            start: self.iss_start,
+            end: self.iss_start + ISS_PASS_SECS,
+            max_elevation_deg: 62.0,
+            visible: true,
+        }))
+    }
+
+    fn github(&self) -> Event {
+        let today = chrono::DateTime::from_timestamp(self.unix_now() + self.utc_offset as i64, 0)
+            .map(|d| d.date_naive())
+            .unwrap_or_default();
+        let days = self
+            .gh_days
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let back = (self.gh_days.len() - 1 - i) as i64;
+                (
+                    (today - chrono::Duration::days(back))
+                        .format("%Y-%m-%d")
+                        .to_string(),
+                    *n,
+                )
+            })
+            .collect();
+        Event::GithubActivity { days }
+    }
+
+    fn ups(&self) -> Event {
+        Event::Ups {
+            on_battery: self.ups_on_battery,
+            low_battery: self.ups_charge <= 20.0,
+            charge_pct: self.ups_charge,
+            load_pct: 6.0,
+            runtime_secs: (self.ups_charge / 100.0 * 3014.0) as u32,
+        }
+    }
+
+    fn net(&self) -> Event {
+        Event::Network {
+            rx_bps: self.net_rx,
+            tx_bps: self.net_tx,
+        }
+    }
+
+    fn apps(&self) -> Event {
+        Event::Apps(self.apps.clone())
+    }
+
     pub fn initial(&self) -> Vec<Event> {
         vec![
             Event::Link {
@@ -279,6 +467,22 @@ impl FakeState {
                 target: LinkTarget::Prices,
                 up: true,
             },
+            Event::Link {
+                target: LinkTarget::Weather,
+                up: true,
+            },
+            Event::Link {
+                target: LinkTarget::Rain,
+                up: true,
+            },
+            Event::Link {
+                target: LinkTarget::Github,
+                up: true,
+            },
+            Event::Link {
+                target: LinkTarget::ArgoCd,
+                up: true,
+            },
             self.metrics(),
             self.pod_snapshot(),
             self.node_snapshot(),
@@ -290,6 +494,15 @@ impl FakeState {
             self.storage(),
             self.electricity(),
             self.prices(),
+            self.weather(),
+            self.air(),
+            self.rain(),
+            self.sky(),
+            self.iss(),
+            self.github(),
+            self.ups(),
+            self.net(),
+            self.apps(),
         ]
     }
 
@@ -313,7 +526,19 @@ impl FakeState {
             }
         }
         self.carbon = (self.carbon + self.rng.f32() * 6.0 - 3.0).clamp(20.0, 600.0);
+        self.net_rx = (self.net_rx * (1.0 + self.rng.f64() * 0.4 - 0.2)).clamp(2e6, 400e6);
+        self.net_tx = (self.net_tx * (1.0 + self.rng.f64() * 0.4 - 0.2)).clamp(2e5, 40e6);
+        self.temp = (self.temp + self.rng.f32() * 0.4 - 0.2).clamp(-5.0, 35.0);
+        self.wind = (self.wind + self.rng.f32() * 2.0 - 1.0).clamp(3.0, 60.0);
+        self.wind_from = (self.wind_from + self.rng.f32() * 6.0 - 3.0).rem_euclid(360.0);
+        self.eaqi = (self.eaqi + self.rng.f32() * 2.0 - 1.0).clamp(5.0, 95.0);
+        if self.ups_on_battery {
+            self.ups_charge = (self.ups_charge - 0.5).max(0.0);
+        } else {
+            self.ups_charge = (self.ups_charge + 1.0).min(100.0);
+        }
         let mut out = vec![self.metrics()];
+        out.push(self.net());
         if self.pending > 0 && self.rng.f32() < 0.5 {
             self.pending -= 1;
             self.running += 1;
@@ -338,11 +563,24 @@ impl FakeState {
             out.push(Event::AlertSnapshot {
                 firing: self.alerts.clone(),
             });
+            out.push(self.ups());
+            self.rain.rotate_left(1);
+            out.push(self.rain());
         }
         if self.ticks.is_multiple_of(10) {
             out.push(self.node_temps());
             out.push(self.storage());
             out.push(self.electricity());
+            out.push(self.air());
+        }
+        if self.ticks.is_multiple_of(30) {
+            self.weather_idx += 1;
+            out.push(self.weather());
+        }
+        if self.ticks.is_multiple_of(60) {
+            out.push(self.sky());
+            out.push(self.iss());
+            out.push(self.github());
         }
         if self.ticks.is_multiple_of(60) && self.prices_ok {
             self.price_rot += 1;
@@ -530,6 +768,55 @@ impl FakeState {
                     up: self.prices_ok,
                 }]
             }
+            FakeCmd::UpsToggle => {
+                self.ups_on_battery = !self.ups_on_battery;
+                vec![
+                    if self.ups_on_battery {
+                        Event::UpsOnBattery
+                    } else {
+                        Event::UpsOnline
+                    },
+                    self.ups(),
+                ]
+            }
+            FakeCmd::AppToggle => {
+                let app = &mut self.apps[DEGRADED_APP];
+                let name = app.name.clone();
+                let edge = if app.health == AppHealth::Healthy {
+                    app.health = AppHealth::Degraded;
+                    Event::AppDegraded { name }
+                } else {
+                    app.health = AppHealth::Healthy;
+                    Event::AppHealthy { name }
+                };
+                vec![edge, self.apps()]
+            }
+            FakeCmd::GithubPush => vec![Event::GithubPush {
+                repo: "silkepilon/RackScreen".into(),
+                commits: 3,
+            }],
+            FakeCmd::GithubStar => vec![Event::GithubStar {
+                repo: "silkepilon/RackScreen".into(),
+            }],
+            FakeCmd::CiFailure => vec![Event::GithubRun {
+                repo: "silkepilon/RackScreen".into(),
+                ok: false,
+            }],
+            FakeCmd::Thunder => {
+                self.weather_idx = 3; // WEATHER_CYCLE[3] is thunder
+                vec![self.weather()]
+            }
+            FakeCmd::RainSoon => {
+                self.rain = vec![0.0; 24];
+                for (i, v) in [(2, 1.5), (3, 3.0), (4, 4.0), (5, 2.0), (6, 0.5)] {
+                    self.rain[i] = v;
+                }
+                vec![self.rain()]
+            }
+            FakeCmd::IssPassNow => {
+                self.iss_start = self.unix_now();
+                vec![self.iss()]
+            }
         }
     }
 }
@@ -564,7 +851,110 @@ mod tests {
         assert_eq!(FakeCmd::from_key('0'), Some(FakeCmd::HealVolume));
         assert_eq!(FakeCmd::from_key('h'), Some(FakeCmd::HotTemp));
         assert_eq!(FakeCmd::from_key('p'), Some(FakeCmd::PriceOutage));
+        assert_eq!(FakeCmd::from_key('u'), Some(FakeCmd::UpsToggle));
+        assert_eq!(FakeCmd::from_key('d'), Some(FakeCmd::AppToggle));
+        assert_eq!(FakeCmd::from_key('g'), Some(FakeCmd::GithubPush));
+        assert_eq!(FakeCmd::from_key('r'), Some(FakeCmd::GithubStar));
+        assert_eq!(FakeCmd::from_key('f'), Some(FakeCmd::CiFailure));
+        assert_eq!(FakeCmd::from_key('l'), Some(FakeCmd::Thunder));
+        assert_eq!(FakeCmd::from_key('w'), Some(FakeCmd::RainSoon));
+        assert_eq!(FakeCmd::from_key('i'), Some(FakeCmd::IssPassNow));
         assert_eq!(FakeCmd::from_key('x'), None);
+    }
+
+    #[test]
+    fn initial_has_every_new_role_fed() {
+        let mut s = FakeState::new(1);
+        s.set_clock(1_788_782_400, 7200);
+        let evs = s.initial();
+        for target in [
+            LinkTarget::Weather,
+            LinkTarget::Rain,
+            LinkTarget::Github,
+            LinkTarget::ArgoCd,
+        ] {
+            assert!(
+                evs.iter()
+                    .any(|e| matches!(e, Event::Link { target: t, up: true } if *t == target)),
+                "{target:?} link up missing"
+            );
+        }
+        assert!(evs.iter().any(|e| matches!(e, Event::Weather { .. })));
+        assert!(evs.iter().any(|e| matches!(e, Event::AirQuality { .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Rain { mm_per_h, .. } if mm_per_h.len() == 24)));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Event::Sky {
+                sunrise: Some(_),
+                ..
+            }
+        )));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Event::IssPass(Some(p)) if p.start == 1_788_782_400 + 42 * 60 && p.visible
+        )));
+        assert!(evs.iter().any(
+            |e| matches!(e, Event::GithubActivity { days } if days.len() == 30 && days[29].1 == 28)
+        ));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Event::Ups {
+                on_battery: false,
+                ..
+            }
+        )));
+        assert!(evs.iter().any(|e| matches!(e, Event::Network { .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Apps(a) if a.len() == 16)));
+    }
+
+    #[test]
+    fn new_commands_emit_their_edges() {
+        let mut s = FakeState::new(1);
+        s.set_clock(1_788_782_400, 7200);
+        let evs = s.command(FakeCmd::UpsToggle);
+        assert!(evs.contains(&Event::UpsOnBattery));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Event::Ups {
+                on_battery: true,
+                ..
+            }
+        )));
+        assert!(s.command(FakeCmd::UpsToggle).contains(&Event::UpsOnline));
+        let evs = s.command(FakeCmd::AppToggle);
+        assert!(evs.iter().any(|e| matches!(e, Event::AppDegraded { .. })));
+        assert!(s
+            .command(FakeCmd::AppToggle)
+            .iter()
+            .any(|e| matches!(e, Event::AppHealthy { .. })));
+        assert!(matches!(
+            s.command(FakeCmd::GithubPush).as_slice(),
+            [Event::GithubPush { commits: 3, .. }]
+        ));
+        assert!(matches!(
+            s.command(FakeCmd::GithubStar).as_slice(),
+            [Event::GithubStar { .. }]
+        ));
+        assert!(matches!(
+            s.command(FakeCmd::CiFailure).as_slice(),
+            [Event::GithubRun { ok: false, .. }]
+        ));
+        assert!(matches!(
+            s.command(FakeCmd::Thunder).as_slice(),
+            [Event::Weather { code: 95, .. }]
+        ));
+        assert!(matches!(
+            s.command(FakeCmd::RainSoon).as_slice(),
+            [Event::Rain { mm_per_h, .. }] if mm_per_h[2] > 0.1 && mm_per_h[0] == 0.0
+        ));
+        assert!(matches!(
+            s.command(FakeCmd::IssPassNow).as_slice(),
+            [Event::IssPass(Some(p))] if p.start == s.unix_now()
+        ));
     }
 
     #[test]
