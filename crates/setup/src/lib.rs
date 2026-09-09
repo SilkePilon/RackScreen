@@ -151,6 +151,8 @@ struct App {
     /// Main menu item under the sidebar bar (also the screen we came from).
     hover: usize,
     bar: Slide,
+    /// Bar over a screen's own sidebar view (Configure's groups), eased like `bar`.
+    side: Slide,
     focus: Focus,
     settle: Settle,
     update_rx: Option<Receiver<UpdateInfo>>,
@@ -207,6 +209,7 @@ impl App {
             current_id: id,
             hover,
             bar: Slide::fixed(hover as f32),
+            side: Slide::fixed(0.0),
             focus: if id == ScreenId::Menu {
                 Focus::Sidebar
             } else {
@@ -237,6 +240,8 @@ impl App {
         if let Some(i) = Self::item_index(id) {
             self.hover_to(i, now);
         }
+        let selected = self.current.sidebar().map_or(0, |v| v.selected);
+        self.side = Slide::fixed(selected as f32);
         self.focus = if id == ScreenId::Menu {
             Focus::Sidebar
         } else {
@@ -275,7 +280,14 @@ impl App {
                 .handle(KeyEvent::from(KeyCode::Esc), &mut self.shared, now);
         }
         match action {
-            Action::None => {}
+            Action::None => {
+                // The screen may have moved its own sidebar selection (Configure's group).
+                if let Some(v) = self.current.sidebar() {
+                    if v.selected as f32 != self.side.target() {
+                        self.side = self.side.to(v.selected as f32, now, BAR_SECS);
+                    }
+                }
+            }
             Action::Go(id) => self.go(id, now),
             Action::Back => {
                 if self.current_id == ScreenId::Menu {
@@ -323,7 +335,7 @@ impl App {
                     th,
                     Some(&view.title),
                     &items,
-                    view.selected as f32,
+                    self.side.value(now),
                     Some(view.selected),
                     true,
                 );
@@ -418,7 +430,10 @@ impl App {
     }
 
     fn animating(&self, now: Secs) -> bool {
-        !self.bar.done(now) || !self.settle.done(now) || self.current.animating(now)
+        !self.bar.done(now)
+            || !self.side.done(now)
+            || !self.settle.done(now)
+            || self.current.animating(now)
     }
 
     fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -530,6 +545,23 @@ mod tests {
         assert_eq!(app.current_id, ScreenId::Menu);
         assert_eq!(app.focus, Focus::Sidebar);
         assert_eq!(screens::menu::ITEMS[app.hover].0, ScreenId::Configure);
+    }
+
+    #[test]
+    fn configure_group_bar_eases_with_tab() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, mut term) = new_app(dir.path(), 100, 30);
+        app.go(ScreenId::Configure, 0.0);
+        assert_eq!(app.side.target(), 0.0);
+        app.handle(KeyEvent::from(KeyCode::Tab), 5.0);
+        assert_eq!(app.side.target(), 1.0, "bar follows the group");
+        assert!(app.animating(5.01), "and eases there");
+        term.draw(|f| app.draw(f, 6.0)).unwrap();
+        let t = text(&term);
+        assert!(t.contains("▸ 2 Services"), "{t}");
+        assert!(t.contains("Configure › Services"));
+        app.handle(KeyEvent::from(KeyCode::Char('6')), 7.0);
+        assert_eq!(app.side.target(), 5.0);
     }
 
     #[test]

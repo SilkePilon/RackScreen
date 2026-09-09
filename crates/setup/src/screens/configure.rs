@@ -736,16 +736,20 @@ impl Configure {
         FIELDS[self.row].group
     }
 
+    /// `↑↓` flow straight through group boundaries: `FIELDS` is contiguous per group,
+    /// so the next row after a group's last field is the next group's first.
     fn move_row(&mut self, delta: i32) {
-        let idx = group_indices(self.group());
-        let pos = idx.iter().position(|i| *i == self.row).unwrap_or(0) as i32;
-        let n = idx.len() as i32;
-        self.row = idx[(pos + delta).rem_euclid(n) as usize];
+        let n = FIELDS.len() as i32;
+        self.row = (self.row as i32 + delta).rem_euclid(n) as usize;
     }
 
     fn move_group(&mut self, delta: i32) {
         let n = Group::ALL.len() as i32;
         let g = Group::ALL[(self.group().index() as i32 + delta).rem_euclid(n) as usize];
+        self.jump_to(g);
+    }
+
+    fn jump_to(&mut self, g: Group) {
         self.row = group_indices(g)[0];
     }
 
@@ -813,9 +817,12 @@ impl Screen for Configure {
         match mode {
             Mode::Browse => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => self.move_row(-1),
-                KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => self.move_row(1),
-                KeyCode::Left | KeyCode::Char('h') => self.move_group(-1),
-                KeyCode::Right | KeyCode::Char('l') => self.move_group(1),
+                KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
+                KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.move_group(-1),
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.move_group(1),
+                KeyCode::Char(c @ '1'..='6') => {
+                    self.jump_to(Group::ALL[(c as u8 - b'1') as usize]);
+                }
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     if kind == FieldKind::Bool {
                         let cur = get(&self.cfg, field) == "true";
@@ -1079,7 +1086,7 @@ impl Screen for Configure {
 
     fn keys(&self) -> String {
         match self.mode {
-            Mode::Browse => "↑↓ field  ←→ group  ⏎ edit/toggle  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  Tab/←→ group  1-6 jump  ⏎ edit  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
             Mode::AskDiscard => "y discard  Esc keep".into(),
@@ -1100,7 +1107,12 @@ impl Screen for Configure {
     fn sidebar(&self) -> Option<SidebarView> {
         Some(SidebarView {
             title: "Configure".into(),
-            items: Group::ALL.iter().map(|g| g.name().to_string()).collect(),
+            // Numbered, so the `1-6` jump keys explain themselves.
+            items: Group::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, g)| format!("{} {}", i + 1, g.name()))
+                .collect(),
             selected: self.group().index(),
         })
     }
@@ -1345,14 +1357,31 @@ mod tests {
     }
 
     #[test]
-    fn up_down_stay_in_the_group_and_left_right_switch_groups() {
+    fn up_down_flow_across_groups_and_left_right_switch_groups() {
         let dir = tempfile::tempdir().unwrap();
         let mut sh = shared_at(&dir.path().join("config.yaml"));
         let mut screen = Configure::from_load(Ok(Config::default()));
         assert_eq!(screen.group(), Group::Cluster);
         screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
-        assert_eq!(screen.group(), Group::Cluster, "wraps inside the group");
-        assert_eq!(FIELDS[screen.row].field, Field::PromPoll);
+        assert_eq!(
+            screen.group(),
+            Group::Thresholds,
+            "up from the first field wraps to the end"
+        );
+        assert_eq!(FIELDS[screen.row].field, Field::HotTemp);
+        screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Cluster);
+        for _ in 0..5 {
+            screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
+        }
+        assert_eq!(
+            screen.group(),
+            Group::Services,
+            "down past the last field enters the next group"
+        );
+        assert_eq!(FIELDS[screen.row].field, Field::QbitEnabled);
+        screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Cluster);
         screen.handle(KeyEvent::from(KeyCode::Right), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Services);
         assert_eq!(
@@ -1369,6 +1398,28 @@ mod tests {
             Group::Thresholds.index()
         );
         assert_eq!(screen.sidebar().unwrap().items.len(), 6);
+    }
+
+    #[test]
+    fn tab_and_digits_switch_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        screen.handle(KeyEvent::from(KeyCode::Tab), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Services);
+        screen.handle(KeyEvent::from(KeyCode::Tab), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Energy);
+        screen.handle(KeyEvent::from(KeyCode::BackTab), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Services);
+        screen.handle(KeyEvent::from(KeyCode::Char('5')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Display);
+        assert_eq!(FIELDS[screen.row].field, Field::Brightness);
+        screen.handle(KeyEvent::from(KeyCode::Char('1')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Cluster);
+        screen.handle(KeyEvent::from(KeyCode::Char('6')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Thresholds);
+        assert!(!screen.dirty, "navigation never dirties the form");
+        assert!(screen.keys().contains("1-6 jump"));
     }
 
     #[test]
