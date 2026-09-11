@@ -94,12 +94,24 @@ pub fn needle_angle(t: f32) -> f32 {
     GAUGE_START_DEG + GAUGE_SWEEP_DEG * t.clamp(0.0, 1.0)
 }
 
+/// The segment the needle points at. A gap segment belongs to the band
+/// before it and is never lit, so a needle over a gap breathes the segment
+/// just before it instead.
+fn needle_segment(t: f32) -> usize {
+    let seg = ((t * (GAUGE_SEGS - 1) as f32).round() as usize).min(GAUGE_SEGS - 1);
+    if seg / SEGS_PER_BAND < 4 && seg % SEGS_PER_BAND == SEGS_PER_BAND - 1 {
+        seg - 1
+    } else {
+        seg
+    }
+}
+
 pub fn price_scene(model: &Model, now: Secs) -> Scene {
     let p = model.prices();
     let cur = model.current_price();
     let level = cur.map(|v| price_level(v, p.avg).0);
     let t = model.smooth_price_needle(now);
-    let needle_seg = ((t * (GAUGE_SEGS - 1) as f32).round() as usize).min(GAUGE_SEGS - 1);
+    let needle_seg = needle_segment(t);
     let mut states = Vec::with_capacity(GAUGE_SEGS);
     for i in 0..GAUGE_SEGS {
         let band = i / SEGS_PER_BAND;
@@ -477,6 +489,19 @@ mod tests {
                 "other bands dim for {price}"
             );
         }
+    }
+
+    #[test]
+    fn needle_over_a_gap_breathes_the_segment_before_it() {
+        // 0.115 / 0.20 = 0.575: band 0, t = (0.275 / 0.3) / 5 = 0.1833, round(0.1833 * 44) = 8, the gap
+        let s = price_scene(&price_model(0.115), 5.0);
+        let states = gauge_states(&s);
+        assert_eq!(states[8], SegState::Off, "the gap stays a gap");
+        assert!(
+            matches!(states[7], SegState::On(_, a) if a < 1.0),
+            "segment 7 breathes instead"
+        );
+        assert!(matches!(states[6], SegState::On(_, a) if a == 1.0));
     }
 
     #[test]
