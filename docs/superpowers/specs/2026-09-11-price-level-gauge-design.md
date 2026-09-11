@@ -47,7 +47,8 @@ alpha 1.0, the other bands at 0.45. The segment directly under the needle breath
 (`breathe(now, 2.4)`), the house rule that the live segment is never static.
 
 **Needle.** One `Drawable::Tick`, white, `r0 = 88`, `r1 = 116`, width 4, at angle
-`225 + 270 * t`. `t` is the needle position in `0..=1` and is eased with a `Smooth`
+`225 + 264 * t`, so `t = 0` and `t = 1` sit on the centres of the first and last
+segment. `t` is the needle position in `0..=1` and is eased with a `Smooth`
 in the model (same `SMOOTH_SECS` as the other rings), so a new slot swings the needle
 instead of jumping it. With no data the needle is not drawn.
 

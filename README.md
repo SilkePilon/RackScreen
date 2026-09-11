@@ -39,7 +39,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | <img src=".github/media/screens/thermal.gif" alt="THERMAL role" width="200"> | <img src=".github/media/screens/storage.gif" alt="STORAGE role" width="200"> |
 | **`thermal`** — the hottest node, blue to amber to red as it climbs | **`storage`** — volumes outside, used capacity inside; a sick volume breathes amber |
 | <img src=".github/media/screens/power-mix.gif" alt="POWER MIX role" width="200"> | <img src=".github/media/screens/price.gif" alt="PRICE role" width="200"> |
-| **`power-mix`** — the grid production mix, one arc and icon per source | **`price`** — the day-ahead price per hour, the current hour breathing |
+| **`power-mix`** — the grid production mix, one arc and icon per source | **`price`** — today's price as a level gauge, the needle at the current quarter-hour against the three-day average |
 | <img src=".github/media/screens/carbon.gif" alt="CARBON role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
 | **`carbon`** — grid carbon intensity, on the Electricity Maps colour scale | **`renewable`** — the renewable share outside, the fossil-free share inside |
 | <img src=".github/media/screens/gh-activity.gif" alt="GH ACTIVITY role" width="200"> | <img src=".github/media/screens/weather.gif" alt="WEATHER role" width="200"> |
@@ -113,7 +113,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-one rol
 | `thermal` | Prometheus | ring is the hottest node, `hot node temp °C` marks the danger band |
 | `storage` | Prometheus (Longhorn) | outer ring a section per volume by robustness, inner ring the used capacity |
 | `power-mix` | Electricity Maps | one arc and icon per production source in your zone |
-| `price` | EnergyZero or ENTSO-E | one pair of segments per hour of today, the current hour breathing |
+| `price` | Energy-Charts | five bands cheap to pricey, the needle at the current quarter-hour, badge the verdict |
 | `carbon` | Electricity Maps | ring and colour follow gCO2eq/kWh |
 | `renewable` | Electricity Maps | outer ring the renewable share, inner ring the fossil-free share, badge alternating |
 | `gh-activity` | GitHub | today's contributions against the month's best outside, the last 7 days inside, badge today's count |
@@ -141,13 +141,9 @@ The grid roles (`power-mix`, `carbon`, `renewable`) use [Electricity Maps](https
 > [!NOTE]
 > Without a token the grid roles show a key icon instead of a value: they are configured but have nothing to poll with.
 
-The `price` role is separate and has its own `price source`, cycled with `⏎`:
+The `price` role is separate and needs no token: day-ahead prices come from [Energy-Charts](https://www.energy-charts.info) by Fraunhofer ISE, at quarter-hour resolution for 40-odd European bidding zones. It is on by default; `price zone` is the Energy-Charts bidding zone (`NL`, `BE`, `DE-LU`, `DK1`, `NO1`, `SE3`, ...) and may stay empty when the electricity zone maps to one, which it does for the countries and zones Electricity Maps and Energy-Charts share. With neither, prices stay off and the log says so. `price vat %` (21 by default) is added to the raw exchange price; energy tax and supplier markup are not included by any feed.
 
-- `energyzero` — the default, no token, but Dutch prices only.
-- `entsoe` — the European transparency platform; ask for a free API token by mail and fill in `entsoe token` plus `entsoe zone (EIC)`, the EIC code of your bidding zone (for example `10YNL----------L` for the Netherlands). Left empty, the zone is derived from the electricity zone when that country is known; without a token or a zone, prices stay off and the log says so.
-- `none` — no price polling; the `price` role then shows no data.
-
-`price incl. VAT` asks EnergyZero for prices with VAT and levies included; ENTSO-E always reports the raw exchange price. The price ring is bucketed into the Pi's own local hours, the same clock that marks the current hour, so set the system time zone once: `sudo timedatectl set-timezone Europe/Amsterdam`. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
+The gauge shows the current quarter-hour's price in €/kWh and where it sits against the mean of today and the two days before: below 60 % of it is `V.CHEAP`, below 90 % `CHEAP`, up to 115 % `NORMAL`, up to 140 % `PRICEY`, above that `V.PRICEY`. The needle swings to each new slot, so set the Pi's time zone once: `sudo timedatectl set-timezone Europe/Amsterdam`. Energy-Charts rate-limits bursts, so `price poll secs` is never below 900. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
 
 The mix colours and the source icons are the ones from the Electricity Maps web app, under their own licence; see [Licence](#licence).
 
@@ -160,7 +156,7 @@ The mix colours and the source icons are the ones from the Electricity Maps web 
 - **Sun and moon** are computed on the Pi from the location and the clock, nothing to configure.
 - **ISS** fetches the station's orbital elements from [Celestrak](https://celestrak.org) once a day and predicts the next pass above `iss min elevation °` (10 by default); turn on `iss enabled`. A pass is marked visible when the sky is dark and the station is still sunlit, and a visible pass sweeps the whole rack violet when it starts.
 
-The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienradar covers NL and BE and stamps its slots in `Europe/Amsterdam`, so the ring lines up with "now" on a Pi left on UTC as well. The sun dial and the price ring do use the Pi's own zone, so still set it once with `sudo timedatectl set-timezone Europe/Amsterdam`.
+The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienradar covers NL and BE and stamps its slots in `Europe/Amsterdam`, so the ring lines up with "now" on a Pi left on UTC as well. The sun dial and the price gauge do use the Pi's own zone, so still set it once with `sudo timedatectl set-timezone Europe/Amsterdam`.
 
 ## GitHub role
 
@@ -212,11 +208,10 @@ electricity:
   poll_secs: 300
 
 price:
-  source: energyzero       # energyzero (NL, no token) | entsoe (EU, token) | none
-  entsoe_token: ""
-  entsoe_zone: ""          # EIC code, e.g. 10YNL----------L; derived from zone when empty
-  include_vat: true
-  poll_secs: 900
+  enabled: true            # Energy-Charts day-ahead prices, no key
+  zone: ""                 # Energy-Charts bidding zone, e.g. NL, DE-LU, DK1; derived from electricity.zone when empty
+  vat_pct: 21              # added to the raw exchange price
+  poll_secs: 900           # minimum 900; Energy-Charts rate-limits bursts
 
 location:
   lat: null                # decimal degrees; needed by weather, wind, aqi, rain, sun, moon and iss
@@ -317,7 +312,7 @@ The design notes are in [`docs/superpowers/specs/2026-09-05-rackscreen-design.md
 
 Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`. Font: JetBrains Mono (OFL), `assets/fonts/OFL.txt`.
 
-The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps and day-ahead prices from EnergyZero or ENTSO-E belong to those services and are subject to their own terms.
+The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps belongs to that service and is subject to its terms. Day-ahead prices come from [Energy-Charts](https://www.energy-charts.info) by Fraunhofer ISE under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 <p align="center">
   <a href="https://github.com/silkepilon/RackScreen">GitHub</a> &nbsp;·&nbsp;

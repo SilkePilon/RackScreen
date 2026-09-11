@@ -36,11 +36,10 @@ electricity:
   poll_secs: 300
 
 price:
-  source: energyzero       # energyzero (NL, no token) | entsoe (EU, token) | none
-  entsoe_token: ""
-  entsoe_zone: ""          # EIC code, e.g. 10YNL----------L; derived from zone when empty
-  include_vat: true
-  poll_secs: 900
+  enabled: true            # Energy-Charts day-ahead prices, no key
+  zone: ""                 # Energy-Charts bidding zone, e.g. NL, DE-LU, DK1; derived from electricity.zone when empty
+  vat_pct: 21              # added to the raw exchange price
+  poll_secs: 900           # minimum 900; Energy-Charts rate-limits bursts
 
 location:
   lat: null                # decimal degrees; needed by weather, wind, aqi, rain, sun, moon and iss
