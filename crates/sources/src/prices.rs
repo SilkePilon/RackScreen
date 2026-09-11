@@ -103,7 +103,9 @@ pub fn mean_over_days<Z: TimeZone>(
     }
 }
 
-/// One request for the local days `first..=last`, inclusive.
+/// One request for the days `first..=last`, inclusive. Energy-Charts reads
+/// both bounds in the bidding zone's time zone, not the Pi's, so callers ask
+/// for a day more than they need.
 async fn fetch_days(
     cfg: &PriceConfig,
     first: NaiveDate,
@@ -136,7 +138,11 @@ pub async fn run_prices(cfg: PriceConfig, ctx: SourceCtx) {
         let today = Utc::now().with_timezone(&cfg.tz).date_naive();
         let first = today - chrono::Duration::days(2);
         let days = [first, first + chrono::Duration::days(1), today];
-        match fetch_days(&cfg, first, today).await {
+        // ask through tomorrow: Energy-Charts reads start/end in the bidding
+        // zone's own time zone, so a Pi west of the zone (Amsterdam polling FI)
+        // would otherwise never receive its own late evening. The mean stays on
+        // the three `days` and `slots_for_day(today)` drops the rest.
+        match fetch_days(&cfg, first, today + chrono::Duration::days(1)).await {
             Ok(samples) => {
                 failures = 0;
                 let eur = slots_for_day(&samples, today, &cfg.tz, cfg.vat_pct);
@@ -246,6 +252,29 @@ mod tests {
         assert!(mean_over_days(&pts, &[other], &chrono_tz::Europe::Amsterdam, 0.0).is_nan());
         assert!((eur_per_kwh(100.0, 0.0) - 0.1).abs() < 1e-7);
         assert!((eur_per_kwh(100.0, 21.0) - 0.121).abs() < 1e-7);
+    }
+
+    #[test]
+    fn slots_follow_the_pi_zone_not_the_bidding_zone() {
+        // the fixture is NL (+02:00): the day a Pi in another zone calls
+        // 2026-09-11 reaches into the neighbouring NL days, which is why the
+        // request runs through tomorrow.
+        let pts = parse_energy_charts(EC).unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 9, 11).unwrap();
+        // Helsinki is an hour ahead: its 23:00-23:45 is 22:00-22:45 in NL
+        let eet = slots_for_day(&pts, day, &chrono_tz::Europe::Helsinki, 21.0);
+        assert!(
+            eet[92..96].iter().all(|v| v.is_finite()),
+            "the Helsinki evening: {:?}",
+            &eet[92..96]
+        );
+        // the Azores are two hours behind: their 00:00-00:45 is 02:00-02:45 in NL
+        let azo = slots_for_day(&pts, day, &chrono_tz::Atlantic::Azores, 21.0);
+        assert!(
+            azo[0..4].iter().all(|v| v.is_finite()),
+            "the Azorean small hours: {:?}",
+            &azo[0..4]
+        );
     }
 
     #[test]

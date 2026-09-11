@@ -624,7 +624,7 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         Field::ElecToken => cfg.electricity.token = text.into(),
         Field::ElecPoll => cfg.electricity.poll_secs = num::<u64>(t, "poll secs")?.max(60),
         Field::PriceEnabled => cfg.price.enabled = t == "true",
-        Field::PriceZone => cfg.price.zone = t.to_ascii_uppercase(),
+        Field::PriceZone => cfg.price.zone = t.to_string(),
         Field::PriceVat => {
             let v: f32 = num(t, "vat %")?;
             if !(0.0..=100.0).contains(&v) {
@@ -1217,8 +1217,11 @@ mod tests {
         assert_eq!(c.electricity.poll_secs, 60, "poll secs are floored at 60");
         set(&mut c, Field::PriceEnabled, "false").unwrap();
         assert!(!c.price.enabled);
-        set(&mut c, Field::PriceZone, " dk1 ").unwrap();
-        assert_eq!(c.price.zone, "DK1", "trimmed and upper-cased");
+        set(&mut c, Field::PriceZone, " IT-North ").unwrap();
+        assert_eq!(
+            c.price.zone, "IT-North",
+            "trimmed, case kept: Energy-Charts zones are case-sensitive"
+        );
         set(&mut c, Field::PriceVat, "0").unwrap();
         assert_eq!(c.price.vat_pct, 0.0);
         assert!(set(&mut c, Field::PriceVat, "150")

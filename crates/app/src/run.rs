@@ -303,7 +303,7 @@ fn price_zone(cfg: &Config) -> Option<String> {
     }
     let zone = cfg.price.zone.trim();
     if !zone.is_empty() {
-        return Some(zone.to_ascii_uppercase());
+        return Some(zone.to_string());
     }
     match rackscreen_core::electricity::energy_charts_zone_for(&cfg.electricity.zone) {
         Some(z) => Some(z.to_string()),
@@ -401,4 +401,36 @@ async fn sigterm() {
         }
     }
     std::future::pending::<()>().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn price_zone_prefers_the_explicit_zone_and_keeps_its_case() {
+        let mut cfg = Config::default();
+        cfg.electricity.zone = "NL".into();
+        assert_eq!(
+            price_zone(&cfg).as_deref(),
+            Some("NL"),
+            "derived from the electricity zone"
+        );
+        cfg.price.zone = " IT-North ".into();
+        assert_eq!(
+            price_zone(&cfg).as_deref(),
+            Some("IT-North"),
+            "explicit zone, trimmed, case kept"
+        );
+        cfg.price.zone.clear();
+        cfg.electricity.zone = "XX".into();
+        assert_eq!(
+            price_zone(&cfg),
+            None,
+            "unknown electricity zone and no price zone"
+        );
+        cfg.price.enabled = false;
+        cfg.price.zone = "NL".into();
+        assert_eq!(price_zone(&cfg), None, "off is off");
+    }
 }

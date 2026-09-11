@@ -186,7 +186,7 @@ rectangle. Nothing else changes in `rackscreen-render`.
 `entsoe zone`) and `price incl. VAT` with:
 
 - `price enabled` (toggle, Enter flips it)
-- `price zone` (text, upper-cased, empty allowed; hint: "Energy-Charts bidding zone, empty derives from the electricity zone")
+- `price zone` (text, trimmed, case kept because Energy-Charts zone names are case-sensitive, empty allowed; hint: "Energy-Charts bidding zone, empty derives from the electricity zone")
 - `price vat %` (number, 0 to 100)
 
 `price poll secs` keeps its field, minimum 900.
