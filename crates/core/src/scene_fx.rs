@@ -530,13 +530,21 @@ mod tests {
         m.apply(
             Event::Prices {
                 date: "2026-09-07".into(),
-                ct_per_kwh: vec![10.0; 24],
+                eur_per_kwh: vec![0.10; 96],
+                avg_eur_per_kwh: 0.10,
                 currency: "EUR".into(),
             },
             0.0,
         );
         m.apply(link(LinkTarget::Prices, true), 0.0);
-        assert!(has_icon(&m.scene_for_role(Role::Price, 1.0), "euro"));
+        let live = m.scene_for_role(Role::Price, 1.0);
+        assert!(!has_icon(&live, "cloud-off"));
+        assert!(
+            live.items
+                .iter()
+                .any(|d| matches!(d, Drawable::Text { text, .. } if text == "€/kWh")),
+            "the gauge is up"
+        );
         m.apply(link(LinkTarget::Prices, false), 2.0);
         assert!(has_icon(&m.scene_for_role(Role::Price, 2.0), "cloud-off"));
     }

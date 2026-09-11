@@ -453,7 +453,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
         Role::Thermal => crate::scene_thermal::thermal_scene(model, now),
         Role::Storage => crate::scene_storage::storage_scene(model, now),
         Role::PowerMix => crate::scene_electricity::power_mix_scene(model, now),
-        Role::Price => crate::scene_electricity::price_scene(model, now, model.local_hour()),
+        Role::Price => crate::scene_electricity::price_scene(model, now),
         Role::Carbon => crate::scene_electricity::carbon_scene(model, now),
         Role::Renewable => crate::scene_electricity::renewable_scene(model, now),
         Role::Ups => crate::scene_ups::ups_scene(model, now),

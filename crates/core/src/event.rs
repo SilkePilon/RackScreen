@@ -178,10 +178,13 @@ pub enum Event {
         carbon_gco2: f32,
         updated_at: String,
     },
-    /// Day-ahead prices, one entry per local hour starting at 00:00.
+    /// Day-ahead prices, one entry per local quarter-hour of `date` starting
+    /// at 00:00 (NaN where unknown), plus the mean over that day and the two
+    /// before it.
     Prices {
         date: String,
-        ct_per_kwh: Vec<f32>,
+        eur_per_kwh: Vec<f32>,
+        avg_eur_per_kwh: f32,
         currency: String,
     },
     /// Current conditions from Open-Meteo.

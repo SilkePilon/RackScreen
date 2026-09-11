@@ -49,10 +49,10 @@ const SOLAR_PEAK: f32 = 9200.0;
 /// Ticks in the compressed demo "day" the solar curve runs through.
 const SOLAR_CYCLE: u64 = 240;
 
-/// Day-ahead price curve in ct/kWh: the EnergyZero fixture values times 100.
+/// Day-ahead price curve in €/kWh per hour; `prices()` interpolates it to quarter-hours.
 const PRICE_CURVE: [f32; 24] = [
-    22.0, 19.0, 17.0, 16.0, 15.0, 15.0, 17.0, 21.0, 24.0, 22.0, 18.0, 13.0, 9.0, 7.0, 6.0, 8.0,
-    12.0, 19.0, 26.0, 29.0, 27.0, 24.0, 22.0, 21.0,
+    0.22, 0.19, 0.17, 0.16, 0.15, 0.15, 0.17, 0.21, 0.24, 0.22, 0.18, 0.13, 0.09, 0.07, 0.06, 0.08,
+    0.12, 0.19, 0.26, 0.29, 0.27, 0.24, 0.22, 0.21,
 ];
 const PRICE_DATE: &str = "2026-09-06";
 
@@ -359,11 +359,20 @@ impl FakeState {
     }
 
     fn prices(&self) -> Event {
-        let mut ct = PRICE_CURVE.to_vec();
-        ct.rotate_left(self.price_rot % PRICE_CURVE.len());
+        let mut hourly = PRICE_CURVE.to_vec();
+        hourly.rotate_left(self.price_rot % PRICE_CURVE.len());
+        let eur = (0..96)
+            .map(|i| {
+                let h = i / 4;
+                let a = hourly[h];
+                let b = hourly[(h + 1) % 24];
+                a + (b - a) * (i % 4) as f32 / 4.0
+            })
+            .collect();
         Event::Prices {
             date: PRICE_DATE.into(),
-            ct_per_kwh: ct,
+            eur_per_kwh: eur,
+            avg_eur_per_kwh: PRICE_CURVE.iter().sum::<f32>() / PRICE_CURVE.len() as f32,
             currency: "EUR".into(),
         }
     }
@@ -1010,8 +1019,8 @@ mod tests {
         )));
         assert!(evs.iter().any(|e| matches!(
             e,
-            Event::Prices { ct_per_kwh, currency, .. }
-                if ct_per_kwh.len() == 24 && ct_per_kwh[0] == 22.0 && currency == "EUR"
+            Event::Prices { eur_per_kwh, avg_eur_per_kwh, currency, .. }
+                if eur_per_kwh.len() == 96 && eur_per_kwh[0] == 0.22 && *avg_eur_per_kwh > 0.17 && *avg_eur_per_kwh < 0.19 && currency == "EUR"
         )));
     }
 
@@ -1027,11 +1036,15 @@ mod tests {
         let rotated = rest
             .iter()
             .find_map(|e| match e {
-                Event::Prices { ct_per_kwh, .. } => Some(ct_per_kwh.clone()),
+                Event::Prices { eur_per_kwh, .. } => Some(eur_per_kwh.clone()),
                 _ => None,
             })
             .expect("prices at tick 60");
-        assert_eq!(rotated[0], 19.0, "curve rotated by one hour");
+        assert_eq!(rotated[0], 0.19, "curve rotated by one hour");
+        assert!(
+            (rotated[2] - 0.18).abs() < 1e-6,
+            "quarter-hours interpolate toward the next hour"
+        );
     }
 
     #[test]

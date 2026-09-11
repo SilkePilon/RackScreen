@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
-use crate::electricity::{partition, Section, Source};
+use crate::electricity::{partition, price_level, Section, Source};
 use crate::event::{App, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
 use crate::fx::Fx;
 use crate::scene_rain::{current_slots, first_wet_minutes, SOON_MINUTES, WET_MM};
@@ -66,11 +66,13 @@ pub struct ElectricityState {
     pub have: bool,
 }
 
-/// Day-ahead prices, one entry per local hour starting at 00:00.
+/// Day-ahead prices, one entry per local quarter-hour starting at 00:00.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PriceState {
     pub date: String,
-    pub ct: Vec<f32>,
+    pub eur: Vec<f32>,
+    /// Mean €/kWh over today and the two days before; the level's reference.
+    pub avg: f32,
     pub currency: String,
     pub have: bool,
 }
@@ -330,8 +332,10 @@ pub struct Model {
     /// An Electricity Maps token is configured; without one the electricity
     /// roles show a key instead of the offline cloud.
     token_present: bool,
-    /// Local wall-clock hour, set by the render loop.
-    local_hour: u32,
+    /// The local quarter-hour (0..=95) the price gauge reads as "now".
+    local_slot: u32,
+    /// Needle position on the price gauge, eased between slots.
+    price_needle: Smooth,
     /// Unix seconds, set by the render loop every frame; the sun dial, rain
     /// ring and ISS countdown are clock-based.
     unix_now: i64,
@@ -417,7 +421,8 @@ impl Model {
             mix_leader: None,
             mix_sections: Vec::new(),
             token_present: false,
-            local_hour: 12,
+            local_slot: 48,
+            price_needle: Smooth::new(0.5, SMOOTH_SECS),
             unix_now: 0,
             utc_offset_secs: 0,
             location_present: false,
@@ -567,12 +572,35 @@ impl Model {
     pub fn token_present(&self) -> bool {
         self.token_present
     }
-    /// The local wall-clock hour (0..=23) the price ring marks as "now".
-    pub fn set_local_hour(&mut self, h: u32) {
-        self.local_hour = h.min(23);
+    /// The local quarter-hour (0..=95) the price gauge reads as "now".
+    pub fn set_local_slot(&mut self, s: u32) {
+        self.local_slot = s.min(95);
     }
-    pub fn local_hour(&self) -> u32 {
-        self.local_hour
+    pub fn local_slot(&self) -> u32 {
+        self.local_slot
+    }
+    /// The price of the current quarter-hour, when it is known.
+    pub fn current_price(&self) -> Option<f32> {
+        if !self.prices.have {
+            return None;
+        }
+        self.prices
+            .eur
+            .get(self.local_slot as usize)
+            .copied()
+            .filter(|v| v.is_finite())
+    }
+    /// The eased needle position of the price gauge, `0..=1`.
+    pub fn smooth_price_needle(&self, now: Secs) -> f32 {
+        self.price_needle.value(now)
+    }
+    /// Point the needle at the current slot's level; a slot with no price
+    /// leaves it where it is.
+    fn retarget_price_needle(&mut self, now: Secs) {
+        if let Some(p) = self.current_price() {
+            let (_, t) = price_level(p, self.prices.avg);
+            self.price_needle.set(t, now);
+        }
     }
     pub fn set_unix_now(&mut self, secs: i64) {
         self.unix_now = secs;
@@ -671,6 +699,7 @@ impl Model {
     /// Drain animation requests into the queues and advance them, then advance
     /// each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
+        self.retarget_price_needle(now);
         // sources that left the mix ease to zero, then stop costing anything
         self.shares
             .retain(|_, sm| sm.target() > 0.0 || sm.value(now) >= SHARE_EPS);
@@ -1036,15 +1065,18 @@ impl Model {
             }
             Event::Prices {
                 date,
-                ct_per_kwh,
+                eur_per_kwh,
+                avg_eur_per_kwh,
                 currency,
             } => {
                 self.prices = PriceState {
                     date,
-                    ct: ct_per_kwh,
+                    eur: eur_per_kwh,
+                    avg: avg_eur_per_kwh,
                     currency,
                     have: true,
                 };
+                self.retarget_price_needle(now);
             }
             Event::Ups {
                 on_battery,
@@ -1690,22 +1722,32 @@ mod tests {
         let mut m = Model::new(Thresholds::default());
         assert!(!m.prices().have);
         assert_eq!(
-            m.local_hour(),
-            12,
+            m.local_slot(),
+            48,
             "noon until the render loop says otherwise"
         );
+        assert_eq!(m.current_price(), None);
+        let mut eur = vec![f32::NAN; 96];
+        eur[48] = 0.221;
+        eur[49] = 0.100;
         m.apply(
             Event::Prices {
                 date: "2026-09-07".into(),
-                ct_per_kwh: vec![10.0, 12.5, 22.1],
+                eur_per_kwh: eur,
+                avg_eur_per_kwh: 0.20,
                 currency: "EUR".into(),
             },
             0.0,
         );
         assert!(m.prices().have);
-        assert_eq!(m.prices().ct.len(), 3);
+        assert_eq!(m.prices().eur.len(), 96);
+        assert_eq!(m.prices().avg, 0.20);
         assert_eq!(m.prices().currency, "EUR");
         assert_eq!(m.prices().date, "2026-09-07");
+        assert_eq!(m.current_price(), Some(0.221));
+        // the needle eased straight to the slot's level (ratio 1.105: NORMAL,
+        // 0.82 of the 0.25-wide band, t = (2 + 0.82) / 5)
+        assert!((m.smooth_price_needle(5.0) - 0.564).abs() < 1e-3);
         m.apply(
             Event::Link {
                 target: LinkTarget::Electricity,
@@ -1724,10 +1766,16 @@ mod tests {
         assert!(!m.token_present());
         m.set_token_present(true);
         assert!(m.token_present());
-        m.set_local_hour(14);
-        assert_eq!(m.local_hour(), 14);
-        m.set_local_hour(99);
-        assert_eq!(m.local_hour(), 23, "clamped into the day");
+        // the next slot retargets the needle on tick, and it eases rather than jumps
+        m.set_local_slot(49);
+        assert_eq!(m.current_price(), Some(0.100));
+        m.tick(5.0);
+        let mid = m.smooth_price_needle(5.2);
+        assert!(mid < 0.564 && mid > 0.0, "easing down: {mid}");
+        // ratio 0.5: V.CHEAP, 0.2 of the 0.3-wide band, t = 0.667 / 5
+        assert!((m.smooth_price_needle(6.0) - 0.1333).abs() < 1e-3);
+        m.set_local_slot(99);
+        assert_eq!(m.local_slot(), 95, "clamped into the day");
     }
 
     #[test]

@@ -83,12 +83,11 @@ pub fn darken(px: &mut Pixmap, k: f32) {
     }
 }
 
-/// Local wall clock as `(hour, minutes since midnight, unix seconds, seconds east of UTC)`;
+/// Local wall clock as `(minutes since midnight, unix seconds, seconds east of UTC)`;
 /// one clock read per tick.
-fn clock() -> (u32, u32, i64, i32) {
+fn clock() -> (u32, i64, i32) {
     let t = chrono::Local::now();
     (
-        t.hour(),
         t.hour() * 60 + t.minute(),
         t.timestamp(),
         t.offset().local_minus_utc(),
@@ -175,8 +174,8 @@ impl RenderLoop {
             while let Ok(ev) = self.rx.try_recv() {
                 model.apply(ev, now);
             }
-            let (hour, minutes, unix, offset) = clock();
-            model.set_local_hour(hour);
+            let (minutes, unix, offset) = clock();
+            model.set_local_slot(minutes / 15);
             model.set_unix_now(unix);
             model.set_utc_offset_secs(offset);
             model.tick(now);

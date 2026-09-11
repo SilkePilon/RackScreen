@@ -40,8 +40,8 @@ const SEED: u64 = 7;
 const WARMUP: Secs = 100.5;
 /// The shortest dwell the model accepts; anything less is clamped to it.
 const CYCLE: Secs = 3.0;
-/// Local hour the price ring marks as "now".
-const HOUR: u32 = 14;
+/// Local quarter-hour the price gauge reads as "now": 14:00.
+const SLOT: u32 = 56;
 /// Every role, each dwelling `CYCLE` and then irising for half a second: one
 /// whole round of the cycling screen, so its GIF loops seamlessly.
 const ALL_SECS: Secs = Role::ALL.len() as Secs * (CYCLE + TRANSITION_SECS);
@@ -174,7 +174,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     model.set_one_at_a_time(false);
     // An Electricity Maps token is configured, so the grid roles show data.
     model.set_token_present(true);
-    model.set_local_hour(HOUR);
+    model.set_local_slot(SLOT);
     model.set_location_present(true);
     model.set_github_token_present(true);
     model.set_utc_offset_secs(UTC_OFFSET);

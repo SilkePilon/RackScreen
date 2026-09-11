@@ -218,11 +218,12 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
     } else if cfg.electricity.enabled {
         tracing::warn!("electricity enabled but no token set; electricity screens stay on no-data");
     }
-    if let Some(source) = price_source(cfg) {
+    if let Some(zone) = price_zone(cfg) {
         let pcfg = rackscreen_sources::prices::PriceConfig {
-            source,
+            zone,
+            vat_pct: cfg.price.vat_pct,
             poll_secs: cfg.price.poll_secs,
-            // the system local zone, the same clock the current-hour marker uses
+            // the system local zone, the same clock the current slot uses
             tz: chrono::Local,
         };
         runtime.spawn(rackscreen_sources::prices::run_prices(pcfg, ctx.clone()));
@@ -293,34 +294,26 @@ fn spawn_github(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx
     ));
 }
 
-/// `None` when prices are off, or when ENTSO-E is picked without a token or a
-/// resolvable bidding zone (warns in that case).
-fn price_source(cfg: &Config) -> Option<rackscreen_sources::prices::PriceSource> {
-    match cfg.price.source.as_str() {
-        "energyzero" => Some(rackscreen_sources::prices::PriceSource::EnergyZero {
-            include_vat: cfg.price.include_vat,
-        }),
-        "entsoe" => {
-            let zone = if cfg.price.entsoe_zone.is_empty() {
-                rackscreen_sources::prices::entsoe_zone_for(&cfg.electricity.zone)
-                    .map(str::to_string)
-            } else {
-                Some(cfg.price.entsoe_zone.clone())
-            };
-            match (zone, cfg.price.entsoe_token.is_empty()) {
-                (Some(zone), false) => Some(rackscreen_sources::prices::PriceSource::Entsoe {
-                    token: cfg.price.entsoe_token.clone(),
-                    zone,
-                }),
-                _ => {
-                    tracing::warn!(
-                        "price source entsoe needs entsoe_token and a known zone; prices disabled"
-                    );
-                    None
-                }
-            }
+/// The Energy-Charts bidding zone to poll: `price.zone` when set, else the one
+/// `electricity.zone` maps to. `None` when prices are off, or (with a warning)
+/// when neither gives a zone.
+fn price_zone(cfg: &Config) -> Option<String> {
+    if !cfg.price.enabled {
+        return None;
+    }
+    let zone = cfg.price.zone.trim();
+    if !zone.is_empty() {
+        return Some(zone.to_ascii_uppercase());
+    }
+    match rackscreen_core::electricity::energy_charts_zone_for(&cfg.electricity.zone) {
+        Some(z) => Some(z.to_string()),
+        None => {
+            tracing::warn!(
+                "price zone unknown for electricity zone {}; set price.zone",
+                cfg.electricity.zone
+            );
+            None
         }
-        _ => None,
     }
 }
 

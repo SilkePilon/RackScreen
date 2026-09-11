@@ -1,11 +1,13 @@
 //! Electricity roles: power mix, price, carbon intensity, renewable / carbon-free.
 
 use crate::anim::{breathe, Secs};
-use crate::electricity::{partition, MIX_ICON_MIN_SEGS};
+use crate::electricity::{partition, price_level, PriceLevel, MIX_ICON_MIN_SEGS};
 use crate::model::Model;
-use crate::scene::{badge, icon_at, ring, ring_states, seg_count, Drawable, Scene, SegState};
+use crate::scene::{
+    badge, badge_w, icon_at, ring, ring_states, seg_count, Drawable, Scene, SegState,
+};
 use crate::theme::layout::*;
-use crate::theme::{carbon_color, price_color, Color, BLUE, GREEN, GREY, OFF, WHITE};
+use crate::theme::{carbon_color, Color, BLUE, GREEN, GREY, OFF, WHITE};
 
 const MIX_ICON_R: f32 = 60.0;
 const MIX_ICON_SIZE: f32 = 26.0;
@@ -69,73 +71,101 @@ pub fn power_mix_scene(model: &Model, now: Secs) -> Scene {
     s
 }
 
-/// Two segments per hour of the day.
-pub const PRICE_SEGS: usize = 48;
+/// The level gauge: 45 segments at 6°, five bands of nine, from 7:30 to 4:30 o'clock.
+pub const GAUGE_SEGS: usize = 45;
+pub const GAUGE_START_DEG: f32 = 225.0;
+pub const GAUGE_PITCH_DEG: f32 = 6.0;
+const SEGS_PER_BAND: usize = GAUGE_SEGS / 5;
+/// Angle the needle sweeps from `t = 0` (segment 0) to `t = 1` (the last segment).
+const GAUGE_SWEEP_DEG: f32 = (GAUGE_SEGS - 1) as f32 * GAUGE_PITCH_DEG;
+const NEEDLE_R0: f32 = 88.0;
+const NEEDLE_R1: f32 = 116.0;
+const NEEDLE_W: f32 = 4.0;
+const DIM_BAND_ALPHA: f32 = 0.45;
+const PRICE_TEXT_CY: f32 = 100.0;
+const PRICE_TEXT_PX: f32 = 40.0;
+const PRICE_CAPTION_CY: f32 = 130.0;
+const PRICE_CAPTION_PX: f32 = 11.0;
+const LEVEL_BADGE_W: f32 = 84.0;
+const LEVEL_BADGE_PX: f32 = 13.0;
 
-fn price_badge_text(ct: f32) -> String {
-    if ct >= 100.0 {
-        format!("{:.2} €", ct / 100.0)
-    } else {
-        format!("{ct:.1} ct")
-    }
+/// Angle of the needle for position `t`.
+pub fn needle_angle(t: f32) -> f32 {
+    GAUGE_START_DEG + GAUGE_SWEEP_DEG * t.clamp(0.0, 1.0)
 }
 
-pub fn price_scene(model: &Model, now: Secs, local_hour: u32) -> Scene {
+pub fn price_scene(model: &Model, now: Secs) -> Scene {
     let p = model.prices();
-    let valid: Vec<f32> = p.ct.iter().copied().filter(|v| v.is_finite()).collect();
-    let (min, max) = valid
-        .iter()
-        .fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
-    let span = (max - min).max(0.01);
-    let mut states = vec![SegState::Off; PRICE_SEGS];
-    for h in 0..24usize {
-        let Some(v) = p.ct.get(h).copied().filter(|v| v.is_finite()) else {
+    let cur = model.current_price();
+    let level = cur.map(|v| price_level(v, p.avg).0);
+    let t = model.smooth_price_needle(now);
+    let needle_seg = ((t * (GAUGE_SEGS - 1) as f32).round() as usize).min(GAUGE_SEGS - 1);
+    let mut states = Vec::with_capacity(GAUGE_SEGS);
+    for i in 0..GAUGE_SEGS {
+        let band = i / SEGS_PER_BAND;
+        let gap = band < 4 && i % SEGS_PER_BAND == SEGS_PER_BAND - 1;
+        if gap {
+            states.push(SegState::Off);
             continue;
+        }
+        let color = PriceLevel::ALL[band].color();
+        let alpha = match level {
+            Some(lvl) if lvl.index() == band && i == needle_seg => breathe(now, 2.4),
+            Some(lvl) if lvl.index() == band => 1.0,
+            _ => DIM_BAND_ALPHA,
         };
-        let color = if v < 0.0 {
-            BLUE
-        } else {
-            price_color((v - min) / span)
-        };
-        let alpha = if (h as u32) < local_hour {
-            0.35
-        } else if h as u32 == local_hour {
-            breathe(now, 2.4)
-        } else {
-            1.0
-        };
-        states[h * 2] = SegState::On(color, alpha);
-        states[h * 2 + 1] = SegState::On(color, alpha);
+        states.push(SegState::On(color, alpha));
     }
     let mut s = Scene::new();
     s.push(Drawable::Ring {
         cx: CX,
         cy: CY,
         radius: RING_R,
-        n: PRICE_SEGS,
+        n: GAUGE_SEGS,
         states,
-        pitch_deg: 360.0 / PRICE_SEGS as f32,
-        start_deg: 0.0,
+        pitch_deg: GAUGE_PITCH_DEG,
+        start_deg: GAUGE_START_DEG,
     });
-    s.push(icon_at("euro", ICON_CY, ICON_SIZE, WHITE, 1.0));
-    let cur =
-        p.ct.get(local_hour as usize)
-            .copied()
-            .filter(|v| v.is_finite());
-    let stroke = match cur {
-        Some(v) if v < 0.0 => BLUE,
-        Some(v) => price_color((v - min) / span),
-        None => GREY,
+    if level.is_some() {
+        s.push(Drawable::Tick {
+            cx: CX,
+            cy: CY,
+            angle_deg: needle_angle(t),
+            r0: NEEDLE_R0,
+            r1: NEEDLE_R1,
+            width: NEEDLE_W,
+            color: WHITE,
+            alpha: 1.0,
+        });
+    }
+    let (text, color) = match cur {
+        Some(v) if v < 0.0 => (format!("{v:.3}"), BLUE),
+        Some(v) => (format!("{v:.3}"), WHITE),
+        None => ("--".to_string(), GREY),
     };
-    let window_odd = ((now / 5.0).floor() as i64).rem_euclid(2) == 1;
-    let text = if window_odd && !valid.is_empty() {
-        format!("min {min:.1}")
-    } else {
-        cur.map(price_badge_text).unwrap_or_else(|| "--".into())
+    s.push(Drawable::Text {
+        cx: CX,
+        cy: PRICE_TEXT_CY,
+        text,
+        px: PRICE_TEXT_PX,
+        color,
+        alpha: 1.0,
+    });
+    s.push(Drawable::Text {
+        cx: CX,
+        cy: PRICE_CAPTION_CY,
+        text: "€/kWh".to_string(),
+        px: PRICE_CAPTION_PX,
+        color: GREY,
+        alpha: 1.0,
+    });
+    let (word, stroke) = match level {
+        Some(lvl) => (lvl.word().to_string(), lvl.color()),
+        None => ("no data".to_string(), GREY),
     };
-    let mut b = badge(BADGE_CY, stroke, text);
-    if let Drawable::Badge { alpha, .. } = &mut b {
-        *alpha = (((now - (now / 5.0).floor() * 5.0) / 0.25) as f32).min(1.0);
+    let mut b = badge_w(BADGE_CY, stroke, word, LEVEL_BADGE_W);
+    if let Drawable::Badge { text_px, .. } = &mut b {
+        *text_px = LEVEL_BADGE_PX;
     }
     s.push(b);
     s
@@ -209,17 +239,50 @@ mod tests {
         m
     }
 
-    fn price_model(ct: Vec<f32>) -> Model {
+    /// A model at slot 56 (14:00) with a flat day at 0.15 €/kWh except slot
+    /// 56, and a three-day average of 0.20.
+    fn price_model(at_now: f32) -> Model {
         let mut m = Model::new(Thresholds::default());
+        m.set_local_slot(56);
+        let mut eur = vec![0.15f32; 96];
+        eur[56] = at_now;
         m.apply(
             Event::Prices {
                 date: "2026-09-07".into(),
-                ct_per_kwh: ct,
+                eur_per_kwh: eur,
+                avg_eur_per_kwh: 0.20,
                 currency: "EUR".into(),
             },
             0.0,
         );
         m
+    }
+
+    fn gauge_states(s: &Scene) -> Vec<SegState> {
+        s.items
+            .iter()
+            .find_map(|d| match d {
+                Drawable::Ring { states, .. } => Some(states.clone()),
+                _ => None,
+            })
+            .expect("ring")
+    }
+
+    fn needle(s: &Scene) -> Option<f32> {
+        s.items.iter().find_map(|d| match d {
+            Drawable::Tick { angle_deg, .. } => Some(*angle_deg),
+            _ => None,
+        })
+    }
+
+    fn texts(s: &Scene) -> Vec<(String, Color)> {
+        s.items
+            .iter()
+            .filter_map(|d| match d {
+                Drawable::Text { text, color, .. } => Some((text.clone(), *color)),
+                _ => None,
+            })
+            .collect()
     }
 
     fn badge_text(s: &Scene) -> String {
@@ -349,110 +412,111 @@ mod tests {
         assert!(icons(&s).is_empty());
     }
 
-    fn day() -> Vec<f32> {
-        let mut ct = vec![0.0f32; 24];
-        for (h, v) in ct.iter_mut().enumerate() {
-            *v = 6.2 + h as f32;
+    #[test]
+    fn price_gauge_has_five_bands_with_gaps_and_lights_the_needle_band() {
+        // 0.221 / 0.20 = 1.105: NORMAL, band 2
+        let m = price_model(0.221);
+        let s = price_scene(&m, 5.0);
+        let states = gauge_states(&s);
+        assert_eq!(states.len(), GAUGE_SEGS);
+        for band in 0..4 {
+            assert_eq!(states[band * 9 + 8], SegState::Off, "gap after band {band}");
         }
-        ct[14] = 22.1;
-        ct
-    }
-
-    #[test]
-    fn price_ring_has_two_segments_per_hour_and_dims_the_past() {
-        let m = price_model(day());
-        let s = price_scene(&m, 2.5, 14);
-        let (n, states) = s
-            .items
-            .iter()
-            .find_map(|d| match d {
-                Drawable::Ring { n, states, .. } => Some((*n, states.clone())),
-                _ => None,
-            })
-            .expect("ring");
-        assert_eq!(n, PRICE_SEGS);
-        assert!(matches!(states[0], SegState::On(_, a) if (a - 0.35).abs() < 1e-6));
-        assert!(matches!(states[27], SegState::On(_, a) if (a - 0.35).abs() < 1e-6));
         assert!(
-            matches!(states[28], SegState::On(_, a) if a < 1.0),
-            "now breathes"
+            matches!(states[44], SegState::On(..)),
+            "the last band has no gap"
         );
-        assert!(matches!(states[29], SegState::On(_, a) if a < 1.0));
-        assert!(matches!(states[30], SegState::On(_, a) if a == 1.0));
-        // hour 0 is the cheapest, hour 23 the dearest
-        assert!(matches!(states[0], SegState::On(c, _) if c == GREEN));
-        assert!(matches!(states[47], SegState::On(c, _) if c == crate::theme::RED));
-        assert_eq!(icons(&s), vec!["euro"]);
-        assert_eq!(badge_text(&s), "22.1 ct");
-    }
-
-    #[test]
-    fn price_badge_alternates_with_the_daily_minimum() {
-        let m = price_model(day());
-        assert_eq!(badge_text(&price_scene(&m, 7.5, 14)), "min 6.2");
-        assert_eq!(badge_text(&price_scene(&m, 12.5, 14)), "22.1 ct");
-        let mut ct = day();
-        ct[14] = 102.0;
-        assert_eq!(
-            badge_text(&price_scene(&price_model(ct), 2.5, 14)),
-            "1.02 €"
-        );
-        let empty = price_model(vec![]);
-        assert_eq!(badge_text(&price_scene(&empty, 2.5, 14)), "--");
-        assert_eq!(badge_text(&price_scene(&empty, 7.5, 14)), "--");
-    }
-
-    #[test]
-    fn missing_hours_are_dark_and_the_badge_says_nothing() {
-        // a partial day: ENTSO-E published 0..12, the rest is still missing
-        let mut ct = day();
-        for v in ct.iter_mut().skip(12) {
-            *v = f32::NAN;
-        }
-        let m = price_model(ct);
-        let s = price_scene(&m, 2.5, 14);
-        let states = s
-            .items
-            .iter()
-            .find_map(|d| match d {
-                Drawable::Ring { states, .. } => Some(states.clone()),
-                _ => None,
-            })
-            .expect("ring");
-        assert!(matches!(states[22], SegState::On(..)), "hour 11 is priced");
+        assert!(matches!(states[0], SegState::On(c, a) if c == GREEN && (a - 0.45).abs() < 1e-6));
+        assert!(matches!(states[18], SegState::On(c, a) if c == crate::theme::AMBER && a == 1.0));
         assert!(
-            states[24..48].iter().all(|st| *st == SegState::Off),
-            "the missing hours stay dark"
+            matches!(states[27], SegState::On(c, a) if c == PriceLevel::Pricey.color() && (a - 0.45).abs() < 1e-6)
         );
-        assert_eq!(s.lit_count(), 24, "two segments for each of the 12 hours");
-        // the current hour is one of the missing ones
-        assert_eq!(badge_text(&s), "--");
+        assert!(
+            matches!(states[44], SegState::On(c, a) if c == crate::theme::RED && (a - 0.45).abs() < 1e-6)
+        );
+        // t = 0.4 + (0.205 / 0.25) / 5 = 0.564; needle segment round(0.564 * 44) = 25 breathes
+        assert!(
+            matches!(states[25], SegState::On(_, a) if a < 1.0),
+            "needle segment breathes"
+        );
+        let angle = needle(&s).expect("needle");
+        assert!((angle - (225.0 + 264.0 * 0.564)).abs() < 0.5, "{angle}");
+        assert_eq!(badge_text(&s), "NORMAL");
         assert!(s
             .items
             .iter()
-            .any(|d| matches!(d, Drawable::Badge { stroke, .. } if *stroke == GREY)));
-        // the min window still works off the hours that did arrive
-        assert_eq!(badge_text(&price_scene(&m, 7.5, 14)), "min 6.2");
-        // and a priced current hour is unaffected
-        assert_eq!(badge_text(&price_scene(&m, 2.5, 3)), "9.2 ct");
+            .any(|d| matches!(d, Drawable::Badge { stroke, w, .. } if *stroke == PriceLevel::Normal.color() && *w == 84.0)));
+        let t = texts(&s);
+        assert_eq!(t[0], ("0.221".to_string(), WHITE));
+        assert_eq!(t[1].0, "€/kWh");
+        assert!(icons(&s).is_empty(), "no euro icon any more");
     }
 
     #[test]
-    fn negative_prices_are_blue() {
-        let mut ct = day();
-        ct[3] = -1.5;
-        let m = price_model(ct);
-        let s = price_scene(&m, 2.5, 3);
-        let states = s
-            .items
-            .iter()
-            .find_map(|d| match d {
-                Drawable::Ring { states, .. } => Some(states.clone()),
-                _ => None,
-            })
-            .expect("ring");
-        assert!(matches!(states[6], SegState::On(c, _) if c == BLUE));
-        assert_eq!(badge_text(&s), "-1.5 ct");
+    fn price_gauge_words_follow_the_bands() {
+        // needle segments for these prices are 6, 13, 21, 30 and 38: never the
+        // first segment of a band, so that one is lit at exactly 1.0
+        for (price, word, band) in [
+            (0.10, "V.CHEAP", 0usize),
+            (0.15, "CHEAP", 1),
+            (0.20, "NORMAL", 2),
+            (0.25, "PRICEY", 3),
+            (0.30, "V.PRICEY", 4),
+        ] {
+            let s = price_scene(&price_model(price), 5.0);
+            assert_eq!(badge_text(&s), word);
+            let states = gauge_states(&s);
+            assert!(
+                matches!(states[band * 9], SegState::On(c, a) if c == PriceLevel::ALL[band].color() && a == 1.0),
+                "band {band} lit for {price}: {:?}",
+                states[band * 9]
+            );
+            let other = if band == 0 { 9 } else { 0 };
+            assert!(
+                matches!(states[other], SegState::On(_, a) if (a - 0.45).abs() < 1e-6),
+                "other bands dim for {price}"
+            );
+        }
+    }
+
+    #[test]
+    fn negative_price_is_blue_and_very_cheap() {
+        let s = price_scene(&price_model(-0.006), 5.0);
+        assert_eq!(texts(&s)[0], ("-0.006".to_string(), BLUE));
+        assert_eq!(badge_text(&s), "V.CHEAP");
+        assert!(
+            (needle(&s).unwrap() - 225.0).abs() < 0.5,
+            "pinned at the cheap end"
+        );
+    }
+
+    #[test]
+    fn price_gauge_without_data_hides_the_needle() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_local_slot(56);
+        let s = price_scene(&m, 5.0);
+        assert!(needle(&s).is_none());
+        assert_eq!(texts(&s)[0], ("--".to_string(), GREY));
+        assert_eq!(badge_text(&s), "no data");
+        assert!(gauge_states(&s).iter().all(|st| {
+            matches!(st, SegState::Off)
+                || matches!(st, SegState::On(_, a) if (*a - 0.45).abs() < 1e-6)
+        }));
+        // a day with a hole at the current slot reads the same way
+        let mut eur = vec![0.15f32; 96];
+        eur[56] = f32::NAN;
+        m.apply(
+            Event::Prices {
+                date: "2026-09-07".into(),
+                eur_per_kwh: eur,
+                avg_eur_per_kwh: 0.20,
+                currency: "EUR".into(),
+            },
+            0.0,
+        );
+        let s = price_scene(&m, 5.0);
+        assert!(needle(&s).is_none());
+        assert_eq!(badge_text(&s), "no data");
     }
 
     #[test]

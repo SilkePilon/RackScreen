@@ -104,15 +104,16 @@ pub struct ElectricityCfg {
     pub poll_secs: u64,
 }
 
-/// Day-ahead electricity price.
+/// Day-ahead electricity price from Energy-Charts.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct PriceCfg {
-    /// `energyzero`, `entsoe` or `none`.
-    pub source: String,
-    pub entsoe_token: String,
-    pub entsoe_zone: String,
-    pub include_vat: bool,
+    pub enabled: bool,
+    /// Energy-Charts bidding zone (`NL`, `DE-LU`, `DK1`, ...); empty derives
+    /// it from `electricity.zone`.
+    pub zone: String,
+    /// VAT added to the raw exchange price, percent.
+    pub vat_pct: f32,
     pub poll_secs: u64,
 }
 
@@ -273,10 +274,9 @@ impl Default for ElectricityCfg {
 impl Default for PriceCfg {
     fn default() -> Self {
         Self {
-            source: "energyzero".into(),
-            entsoe_token: String::new(),
-            entsoe_zone: String::new(),
-            include_vat: true,
+            enabled: true,
+            zone: String::new(),
+            vat_pct: 21.0,
             poll_secs: 900,
         }
     }
@@ -478,9 +478,14 @@ impl Config {
             );
         }
         anyhow::ensure!(
-            matches!(self.price.source.as_str(), "energyzero" | "entsoe" | "none"),
-            "price.source must be energyzero, entsoe or none (got '{}')",
-            self.price.source
+            (0.0..=100.0).contains(&self.price.vat_pct),
+            "price.vat_pct must be between 0 and 100 (got {})",
+            self.price.vat_pct
+        );
+        anyhow::ensure!(
+            self.price.poll_secs >= 900,
+            "price.poll_secs must be at least 900; Energy-Charts rate-limits (got {})",
+            self.price.poll_secs
         );
         anyhow::ensure!(
             !self.electricity.enabled || !self.electricity.zone.trim().is_empty(),
@@ -693,12 +698,39 @@ mod tests {
     }
 
     #[test]
-    fn bad_price_source_and_zoneless_electricity_rejected() {
+    fn price_bounds_and_old_keys() {
         let mut c = Config::default();
-        c.price.source = "foo".into();
-        let err = c.validate().unwrap_err().to_string();
-        assert!(err.contains("price.source") && err.contains("foo"), "{err}");
+        c.price.vat_pct = 120.0;
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("price.vat_pct"));
+        c.price.vat_pct = 0.0;
+        c.price.poll_secs = 600;
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("price.poll_secs"));
+        c.price.poll_secs = 900;
+        c.validate().unwrap();
+        // a file from before Energy-Charts still loads; its old keys are ignored
+        let old = Config::from_yaml(
+            "price:\n  source: entsoe\n  entsoe_token: t\n  entsoe_zone: 10YNL----------L\n  include_vat: false\n  poll_secs: 1800\n",
+        )
+        .unwrap();
+        assert_eq!(old.price.poll_secs, 1800);
+        assert!(old.price.enabled);
+        assert_eq!(old.price.vat_pct, 21.0);
+        assert!(
+            !old.to_yaml().unwrap().contains("entsoe"),
+            "dropped on save"
+        );
+    }
 
+    #[test]
+    fn zoneless_electricity_rejected() {
         let mut c = Config::default();
         c.electricity.enabled = true;
         c.electricity.zone = "  ".into();
@@ -714,8 +746,9 @@ mod tests {
         assert!(!c.electricity.enabled);
         assert_eq!(c.electricity.zone, "NL");
         assert_eq!(c.electricity.poll_secs, 300);
-        assert_eq!(c.price.source, "energyzero");
-        assert!(c.price.include_vat);
+        assert!(c.price.enabled);
+        assert_eq!(c.price.zone, "");
+        assert_eq!(c.price.vat_pct, 21.0);
         assert_eq!(c.price.poll_secs, 900);
         assert_eq!(c.thresholds.hot_temp, 70.0);
     }

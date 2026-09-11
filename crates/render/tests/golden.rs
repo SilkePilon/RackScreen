@@ -365,18 +365,20 @@ fn electricity_model() -> Model {
         },
         0.0,
     );
-    // a cheap night, a dear evening, 22.1 ct at 14:00
-    let mut ct: Vec<f32> = (0..24).map(|h| 6.2 + h as f32).collect();
-    ct[14] = 22.1;
+    // 14:00 on a day that climbs from 0.062 to 0.292 €/kWh, 0.221 at 14:00,
+    // against a three-day mean of 0.18: PRICEY
+    m.set_local_slot(56);
+    let mut eur: Vec<f32> = (0..96).map(|i| (6.2 + (i / 4) as f32) / 100.0).collect();
+    eur[56] = 0.221;
     m.apply(
         Event::Prices {
             date: "2026-09-07".into(),
-            ct_per_kwh: ct,
+            eur_per_kwh: eur,
+            avg_eur_per_kwh: 0.18,
             currency: "EUR".into(),
         },
         0.0,
     );
-    m.set_local_hour(14);
     m
 }
 
@@ -400,7 +402,7 @@ fn price_carbon_and_renewable() {
     let m = electricity_model();
     let mut r = Renderer::new().unwrap();
 
-    // 1.2 s: the badge has faded in and sits in the "current price" window.
+    // 1.2 s: the needle has eased onto its band.
     let mut px = new_pixmap();
     r.render(&m.scene_for_role(Role::Price, 1.2), &mut px);
     check("price", &px);
