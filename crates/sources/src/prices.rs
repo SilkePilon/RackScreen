@@ -257,8 +257,7 @@ mod tests {
     #[test]
     fn slots_follow_the_pi_zone_not_the_bidding_zone() {
         // the fixture is NL (+02:00): the day a Pi in another zone calls
-        // 2026-09-11 reaches into the neighbouring NL days, which is why the
-        // request runs through tomorrow.
+        // 2026-09-11 reaches into the neighbouring NL days.
         let pts = parse_energy_charts(EC).unwrap();
         let day = NaiveDate::from_ymd_opt(2026, 9, 11).unwrap();
         // Helsinki is an hour ahead: its 23:00-23:45 is 22:00-22:45 in NL
@@ -274,6 +273,13 @@ mod tests {
             azo[0..4].iter().all(|v| v.is_finite()),
             "the Azorean small hours: {:?}",
             &azo[0..4]
+        );
+        // and their evening is NL tomorrow, which the fixture does not hold:
+        // this is why `run_prices` asks for tomorrow as well
+        assert!(
+            azo[92..96].iter().all(|v| v.is_nan()),
+            "the Azorean evening: {:?}",
+            &azo[92..96]
         );
     }
 
