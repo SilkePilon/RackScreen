@@ -24,17 +24,6 @@ pub enum FieldKind {
     Secret,
     Number,
     Bool,
-    /// One of a fixed set of strings, cycled with Enter/space.
-    Choice,
-}
-
-/// The values a `FieldKind::Choice` field cycles through, in order.
-pub const PRICE_SOURCES: [&str; 3] = ["energyzero", "entsoe", "none"];
-
-/// The value after `cur` in `PRICE_SOURCES`, wrapping; the first one if `cur` is unknown.
-fn next_choice(cur: &str) -> &'static str {
-    let i = PRICE_SOURCES.iter().position(|v| *v == cur);
-    PRICE_SOURCES[i.map_or(0, |i| (i + 1) % PRICE_SOURCES.len())]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,10 +53,9 @@ pub enum Field {
     ElecZone,
     ElecToken,
     ElecPoll,
-    PriceSource,
-    EntsoeToken,
-    EntsoeZone,
-    IncludeVat,
+    PriceEnabled,
+    PriceZone,
+    PriceVat,
     PricePoll,
     HotTemp,
     LocLat,
@@ -152,10 +140,10 @@ const fn spec(
     }
 }
 
-use FieldKind::{Bool, Choice, Number, Secret, Text};
+use FieldKind::{Bool, Number, Secret, Text};
 use Group::{Cluster, Display, Energy, Services, Sky, Thresholds};
 
-pub const FIELDS: [FieldSpec; 44] = [
+pub const FIELDS: [FieldSpec; 43] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -325,36 +313,28 @@ pub const FIELDS: [FieldSpec; 44] = [
         "Seconds between polls, at least 60.",
     ),
     spec(
-        Field::PriceSource,
+        Field::PriceEnabled,
         Energy,
         "Prices",
-        "source",
-        Choice,
-        "energyzero, entsoe or none; Enter cycles.",
-    ),
-    spec(
-        Field::EntsoeToken,
-        Energy,
-        "Prices",
-        "entsoe token",
-        Secret,
-        "ENTSO-E transparency platform token.",
-    ),
-    spec(
-        Field::EntsoeZone,
-        Energy,
-        "Prices",
-        "entsoe zone",
-        Text,
-        "Bidding zone EIC code for ENTSO-E.",
-    ),
-    spec(
-        Field::IncludeVat,
-        Energy,
-        "Prices",
-        "incl. VAT",
+        "enabled",
         Bool,
-        "Show prices including VAT.",
+        "Day-ahead prices from Energy-Charts, no key.",
+    ),
+    spec(
+        Field::PriceZone,
+        Energy,
+        "Prices",
+        "zone",
+        Text,
+        "Energy-Charts zone (NL, DE-LU, DK1); empty: from elec. zone.",
+    ),
+    spec(
+        Field::PriceVat,
+        Energy,
+        "Prices",
+        "vat %",
+        Number,
+        "VAT added to the exchange price, 0 to 100.",
     ),
     spec(
         Field::PricePoll,
@@ -362,7 +342,7 @@ pub const FIELDS: [FieldSpec; 44] = [
         "Prices",
         "poll",
         Number,
-        "Seconds between price polls, at least 60.",
+        "Seconds between price polls, at least 900.",
     ),
     spec(
         Field::LocLat,
@@ -564,10 +544,9 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::ElecZone => cfg.electricity.zone.clone(),
         Field::ElecToken => cfg.electricity.token.clone(),
         Field::ElecPoll => cfg.electricity.poll_secs.to_string(),
-        Field::PriceSource => cfg.price.source.clone(),
-        Field::EntsoeToken => cfg.price.entsoe_token.clone(),
-        Field::EntsoeZone => cfg.price.entsoe_zone.clone(),
-        Field::IncludeVat => cfg.price.include_vat.to_string(),
+        Field::PriceEnabled => cfg.price.enabled.to_string(),
+        Field::PriceZone => cfg.price.zone.clone(),
+        Field::PriceVat => format!("{}", cfg.price.vat_pct),
         Field::PricePoll => cfg.price.poll_secs.to_string(),
         Field::HotTemp => format!("{}", cfg.thresholds.hot_temp),
         Field::LocLat => cfg.location.lat.map(|v| v.to_string()).unwrap_or_default(),
@@ -644,19 +623,16 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         Field::ElecZone => cfg.electricity.zone = t.into(),
         Field::ElecToken => cfg.electricity.token = text.into(),
         Field::ElecPoll => cfg.electricity.poll_secs = num::<u64>(t, "poll secs")?.max(60),
-        Field::PriceSource => {
-            if !PRICE_SOURCES.contains(&t) {
-                return Err(format!(
-                    "price source must be one of {}",
-                    PRICE_SOURCES.join(", ")
-                ));
+        Field::PriceEnabled => cfg.price.enabled = t == "true",
+        Field::PriceZone => cfg.price.zone = t.to_ascii_uppercase(),
+        Field::PriceVat => {
+            let v: f32 = num(t, "vat %")?;
+            if !(0.0..=100.0).contains(&v) {
+                return Err("vat % must be between 0 and 100".into());
             }
-            cfg.price.source = t.into();
+            cfg.price.vat_pct = v;
         }
-        Field::EntsoeToken => cfg.price.entsoe_token = text.into(),
-        Field::EntsoeZone => cfg.price.entsoe_zone = t.into(),
-        Field::IncludeVat => cfg.price.include_vat = t == "true",
-        Field::PricePoll => cfg.price.poll_secs = num::<u64>(t, "poll secs")?.max(60),
+        Field::PricePoll => cfg.price.poll_secs = num::<u64>(t, "poll secs")?.max(900),
         Field::HotTemp => cfg.thresholds.hot_temp = num(t, "temp °C")?,
         Field::LocLat => cfg.location.lat = coord(t, "lat", 90.0)?,
         Field::LocLon => cfg.location.lon = coord(t, "lon", 180.0)?,
@@ -828,10 +804,6 @@ impl Screen for Configure {
                         let cur = get(&self.cfg, field) == "true";
                         let _ = set(&mut self.cfg, field, if cur { "false" } else { "true" });
                         self.dirty = true;
-                    } else if kind == FieldKind::Choice {
-                        let next = next_choice(&get(&self.cfg, field));
-                        let _ = set(&mut self.cfg, field, next);
-                        self.dirty = true;
                     } else {
                         self.mode = Mode::Edit(get(&self.cfg, field));
                     }
@@ -994,7 +966,6 @@ impl Screen for Configure {
                                 format!("{} off", g.pending)
                             }
                         }
-                        (_, _, FieldKind::Choice) => format!("‹ {raw} ›"),
                         (_, _, FieldKind::Number) if s.label == "poll" => {
                             raw.parse::<u64>().map(humanise_poll).unwrap_or(raw)
                         }
@@ -1232,7 +1203,9 @@ mod tests {
     fn electricity_price_and_temp_fields() {
         let mut c = Config::default();
         assert_eq!(get(&c, Field::ElecZone), "NL");
-        assert_eq!(get(&c, Field::PriceSource), "energyzero");
+        assert_eq!(get(&c, Field::PriceEnabled), "true");
+        assert_eq!(get(&c, Field::PriceZone), "");
+        assert_eq!(get(&c, Field::PriceVat), "21");
         assert_eq!(get(&c, Field::HotTemp), "70");
         set(&mut c, Field::ElecEnabled, "true").unwrap();
         assert!(c.electricity.enabled);
@@ -1242,45 +1215,24 @@ mod tests {
         assert_eq!(c.electricity.token, "tok");
         set(&mut c, Field::ElecPoll, "10").unwrap();
         assert_eq!(c.electricity.poll_secs, 60, "poll secs are floored at 60");
-        set(&mut c, Field::EntsoeToken, "et").unwrap();
-        set(&mut c, Field::EntsoeZone, "10YNL----------L").unwrap();
-        assert_eq!(c.price.entsoe_zone, "10YNL----------L");
-        set(&mut c, Field::IncludeVat, "false").unwrap();
-        assert!(!c.price.include_vat);
+        set(&mut c, Field::PriceEnabled, "false").unwrap();
+        assert!(!c.price.enabled);
+        set(&mut c, Field::PriceZone, " dk1 ").unwrap();
+        assert_eq!(c.price.zone, "DK1", "trimmed and upper-cased");
+        set(&mut c, Field::PriceVat, "0").unwrap();
+        assert_eq!(c.price.vat_pct, 0.0);
+        assert!(set(&mut c, Field::PriceVat, "150")
+            .unwrap_err()
+            .contains("0 and 100"));
+        assert!(set(&mut c, Field::PriceVat, "lots").is_err());
+        set(&mut c, Field::PricePoll, "60").unwrap();
+        assert_eq!(c.price.poll_secs, 900, "floored at 900 for Energy-Charts");
         set(&mut c, Field::PricePoll, "1800").unwrap();
         assert_eq!(c.price.poll_secs, 1800);
         set(&mut c, Field::HotTemp, "82.5").unwrap();
         assert_eq!(c.thresholds.hot_temp, 82.5);
         assert!(set(&mut c, Field::HotTemp, "warm").is_err());
-        // the choice field only takes the three known sources
-        assert!(set(&mut c, Field::PriceSource, "nordpool")
-            .unwrap_err()
-            .contains("price source must be one of"));
-        set(&mut c, Field::PriceSource, "entsoe").unwrap();
-        assert_eq!(c.price.source, "entsoe");
         assert!(c.validate().is_ok());
-    }
-
-    #[test]
-    fn choice_field_cycles_on_enter() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut sh = shared_at(&dir.path().join("config.yaml"));
-        let mut screen = Configure::from_load(Ok(Config::default()));
-        screen.row = FIELDS
-            .iter()
-            .position(|s| s.field == Field::PriceSource)
-            .unwrap();
-        assert_eq!(screen.cfg.price.source, "energyzero");
-        for want in ["entsoe", "none", "energyzero"] {
-            screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
-            assert_eq!(screen.cfg.price.source, want);
-        }
-        assert!(screen.dirty);
-        // space cycles too, and an unknown value falls back to the first
-        screen.cfg.price.source = "nordpool".into();
-        screen.handle(KeyEvent::from(KeyCode::Char(' ')), &mut sh, 0.0);
-        assert_eq!(screen.cfg.price.source, "energyzero");
-        assert!(matches!(screen.mode, Mode::Browse), "no edit buffer opened");
     }
 
     #[test]
@@ -1305,7 +1257,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 44);
+        assert_eq!(FIELDS.len(), 43);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1313,7 +1265,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 44);
+        assert_eq!(FIELDS.len(), 43);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);

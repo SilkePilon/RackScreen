@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn journal_and_links() {
         let sh = FakeShell::new();
-        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO electricity: poll ok (7 sources)\nWARN prices: energyzero status: 503\nINFO running (4 screens, 30 fps, source K8s)\n"));
+        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO electricity: poll ok (7 sources)\nWARN prices: energy-charts status: 503\nINFO running (4 screens, 30 fps, source K8s)\n"));
         let sd = Systemd::new(&sh, "pi");
         let lines = sd.journal_tail(20).unwrap();
         assert_eq!(lines.len(), 5);
