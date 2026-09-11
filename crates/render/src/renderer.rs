@@ -189,6 +189,17 @@ impl Painter {
                 let path = segment_outline(*cx, *cy, (r0 + r1) / 2.0, *angle_deg, r1 - r0, *width);
                 fill(px, &path, *color, *alpha);
             }
+            Drawable::Text {
+                cx,
+                cy,
+                text,
+                px: text_px,
+                color,
+                alpha,
+            } => {
+                self.text
+                    .draw_centered(px, text, *text_px, *cx, *cy, *color, *alpha);
+            }
         }
     }
 }
@@ -302,5 +313,31 @@ mod tests {
         assert!(pixel(&px, 120, 36).0 > 200, "r = 84, inside r0..r1");
         assert_eq!(pixel(&px, 120, 26), (0, 0, 0), "r = 94, past r1 + cap");
         assert_eq!(pixel(&px, 120, 48), (0, 0, 0), "r = 72, short of r0 - cap");
+    }
+
+    #[test]
+    fn text_draws_centred_glyphs() {
+        use rackscreen_core::scene::{Drawable, Scene};
+        use rackscreen_core::theme::layout::{CX, CY};
+        use rackscreen_core::theme::WHITE;
+        let mut r = Renderer::new().unwrap();
+        let mut px = Pixmap::new(240, 240).unwrap();
+        let mut s = Scene::new();
+        s.push(Drawable::Text {
+            cx: CX,
+            cy: CY,
+            text: "0.171".into(),
+            px: 40.0,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        r.render(&s, &mut px);
+        let lit = (100..140)
+            .flat_map(|y| (60..180).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixel(&px, x, y) != (0, 0, 0))
+            .count();
+        assert!(lit > 200, "glyph pixels in the centre band: {lit}");
+        assert_eq!(pixel(&px, 120, 20), (0, 0, 0), "nothing above the text");
+        assert_eq!(pixel(&px, 120, 220), (0, 0, 0), "nothing below the text");
     }
 }

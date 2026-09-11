@@ -78,6 +78,15 @@ pub enum Drawable {
         color: Color,
         alpha: f32,
     },
+    /// Free-standing centred text: a badge's text without its box.
+    Text {
+        cx: f32,
+        cy: f32,
+        text: String,
+        px: f32,
+        color: Color,
+        alpha: f32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
