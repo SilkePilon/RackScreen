@@ -83,11 +83,6 @@ pub fn carbon_color(g: f32) -> Color {
     Color::hex(STOPS[3].1)
 }
 
-/// 0 = cheapest of the day (green) .. 1 = most expensive (red).
-pub fn price_color(t: f32) -> Color {
-    GREEN.mix(RED, t.clamp(0.0, 1.0))
-}
-
 /// GitHub contribution calendar greens, darkest level first.
 pub const GH_GREENS: [Color; 4] = [
     Color::hex(0x0e4429),
@@ -354,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn carbon_and_price_scales() {
+    fn carbon_scale() {
         assert_eq!(carbon_color(0.0), Color::hex(0x2AA364));
         assert_eq!(carbon_color(-50.0), Color::hex(0x2AA364));
         assert_eq!(carbon_color(150.0), Color::hex(0xF5EB4D));
@@ -362,10 +357,6 @@ mod tests {
         assert_eq!(carbon_color(1000.0), Color::hex(0x381D02));
         let mid = carbon_color(75.0);
         assert_eq!(mid, Color::hex(0x2AA364).mix(Color::hex(0xF5EB4D), 0.5));
-        assert_eq!(price_color(0.0), GREEN);
-        assert_eq!(price_color(1.0), RED);
-        assert_eq!(price_color(-1.0), GREEN);
-        assert_eq!(price_color(0.5), GREEN.mix(RED, 0.5));
     }
 
     #[test]

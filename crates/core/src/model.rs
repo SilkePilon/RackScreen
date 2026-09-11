@@ -1772,7 +1772,7 @@ mod tests {
         m.tick(5.0);
         let mid = m.smooth_price_needle(5.2);
         assert!(mid < 0.564 && mid > 0.0, "easing down: {mid}");
-        // ratio 0.5: V.CHEAP, 0.2 of the 0.3-wide band, t = 0.667 / 5
+        // ratio 0.5: V.CHEAP, 0.2 into the 0.3-wide band, t = 0.667 / 5
         assert!((m.smooth_price_needle(6.0) - 0.1333).abs() < 1e-3);
         m.set_local_slot(99);
         assert_eq!(m.local_slot(), 95, "clamped into the day");
