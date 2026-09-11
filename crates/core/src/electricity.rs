@@ -60,9 +60,8 @@ pub const LEVEL_EDGES: [f32; 6] = [0.30, 0.60, 0.90, 1.15, 1.40, 1.70];
 /// `0..=1` that is linear inside each fifth of the arc. Ratios past the outer
 /// edges clamp; an average that is not positive (or not finite), or a price
 /// that is not finite, reads as `Normal` in the middle of the arc.
-#[allow(clippy::neg_cmp_op_on_partial_ord)]
 pub fn price_level(price: f32, avg: f32) -> (PriceLevel, f32) {
-    if !(avg > 0.0) || !price.is_finite() {
+    if !avg.is_finite() || avg <= 0.0 || !price.is_finite() {
         return (PriceLevel::Normal, 0.5);
     }
     let ratio = price / avg;
@@ -368,6 +367,11 @@ mod tests {
         assert_eq!(price_level(0.1, 0.0), (PriceLevel::Normal, 0.5));
         assert_eq!(price_level(0.1, -0.2), (PriceLevel::Normal, 0.5));
         assert_eq!(price_level(0.1, f32::NAN), (PriceLevel::Normal, 0.5));
+        assert_eq!(price_level(0.1, f32::INFINITY), (PriceLevel::Normal, 0.5));
+        assert_eq!(
+            price_level(0.1, f32::NEG_INFINITY),
+            (PriceLevel::Normal, 0.5)
+        );
         assert_eq!(price_level(f32::NAN, avg), (PriceLevel::Normal, 0.5));
     }
 
