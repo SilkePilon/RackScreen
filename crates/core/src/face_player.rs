@@ -465,10 +465,16 @@ impl FacePlayer {
                 let def = cur.kind.def();
                 let held = self.rest.value(now);
                 let f = run_act(&def, cur.progress(now), held, io.gaze);
+                // the idle wobble fades out with the act's envelope, so it does
+                // not snap away at the start or back in at the end
+                let env = crate::face_acts::envelope(cur.progress(now), def.dur).env;
                 FaceFrame {
                     e: f.e,
                     blink: io.blink,
-                    off: f.off,
+                    off: (
+                        f.off.0 + io.wobble.0 * (1.0 - env),
+                        f.off.1 + io.wobble.1 * (1.0 - env),
+                    ),
                     rot: f.rot + io.tilt,
                     gaze: f.gaze,
                     eyes: f.eyes,
@@ -866,6 +872,28 @@ mod tests {
             p.frame(8.0).e.close_to(&Expr::SAD, 0.05),
             "held sad after lost-one"
         );
+        // the idle wobble must not snap at an act's start or end: an excited
+        // face bounces up to 7 px and the act would swallow it whole
+        let mut p = player();
+        p.on_fx(&FxRequest::GithubStar, 0.0);
+        p.tick(&quiet(), 0.0);
+        run(&mut p, &quiet(), 0.0, 5.0);
+        p.on_fx(&FxRequest::GithubRelease, 5.0); // excited too: the mood holds
+        let mut prev = p.frame(5.0);
+        let mut t = 5.0;
+        while t < 10.0 {
+            p.tick(&quiet(), t);
+            let f = p.frame(t);
+            assert_eq!(p.mood(), Mood::Excited, "the excited reaction holds");
+            assert!(
+                (f.off.1 - prev.off.1).abs() < 4.0,
+                "wobble jump at {t}: {} -> {}",
+                prev.off.1,
+                f.off.1
+            );
+            prev = f;
+            t += 1.0 / 30.0;
+        }
         let mut a = player();
         let mut b = player();
         for k in 0..300 {

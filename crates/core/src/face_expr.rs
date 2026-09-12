@@ -257,15 +257,17 @@ impl Idle {
                 self.next_tilt = now + 10.0 + 15.0 * unit(rng) as Secs;
             }
         }
-        let t = now as f32;
+        // in f64: `now` is seconds since start, and an f32 clock would stutter
+        // after a few days of uptime
+        let s = |w: f64| (now * w).sin() as f32;
         let wobble = match mood {
-            Mood::Excited => (0.0, -(t * 9.0).sin().abs() * 7.0),
+            Mood::Excited => (0.0, -s(9.0).abs() * 7.0),
             Mood::Angry => {
-                let burst = if (t * 1.3).sin() > 0.2 { 1.0 } else { 0.0 };
-                ((t * 46.0).sin() * 2.2 * burst, 0.0)
+                let burst = if s(1.3) > 0.2 { 1.0 } else { 0.0 };
+                (s(46.0) * 2.2 * burst, 0.0)
             }
-            Mood::Scared => ((t * 70.0).sin() * 1.4, 0.0),
-            Mood::Sleepy => (0.0, (t * 1.4).sin() * 4.0 + 3.0),
+            Mood::Scared => (s(70.0) * 1.4, 0.0),
+            Mood::Sleepy => (0.0, s(1.4) * 4.0 + 3.0),
             Mood::Sad => (0.0, 4.0),
             Mood::Bored => (0.0, 2.0),
             _ => (0.0, 0.0),
@@ -392,6 +394,26 @@ mod tests {
             t += 1.0 / 30.0;
         }
         assert!(sideways);
+    }
+
+    #[test]
+    fn wobble_keeps_precision_after_a_month() {
+        // `now` is seconds since start: after a month an f32 clock steps by a
+        // quarter second, which turns the excited bounce into a stutter
+        let mut rng = 5u64;
+        let mut idle = Idle::new();
+        let mut ys = Vec::new();
+        for k in 0..30 {
+            let now = 2.6e6 + k as Secs / 30.0;
+            ys.push(idle.tick(Mood::Excited, now, &mut rng).wobble.1);
+        }
+        assert!(
+            ys.windows(2).any(|w| w[0] != w[1]),
+            "the bounce froze: {ys:?}"
+        );
+        for w in ys.windows(2) {
+            assert!((w[1] - w[0]).abs() < 3.0, "jump of {} px", w[1] - w[0]);
+        }
     }
 
     #[test]
