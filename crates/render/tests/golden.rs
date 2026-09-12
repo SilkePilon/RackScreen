@@ -713,8 +713,9 @@ fn face_mid_act_frames() {
         },
         2.0,
     );
-    tick_until(&mut m, 2.0, 2.0 + 0.5 * 2.8);
-    check("face_launch_mid", &render_face(&m, 2.0 + 0.5 * 2.8));
+    // 34 % in: the rocket is mid-screen
+    tick_until(&mut m, 2.0, 2.0 + 0.34 * 2.8);
+    check("face_launch_mid", &render_face(&m, 2.0 + 0.34 * 2.8));
 }
 
 #[test]
