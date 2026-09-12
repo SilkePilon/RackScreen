@@ -80,7 +80,7 @@ display:
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
-#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys
+#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face
 screens:
   - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
   - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
