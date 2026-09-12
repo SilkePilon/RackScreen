@@ -27,8 +27,8 @@ pub const EYE_RADIUS: f32 = 20.0;
 /// Half width of the lid cuts.
 pub const LID_W: f32 = 48.0;
 
-pub fn face_scene(_model: &Model, _now: Secs) -> Scene {
-    Scene::new()
+pub fn face_scene(model: &Model, now: Secs) -> Scene {
+    render_frame(&model.face().frame(now), now)
 }
 
 /// Amber for brightness `b` in 0..1, before alpha.

@@ -4,8 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
 use crate::electricity::{partition, price_level, Section, Source};
-use crate::event::{App, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
+use crate::event::{App, AppHealth, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
+use crate::face_player::{FaceInputs, FacePlayer, FaceTuning};
 use crate::fx::Fx;
+use crate::mood::MoodInputs;
 use crate::scene_rain::{current_slots, first_wet_minutes, SOON_MINUTES, WET_MM};
 use crate::screens::ScreenState;
 use crate::theme::eaqi_band;
@@ -366,6 +368,8 @@ pub struct Model {
     /// A `Boot` that arrived while the API link was down; it plays on first connect
     /// so the sweep is not aged out behind the connecting scene.
     boot_pending: bool,
+    /// The `face` role's act player; fed the same fx requests as the splashes.
+    face: FacePlayer,
 }
 
 impl Model {
@@ -442,6 +446,7 @@ impl Model {
             rng: RNG_SEED,
             seen_api_up: false,
             boot_pending: false,
+            face: FacePlayer::new(0.0),
         }
     }
 
@@ -456,6 +461,64 @@ impl Model {
     }
     pub fn night_override(&self) -> Option<bool> {
         self.night_override
+    }
+    pub fn face(&self) -> &FacePlayer {
+        &self.face
+    }
+    pub fn set_face_tuning(&mut self, t: FaceTuning) {
+        self.face.set_tuning(t);
+    }
+    /// Half an hour before night and ten minutes after: the face is sleepy.
+    pub fn set_bedtime_near(&mut self, near: bool) {
+        self.face.set_bedtime_near(near);
+    }
+
+    /// The cluster facts the face reads each frame.
+    pub fn face_inputs(&self, now: Secs) -> FaceInputs {
+        let st = &self.state;
+        let th = self.thresholds;
+        let hot = (st.have_temps && self.hot_temp.value(now) >= th.hot_temp)
+            || (st.have_metrics && (st.cpu_pct >= th.hot_cpu || st.mem_pct >= th.hot_mem));
+        FaceInputs {
+            mood: MoodInputs {
+                on_battery: self.ups.have && self.ups.on_battery,
+                nodes_not_ready: !st.nodes_not_ready.is_empty(),
+                app_degraded: self
+                    .apps
+                    .apps
+                    .iter()
+                    .any(|a| a.health == AppHealth::Degraded),
+                volume_degraded: st
+                    .volumes
+                    .iter()
+                    .any(|(_, r)| matches!(r, Robustness::Degraded | Robustness::Faulted)),
+                alerts: !st.alerts.is_empty(),
+                hot,
+                pods_failed: st.pods_failed > 0,
+            },
+            ups_have: self.ups.have,
+            ups_charge_pct: self.ups.charge_pct,
+            storage_have: st.have_storage,
+            storage_pct: self.storage_pct.value(now),
+            gh_have: self.github.have,
+            gh_today: self.github.today(),
+            price_level: if self.prices.have {
+                self.current_price()
+                    .map(|p| price_level(p, self.prices.avg).0)
+            } else {
+                None
+            },
+            weather_have: self.weather.have,
+            weather_code: self.weather.code,
+            weather_temp_c: self.weather.temp_c,
+            weather_gust_kmh: self.weather.gust_kmh,
+            weather_is_day: self.weather.is_day,
+            sky_have: self.sky.have,
+            sunrise: self.sky.sunrise,
+            sunset: self.sky.sunset,
+            moon_illumination: self.sky.moon_illumination,
+            unix_now: self.unix_now,
+        }
     }
     pub fn smooth_cpu(&self, now: Secs) -> f32 {
         self.cpu.value(now)
@@ -684,6 +747,7 @@ impl Model {
     /// Reseed the picker (zero is bumped, xorshift dies on it).
     pub fn set_rng_seed(&mut self, seed: u64) {
         self.rng = if seed == 0 { RNG_SEED } else { seed };
+        self.face.set_seed(seed);
     }
 
     /// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
@@ -727,8 +791,11 @@ impl Model {
             }
         }
         for req in std::mem::take(&mut self.fx) {
+            self.face.on_fx(&req, now);
             self.fx_state.apply(req, now);
         }
+        let inputs = self.face_inputs(now);
+        self.face.tick(&inputs, now);
         let screens = self.screens.len();
         self.fx_state.tick(now, screens);
         let sweep_active = self.fx_state.sweeps.active().is_some();
@@ -1114,6 +1181,9 @@ impl Model {
                 LinkTarget::K8sApi => {
                     let was = self.link.api;
                     self.link.api = up;
+                    if was && !up {
+                        self.face.on_link_down(now);
+                    }
                     if up && !was {
                         if self.boot_pending {
                             self.boot_pending = false;
@@ -2274,5 +2344,131 @@ mod tests {
         );
         assert!(!m.all_healthy());
         assert!(!m.torrent_mode());
+    }
+
+    #[test]
+    fn fx_requests_reach_the_face() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::PodCrashed {
+                ns: "a".into(),
+                name: "b".into(),
+            },
+            1.0,
+        );
+        m.tick(1.0);
+        assert_eq!(
+            m.face().current_act(),
+            Some(crate::face_acts::ActKind::Ouch)
+        );
+        assert!(
+            m.fx().splashes[Role::Pods.index()].active().is_some(),
+            "the splash still plays too"
+        );
+    }
+
+    #[test]
+    fn link_down_reaches_the_face_and_link_up_after_boot_does_too() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: false,
+            },
+            1.0,
+        );
+        m.tick(1.0);
+        assert_eq!(
+            m.face().current_act(),
+            Some(crate::face_acts::ActKind::Hello)
+        );
+        let mut t = 1.0;
+        while t < 5.0 {
+            m.tick(t);
+            t += 0.1;
+        }
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            5.0,
+        );
+        m.tick(5.0);
+        assert_eq!(
+            m.face().current_act(),
+            Some(crate::face_acts::ActKind::FoundYou)
+        );
+    }
+
+    #[test]
+    fn face_inputs_reduce_cluster_state() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 4,
+                not_ready: vec!["pi-4".into()],
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Ups {
+                on_battery: false,
+                low_battery: false,
+                charge_pct: 18.0,
+                load_pct: 10.0,
+                runtime_secs: 600,
+            },
+            0.0,
+        );
+        let i = m.face_inputs(0.0);
+        assert!(i.mood.nodes_not_ready && !i.mood.on_battery);
+        assert!(i.ups_have && i.ups_charge_pct == 18.0);
+        m.tick(1.0);
+        assert_eq!(m.face().mood(), crate::mood::Mood::Sad);
+        assert_eq!(
+            m.face().current_act(),
+            Some(crate::face_acts::ActKind::OnFumes)
+        );
+        m.apply(metrics(95.0, None), 2.0);
+        assert!(m.face_inputs(2.0).mood.hot, "cpu over hot_cpu");
+        m.set_bedtime_near(true);
+        m.set_face_tuning(crate::face_player::FaceTuning {
+            reaction: 5.0,
+            ..Default::default()
+        });
+        assert_eq!(m.face().tuning().reaction, 5.0);
+    }
+
+    #[test]
+    fn face_scene_is_dot_rows() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 4,
+                total: 4,
+                not_ready: vec![],
+            },
+            0.0,
+        );
+        m.tick(1.0);
+        let s = m.scene_for_role(Role::Face, 1.0);
+        assert_eq!(s.items.len(), 49);
+        assert_eq!(m.scene_for_role(Role::Face, 1.0), s, "pure in `now`");
     }
 }
