@@ -188,15 +188,24 @@ fn overlay(f: &FaceFrame, i: usize, j: usize) -> f32 {
 /// Brightness 0..1 of cell `(i, j)` and the tint of the sprite covering it,
 /// before the flicker multiplier.
 pub fn cell_brightness(f: &FaceFrame, now: Secs, i: usize, j: usize) -> (f32, Option<Color>) {
-    cell_brightness_with(f, &xform(f, now), i, j)
+    cell_with(f, &xform(f, now), &eyes_of(f), i, j).unwrap_or((0.0, None))
 }
 
-fn cell_brightness_with(f: &FaceFrame, xf: &Xform, i: usize, j: usize) -> (f32, Option<Color>) {
+/// The same, with the per-frame transform and eye shapes built once by the
+/// caller. `None` when the cell lies outside the round panel.
+fn cell_with(
+    f: &FaceFrame,
+    xf: &Xform,
+    eyes: &[Eye; 2],
+    i: usize,
+    j: usize,
+) -> Option<(f32, Option<Color>)> {
     let (cx, cy) = (i as f32 * CELL + 5.0, j as f32 * CELL + 5.0);
-    if ((cx - 120.0).powi(2) + (cy - 120.0).powi(2)).sqrt() > VISIBLE_R {
-        return (0.0, None);
+    // the visible and rim checks share this one distance
+    let dist = ((cx - 120.0).powi(2) + (cy - 120.0).powi(2)).sqrt();
+    if dist > VISIBLE_R {
+        return None;
     }
-    let eyes = eyes_of(f);
     let mut sum = 0.0;
     let mut tint = None;
     for dy in [-3.0, 0.0, 3.0] {
@@ -220,11 +229,11 @@ fn cell_brightness_with(f: &FaceFrame, xf: &Xform, i: usize, j: usize) -> (f32, 
         }
     }
     let mut b: f32 = sum / 9.0;
-    if f.post.rim > 0.0 && ((cx - 120.0).powi(2) + (cy - 120.0).powi(2)).sqrt() > RIM_R {
+    if f.post.rim > 0.0 && dist > RIM_R {
         b = b.max(f.post.rim);
     }
     b = b.max(overlay(f, i, j));
-    (b, tint)
+    Some((b, tint))
 }
 
 /// The whole matrix: a clear, then for each row a `Dots` of lit cells
@@ -233,24 +242,27 @@ fn cell_brightness_with(f: &FaceFrame, xf: &Xform, i: usize, j: usize) -> (f32, 
 pub fn render_frame(f: &FaceFrame, now: Secs) -> Scene {
     let mut s = Scene::new();
     let xf = xform(f, now);
+    // the transform and the eye shapes are the same for every cell
+    let eyes = eyes_of(f);
     let clear = Color { a: 0, ..AMBER };
     for j in 0..N {
         let mut lit = Vec::with_capacity(N);
         let mut unlit = Vec::with_capacity(N);
         for i in 0..N {
-            let (cx, cy) = (i as f32 * CELL + 5.0, j as f32 * CELL + 5.0);
-            let visible = ((cx - 120.0).powi(2) + (cy - 120.0).powi(2)).sqrt() <= VISIBLE_R;
-            let (b, tint) = cell_brightness_with(f, &xf, i, j);
-            if !visible {
-                lit.push(clear);
-                unlit.push(clear);
-            } else if b > LIT_MIN {
-                let a = ((0.45 + 0.55 * b) * f.post.flicker).clamp(0.0, 1.0);
-                lit.push(tint.unwrap_or_else(|| amber(b)).with_alpha(a));
-                unlit.push(clear);
-            } else {
-                lit.push(clear);
-                unlit.push(AMBER.with_alpha(0.08));
+            match cell_with(f, &xf, &eyes, i, j) {
+                None => {
+                    lit.push(clear);
+                    unlit.push(clear);
+                }
+                Some((b, tint)) if b > LIT_MIN => {
+                    let a = ((0.45 + 0.55 * b) * f.post.flicker).clamp(0.0, 1.0);
+                    lit.push(tint.unwrap_or_else(|| amber(b)).with_alpha(a));
+                    unlit.push(clear);
+                }
+                Some(_) => {
+                    lit.push(clear);
+                    unlit.push(AMBER.with_alpha(0.08));
+                }
             }
         }
         let cy = j as f32 * CELL + 5.0;

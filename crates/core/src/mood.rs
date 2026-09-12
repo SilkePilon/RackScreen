@@ -88,6 +88,7 @@ impl MoodEngine {
         self.touch(now);
     }
     /// Hold `mood` for `tuning.reaction` seconds (unless the state is severe).
+    /// `Mood::Content` is not a reaction: it clears any held one.
     pub fn react(&mut self, mood: Mood, now: Secs) {
         self.touch(now);
         self.reaction = if mood == Mood::Content {
