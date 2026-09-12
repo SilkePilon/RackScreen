@@ -79,6 +79,16 @@ pub enum ActKind {
     // prices
     KaChing,
     Expensive,
+    // boot and idle habits
+    WakeUp,
+    Sneeze,
+    Humming,
+    Peek,
+    Stretch,
+    Scanning,
+    Hic,
+    DozingOff,
+    Dizzy,
 }
 
 impl ActKind {
@@ -130,6 +140,15 @@ impl ActKind {
         ActKind::LookUp,
         ActKind::KaChing,
         ActKind::Expensive,
+        ActKind::WakeUp,
+        ActKind::Sneeze,
+        ActKind::Humming,
+        ActKind::Peek,
+        ActKind::Stretch,
+        ActKind::Scanning,
+        ActKind::Hic,
+        ActKind::DozingOff,
+        ActKind::Dizzy,
     ];
 
     /// Jumps the queue.
@@ -155,7 +174,18 @@ impl ActKind {
                 | ActKind::MehClouds
                 | ActKind::Heatwave
                 | ActKind::Freezing
+                | ActKind::Sneeze
+                | ActKind::Humming
+                | ActKind::Peek
+                | ActKind::Stretch
+                | ActKind::Scanning
+                | ActKind::Hic
+                | ActKind::DozingOff
         )
+    }
+    /// One of the weighted idle habits picked when nothing is happening.
+    pub fn is_idle_habit(self) -> bool {
+        IDLE_HABITS.iter().any(|(k, _)| *k == self)
     }
     /// At most one per 20 s.
     pub fn is_rate_limited(self) -> bool {
@@ -247,9 +277,29 @@ impl ActKind {
             ActKind::LookUp => d(3.4, Mood::Content, Some(&SAT), Some(T_ISS), look_up),
             ActKind::KaChing => d(2.8, Mood::Happy, Some(&EURO), Some(T_PRICE), ka_ching),
             ActKind::Expensive => d(2.8, Mood::Content, Some(&EURO), Some(T_PRICE), expensive),
+            ActKind::WakeUp => d(3.6, Mood::Content, None, None, wake_up),
+            ActKind::Sneeze => d(2.4, Mood::Content, None, None, sneeze),
+            ActKind::Humming => d(3.0, Mood::Content, None, None, humming),
+            ActKind::Peek => d(2.6, Mood::Content, None, None, peek),
+            ActKind::Stretch => d(2.6, Mood::Content, None, None, stretch),
+            ActKind::Scanning => d(3.4, Mood::Content, None, None, scanning),
+            ActKind::Hic => d(1.4, Mood::Content, None, None, hic),
+            ActKind::DozingOff => d(3.6, Mood::Sleepy, None, None, dozing_off),
+            ActKind::Dizzy => d(3.2, Mood::Worried, None, None, dizzy),
         }
     }
 }
+
+/// Idle habits with their pick weights. `DozingOff` is only eligible while bored.
+pub const IDLE_HABITS: &[(ActKind, u32)] = &[
+    (ActKind::Sneeze, 1),
+    (ActKind::Humming, 3),
+    (ActKind::Peek, 3),
+    (ActKind::Stretch, 3),
+    (ActKind::Scanning, 3),
+    (ActKind::Hic, 1),
+    (ActKind::DozingOff, 4),
+];
 
 /// Current-conditions category from the WMO code, temperature and gusts.
 /// Thunder (95..=99) is an event, so it returns `None`.
@@ -1266,6 +1316,146 @@ fn expensive(f: &mut Frame) {
     f.eyes[1].open = Some(1.1);
 }
 
+// ---------------- boot and idle habits ----------------
+
+fn wake_up(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.set(&Expr::SLEEPY, 1.0);
+    if q < 0.35 {
+        let fade = 1.0 - seg(q, 0.25, 0.35);
+        for i in 0..3 {
+            let ii = i as f32;
+            let r = (t * 0.5 + ii / 3.0).fract();
+            f.at(
+                &Z,
+                17.0 + r * 3.0 + ii * 1.5,
+                7.0 - r * 4.0 - ii,
+                None,
+                (1.0 - r) * fade,
+            );
+        }
+    }
+    if inseg(q, 0.35, 0.7) {
+        let r = bump(q, 0.35, 0.7);
+        f.e.open = 0.06;
+        f.e.sep = 1.0 + 0.15 * r;
+        f.e.scale = 1.0 + 0.1 * r;
+        f.rot = -0.1 * r;
+        f.off.1 -= r * 4.0;
+    }
+    if q >= 0.7 {
+        let r = seg(q, 0.7, 1.0);
+        f.set(&Expr::CONTENT, r);
+        if (r * PI * 4.0).sin() > 0.8 {
+            f.e.open = 0.05;
+        }
+    }
+}
+
+fn sneeze(f: &mut Frame) {
+    let q = f.q;
+    if inseg(q, 0.05, 0.5) {
+        let s = seg(q, 0.05, 0.5);
+        f.e.open = 0.6 - s * 0.5;
+        f.e.tilt = -0.4 * s;
+        f.off.1 -= s * 8.0;
+        f.rot = -s * 0.12;
+    }
+    if inseg(q, 0.5, 0.8) {
+        let s = seg(q, 0.5, 0.8);
+        f.off.1 += 10.0 * (1.0 - s);
+        f.rot = 0.15 * (1.0 - s);
+        f.e.open = 0.06;
+        for k in 0..4 {
+            let kk = k as f32;
+            f.dot(
+                9.0 + kk * 1.5 + s * 5.0,
+                17.0 + kk * 0.5 + s * 3.0,
+                None,
+                1.0 - s,
+            );
+        }
+    }
+}
+
+fn humming(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.e.open = 0.1;
+    f.e.lower = 0.5;
+    f.off.0 += (t * 3.5).sin() * 3.0;
+    f.rot = (t * 3.5).sin() * 0.06;
+    let a = seg(q, 0.0, 0.15) * (1.0 - seg(q, 0.85, 1.0));
+    f.at(&NOTE, 17.0, 3.0 + (t * 7.0).sin() * 0.6, Some(T_SKY), a);
+}
+
+fn peek(f: &mut Frame) {
+    let q = f.q;
+    let s = ease(seg(q, 0.05, 0.4)) * (1.0 - ease(seg(q, 0.7, 0.95)));
+    f.off.0 += 26.0 * s;
+    f.gaze = (1.4 * s, 0.0);
+    f.eyes[0].scale = Some(1.0 - 0.3 * s);
+    f.eyes[1].scale = Some(1.0 - 0.3 * s);
+    f.e.open = 1.0 - 0.2 * s;
+}
+
+fn stretch(f: &mut Frame) {
+    let q = f.q;
+    let s = (ease(seg(q, 0.05, 0.85)) * PI).sin();
+    f.e.open = 1.0 - 0.92 * s;
+    f.e.scale = 1.0 + 0.2 * s;
+    f.e.sep = 1.0 + 0.15 * s;
+    f.off.1 -= 5.0 * s;
+}
+
+fn scanning(f: &mut Frame) {
+    let q = f.q;
+    f.e.open = 0.3;
+    let s = (seg(q, 0.05, 0.95) * PI * 2.0).sin();
+    f.gaze = (s * 1.3, 0.0);
+    let a = PI + s * 1.2;
+    f.dot(
+        11.5 + (a + PI / 2.0).cos() * 10.5,
+        11.5 + (a + PI / 2.0).sin() * 10.5,
+        Some(T_K8S),
+        1.0,
+    );
+}
+
+fn hic(f: &mut Frame) {
+    let q = f.q;
+    if inseg(q, 0.2, 0.5) {
+        let s = bump(q, 0.2, 0.5);
+        f.off.1 -= 12.0 * s;
+        f.e.open = 1.35;
+        f.e.scale = 0.92;
+    }
+}
+
+fn dozing_off(f: &mut Frame) {
+    let q = f.q;
+    let s = seg(q, 0.0, 0.7);
+    f.e.open = 1.0 - s * 0.85;
+    f.off.1 += s * s * 12.0;
+    f.rot = s * 0.1;
+    if inseg(q, 0.7, 0.8) {
+        f.e.open = 1.3;
+        f.off.1 -= s * s * 12.0;
+    }
+    if q >= 0.8 {
+        f.e.open = 0.7;
+    }
+}
+
+fn dizzy(f: &mut Frame) {
+    let t = f.t;
+    let odd = ((t * 6.0).floor() as i64) % 2 == 1;
+    f.sprite = Some(both(if odd { &SPIRAL1 } else { &SPIRAL2 }));
+    f.off.0 += (t * 3.0).cos() * 5.0;
+    f.off.1 += (t * 3.0).sin() * 4.0;
+    f.rot = (t * 3.0).sin() * 0.1;
+    f.hold(&Expr::WORRIED, 0.85, 1.0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1505,7 +1695,6 @@ mod tests {
 
     #[test]
     fn task_seven_acts_exist() {
-        assert_eq!(ActKind::ALL.len(), 47);
         assert!(ActKind::Lightning.is_severe());
         assert!(!ActKind::Lightning.is_habit());
         let f = run_act(&ActKind::Sunny.def(), 0.6, Expr::CONTENT, (0.0, 0.0));
@@ -1527,5 +1716,32 @@ mod tests {
                 .any(|p| std::ptr::eq(p.sprite, &SUN) && p.y < SLOT_Y - 2.0),
             "sun rises out of the slot"
         );
+    }
+
+    #[test]
+    fn task_eight_acts_complete_the_catalogue() {
+        assert_eq!(ActKind::ALL.len(), 56);
+        assert!(!ActKind::WakeUp.is_habit() && !ActKind::Dizzy.is_habit());
+        assert!(ActKind::Sneeze.is_habit() && ActKind::DozingOff.is_habit());
+        assert_eq!(IDLE_HABITS.len(), 7);
+        assert_eq!(IDLE_HABITS.iter().map(|(_, w)| w).sum::<u32>(), 18);
+        for (k, _) in IDLE_HABITS {
+            assert!(
+                k.is_idle_habit() && k.def().icon.is_none() && !k.def().rise,
+                "{k:?}"
+            );
+        }
+        assert!(!ActKind::Sunny.is_idle_habit());
+        let d = ActKind::WakeUp.def();
+        assert!(d.icon.is_none() && !d.rise && (d.dur - 3.6).abs() < 1e-6);
+        let f = run_act(&d, 0.2, Expr::CONTENT, (0.0, 0.0));
+        assert!(f.e.open < 0.4, "asleep at the start: {}", f.e.open);
+        assert!(f.placed.iter().any(|p| std::ptr::eq(p.sprite, &Z)));
+        let f = run_act(&ActKind::Dizzy.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!(f
+            .sprite
+            .is_some_and(|s| std::ptr::eq(s[0], &SPIRAL1) || std::ptr::eq(s[0], &SPIRAL2)));
+        let f = run_act(&ActKind::Peek.def(), 0.45, Expr::CONTENT, (0.0, 0.0));
+        assert!(f.off.0 > 15.0, "leans to the edge: {}", f.off.0);
     }
 }
