@@ -5,6 +5,7 @@ pub mod event;
 pub mod format;
 pub mod fx;
 pub mod model;
+pub mod mood;
 pub mod night;
 pub mod scene;
 pub mod scene_deploys;
