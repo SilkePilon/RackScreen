@@ -146,8 +146,8 @@ that triggers an act touches it; snapshots and polls do not.
 
 ## Acts
 
-`crates/core/src/acts.rs`: the catalogue and the player. `scene_face.rs`
-turns the player's output into dots.
+`crates/core/src/face_acts.rs` holds the catalogue, `face_player.rs` the
+player, `scene_face.rs` turns the player's output into dots.
 
 ### Envelope
 
