@@ -1671,8 +1671,16 @@ pub fn run_act(def: &ActDef, p: f32, held: Expr, idle_gaze: (f32, f32)) -> Frame
         f.sprite = None;
         f.eyes = [EyeOv::default(); 2];
         f.rot *= 1.0 - o;
-        f.off = (f.off.0 * (1.0 - o), f.off.1 * (1.0 - o));
-        f.gaze = (lerp(f.gaze.0, idle_gaze.0, o), lerp(f.gaze.1, idle_gaze.1, o));
+        // decay the body's own offset and gaze; the envelope baseline (rise,
+        // look-down) already follows `env`, so the face and the icon settle together
+        f.off = (
+            base_off.0 + (f.off.0 - base_off.0) * (1.0 - o),
+            base_off.1 + (f.off.1 - base_off.1) * (1.0 - o),
+        );
+        f.gaze = (
+            base_gaze.0 + (f.gaze.0 - base_gaze.0) * (1.0 - o),
+            base_gaze.1 + (f.gaze.1 - base_gaze.1) * (1.0 - o),
+        );
         f.post.flicker = lerp(f.post.flicker, 1.0, o);
         f.post.rim *= 1.0 - o;
         let first_is_icon = def.icon.is_some();

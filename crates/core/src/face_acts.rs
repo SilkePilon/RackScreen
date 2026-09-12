@@ -305,10 +305,14 @@ pub fn run_act(def: &ActDef, p: f32, held: Expr, idle_gaze: (f32, f32)) -> Frame
         f.sprite = None;
         f.eyes = [EyeOv::default(); 2];
         f.rot *= 1.0 - o;
-        f.off = (f.off.0 * (1.0 - o), f.off.1 * (1.0 - o));
+        // decay the body's own offset and gaze; the envelope baseline (rise, look-down) already follows `env`
+        f.off = (
+            base_off.0 + (f.off.0 - base_off.0) * (1.0 - o),
+            base_off.1 + (f.off.1 - base_off.1) * (1.0 - o),
+        );
         f.gaze = (
-            lerp(f.gaze.0, idle_gaze.0, o),
-            lerp(f.gaze.1, idle_gaze.1, o),
+            base_gaze.0 + (f.gaze.0 - base_gaze.0) * (1.0 - o),
+            base_gaze.1 + (f.gaze.1 - base_gaze.1) * (1.0 - o),
         );
         f.post.flicker = lerp(f.post.flicker, 1.0, o);
         f.post.rim *= 1.0 - o;
@@ -525,6 +529,37 @@ mod tests {
 
     fn frame(kind: ActKind, p: f32) -> Frame {
         run_act(&kind.def(), p, Expr::SAD, (0.4, -0.3))
+    }
+
+    #[test]
+    fn out_phase_face_and_icon_settle_together() {
+        // half way through the out phase the rise and the icon slide are both half done
+        let d = ActKind::OhHi.def();
+        let p = 1.0 - (IN_S / 2.0) / d.dur;
+        let f = run_act(&d, p, Expr::CONTENT, (0.4, -0.3));
+        assert!(
+            (f.off.1 + RISE_PX * 0.5).abs() < 1e-3,
+            "rise half way out: {}",
+            f.off.1
+        );
+        assert!(
+            (f.placed[0].y - (SLOT_Y + 4.0)).abs() < 1e-3,
+            "icon half way out: {}",
+            f.placed[0].y
+        );
+        assert!(
+            (f.gaze.1 - (0.9 + (-0.3 - 0.9) * 0.5)).abs() < 1e-3,
+            "gaze half way back: {}",
+            f.gaze.1
+        );
+        // and a quarter of the way in, the same proportions hold on the way up
+        let p = (IN_S / 4.0) / d.dur;
+        let f = run_act(&d, p, Expr::CONTENT, (0.4, -0.3));
+        assert!(
+            (f.off.1 + RISE_PX * 0.25).abs() < 1e-3,
+            "rise a quarter in: {}",
+            f.off.1
+        );
     }
 
     #[test]
