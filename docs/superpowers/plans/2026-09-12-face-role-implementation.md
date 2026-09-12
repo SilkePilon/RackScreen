@@ -4066,7 +4066,7 @@ impl Eye {
         let outside = if dx > 0.0 && dy > 0.0 {
             dx * dx + dy * dy > r * r
         } else {
-            dx > 0.0 || dy > 0.0
+            dx > r || dy > r
         };
         if outside {
             return false;
@@ -4168,7 +4168,7 @@ pub fn cell_brightness(f: &FaceFrame, now: Secs, i: usize, j: usize) -> (f32, Op
         for dx in [-3.0, 0.0, 3.0] {
             let (sx, sy) = (cx + dx, cy + dy);
             let (lx, ly) = to_local(f, now, sx, sy);
-            let mut v = if eyes.iter().any(|e| e.inside(lx, ly)) { 1.0 } else { 0.0 };
+            let mut v: f32 = if eyes.iter().any(|e| e.inside(lx, ly)) { 1.0 } else { 0.0 };
             for p in &f.placed {
                 if p.alpha > 0.0 && sprite_hit(p, sx, sy) {
                     v = v.max(p.alpha);
