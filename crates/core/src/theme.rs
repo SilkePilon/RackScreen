@@ -143,10 +143,11 @@ pub enum Role {
     Ups,
     Net,
     Deploys,
+    Face,
 }
 
 impl Role {
-    pub const ALL: [Role; 21] = [
+    pub const ALL: [Role; 22] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -168,6 +169,7 @@ impl Role {
         Role::Ups,
         Role::Net,
         Role::Deploys,
+        Role::Face,
     ];
 
     pub fn index(self) -> usize {
@@ -203,6 +205,7 @@ impl Role {
             Role::Ups => "ups",
             Role::Net => "net",
             Role::Deploys => "deploys",
+            Role::Face => "face",
         }
     }
     pub fn parse(s: &str) -> Option<Role> {
@@ -222,6 +225,7 @@ impl Role {
                 | Role::Ups
                 | Role::Net
                 | Role::Deploys
+                | Role::Face
         )
     }
     /// Roles that need `location.lat` / `location.lon` in the config.
@@ -260,6 +264,7 @@ impl Role {
             Role::Ups => GREEN,
             Role::Net => BLUE,
             Role::Deploys => GREEN,
+            Role::Face => AMBER,
         }
     }
     pub fn icon(self) -> &'static str {
@@ -285,6 +290,7 @@ impl Role {
             Role::Ups => "battery-charging",
             Role::Net => "arrow-down-up",
             Role::Deploys => "rocket",
+            Role::Face => "smile",
         }
     }
 }
@@ -381,6 +387,7 @@ mod tests {
                 Role::Ups,
                 Role::Net,
                 Role::Deploys,
+                Role::Face,
             ]
         );
         assert!(!Role::PowerMix.is_cluster() && !Role::Price.is_cluster());
@@ -388,10 +395,16 @@ mod tests {
     }
 
     #[test]
-    fn twenty_one_roles_with_unique_names_and_icons() {
-        assert_eq!(Role::ALL.len(), 21);
+    fn twenty_two_roles_with_unique_names_and_icons() {
+        assert_eq!(Role::ALL.len(), 22);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 21);
+        assert_eq!(names.len(), 22);
+        assert_eq!(Role::parse("face"), Some(Role::Face));
+        assert_eq!(Role::Face.icon(), "smile");
+        assert_eq!(Role::Face.accent(), AMBER);
+        assert!(Role::Face.is_cluster());
+        assert!(!Role::Face.is_sky());
+        assert_eq!(Role::ALL[21], Role::Face);
         assert_eq!(Role::parse("gh-activity"), Some(Role::GhActivity));
         assert_eq!(Role::parse("deploys"), Some(Role::Deploys));
         assert_eq!(Role::Iss.icon(), "satellite");

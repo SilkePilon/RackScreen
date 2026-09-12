@@ -9,6 +9,7 @@ pub mod night;
 pub mod scene;
 pub mod scene_deploys;
 pub mod scene_electricity;
+pub mod scene_face;
 pub mod scene_fx;
 pub mod scene_github;
 pub mod scene_net;

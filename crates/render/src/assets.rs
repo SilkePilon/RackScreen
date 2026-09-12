@@ -79,6 +79,7 @@ icons!(
     "em-gas",
     "em-oil",
     "em-unknown",
+    "smile",
 );
 
 #[cfg(test)]

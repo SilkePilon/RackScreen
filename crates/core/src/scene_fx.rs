@@ -167,6 +167,7 @@ impl crate::model::Model {
             Role::Ups => !(link.prom && self.ups().have),
             Role::Net => !(link.prom && self.net().have),
             Role::Deploys => !(link.argocd && self.apps().have),
+            Role::Face => !st.have_nodes,
             Role::GhActivity => !(link.github && self.github().have),
             Role::Weather | Role::Wind => !(link.weather && self.weather().have),
             Role::Aqi => !(link.weather && self.air().have),

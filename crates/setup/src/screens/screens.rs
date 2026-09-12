@@ -852,10 +852,7 @@ mod tests {
         s.handle(KeyEvent::from(KeyCode::Up), &mut sh.clone_for_test(), 0.0);
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
-        assert!(
-            text.contains("▸ ○  deploys"),
-            "scrolled to the cursor: {text}"
-        );
+        assert!(text.contains("▸ ○  face"), "scrolled to the cursor: {text}");
     }
 
     #[test]

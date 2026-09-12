@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p assets/icons assets/fonts
-ICONS="arrow-up cpu memory-stick box heart-pulse download package-plus package-x package-minus flame circle-check server-off server triangle-alert shield-check plug-zap plug cloud-off euro cloud leaf thermometer database database-zap key-round zap"
+ICONS="arrow-up cpu memory-stick box heart-pulse download package-plus package-x package-minus flame circle-check server-off server triangle-alert shield-check plug-zap plug cloud-off euro cloud leaf thermometer database database-zap key-round zap smile"
 for i in $ICONS; do
   curl -sSL "https://unpkg.com/lucide-static@0.544.0/icons/$i.svg" -o "assets/icons/$i.svg"
   grep -q "<svg" "assets/icons/$i.svg" || { echo "bad svg: $i"; exit 1; }
