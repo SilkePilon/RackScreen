@@ -129,7 +129,6 @@ pub struct FacePlayer {
     price_prev: Option<PriceLevel>,
     sunrise_done: Option<i64>,
     sunset_done: Option<i64>,
-    last_tick: Secs,
 }
 
 impl FacePlayer {
@@ -158,7 +157,6 @@ impl FacePlayer {
             price_prev: None,
             sunrise_done: None,
             sunset_done: None,
-            last_tick: now,
         }
     }
 
@@ -228,20 +226,24 @@ impl FacePlayer {
             self.crashes.retain(|t| now - t <= DIZZY_WINDOW_SECS);
             self.crashes.push(now);
         }
-        self.request(kind, now);
-        if kind == ActKind::Ouch && self.crashes.len() >= DIZZY_CRASHES {
+        let _ = self.request(kind, now);
+        // only spend the counter when dizzy really got in: a full queue must not
+        // swallow it, the next crash should still make the face dizzy
+        if kind == ActKind::Ouch
+            && self.crashes.len() >= DIZZY_CRASHES
+            && self.request(ActKind::Dizzy, now)
+        {
             self.crashes.clear();
-            self.request(ActKind::Dizzy, now);
         }
     }
 
     pub fn on_link_down(&mut self, now: Secs) {
-        self.request(ActKind::Hello, now);
+        let _ = self.request(ActKind::Hello, now);
     }
 
     /// Queue an event act (not a habit), honouring rate limits, the cap,
-    /// severity, and boot.
-    fn request(&mut self, kind: ActKind, now: Secs) {
+    /// severity, and boot. True when the act was started or queued.
+    fn request(&mut self, kind: ActKind, now: Secs) -> bool {
         if kind == ActKind::WakeUp {
             self.queue.clear();
             self.current = Some(Playing {
@@ -250,24 +252,24 @@ impl FacePlayer {
                 dur: kind.def().dur as Secs,
             });
             self.mood.touch(now);
-            return;
+            return true;
         }
-        if kind.is_rate_limited() {
+        let limited = kind.is_rate_limited();
+        if limited {
             let last = if kind == ActKind::OhHi {
-                &mut self.last_pod_start
+                self.last_pod_start
             } else {
-                &mut self.last_pod_gone
+                self.last_pod_gone
             };
             if last.is_some_and(|t| now - t < POD_RATE_SECS) {
-                return;
+                return false;
             }
-            *last = Some(now);
         }
         self.mood.touch(now);
         if self.queue.contains(&kind)
             || self.current.is_some_and(|p| p.kind == kind && !p.done(now))
         {
-            return;
+            return false;
         }
         // an interruptible habit gives way: jump to its out phase
         if let Some(cur) = self.current {
@@ -281,18 +283,31 @@ impl FacePlayer {
                 }
             }
         }
-        if kind.is_severe() {
+        let queued = if kind.is_severe() {
             self.queue.push_front(kind);
             self.queue.truncate(QUEUE_CAP);
+            true
         } else if self.queue.len() < QUEUE_CAP {
             self.queue.push_back(kind);
+            true
+        } else {
+            false
+        };
+        // the window only starts once an act really got through: a dropped
+        // request must not cost the next one its twenty seconds
+        if queued && limited {
+            if kind == ActKind::OhHi {
+                self.last_pod_start = Some(now);
+            } else {
+                self.last_pod_gone = Some(now);
+            }
         }
+        queued
     }
 
     /// Advance: finish or start acts, run edge triggers and habits, and move
     /// the rest expression toward the mood.
     pub fn tick(&mut self, i: &FaceInputs, now: Secs) {
-        self.last_tick = now;
         self.edges(i, now);
         if let Some(cur) = self.current {
             if cur.done(now) {
@@ -329,7 +344,7 @@ impl FacePlayer {
         if i.ups_have {
             if self.ups_low_armed && i.ups_charge_pct < UPS_LOW_PCT {
                 self.ups_low_armed = false;
-                self.request(ActKind::OnFumes, now);
+                let _ = self.request(ActKind::OnFumes, now);
             } else if !self.ups_low_armed && i.ups_charge_pct > UPS_LOW_REARM_PCT {
                 self.ups_low_armed = true;
             }
@@ -337,7 +352,7 @@ impl FacePlayer {
         if i.storage_have {
             if self.storage_full_armed && i.storage_pct >= STORAGE_FULL_PCT {
                 self.storage_full_armed = false;
-                self.request(ActKind::SoFull, now);
+                let _ = self.request(ActKind::SoFull, now);
             } else if !self.storage_full_armed && i.storage_pct < STORAGE_FULL_REARM_PCT {
                 self.storage_full_armed = true;
             }
@@ -345,7 +360,7 @@ impl FacePlayer {
         if i.gh_have {
             if self.gh_milestone_armed && i.gh_today >= GH_MILESTONE {
                 self.gh_milestone_armed = false;
-                self.request(ActKind::LevelUp, now);
+                let _ = self.request(ActKind::LevelUp, now);
             } else if !self.gh_milestone_armed && i.gh_today < GH_MILESTONE {
                 self.gh_milestone_armed = true;
             }
@@ -356,9 +371,9 @@ impl FacePlayer {
             if let Some(prev) = self.price_prev {
                 if prev != level {
                     if cheap(level) && !cheap(prev) {
-                        self.request(ActKind::KaChing, now);
+                        let _ = self.request(ActKind::KaChing, now);
                     } else if pricey(level) && !pricey(prev) {
-                        self.request(ActKind::Expensive, now);
+                        let _ = self.request(ActKind::Expensive, now);
                     }
                 }
             }
@@ -370,7 +385,7 @@ impl FacePlayer {
             if let Some(e) = passing(i.sunrise) {
                 if self.sunrise_done != Some(e) {
                     self.sunrise_done = Some(e);
-                    self.request(ActKind::Morning, now);
+                    let _ = self.request(ActKind::Morning, now);
                 }
             }
             if let Some(e) = passing(i.sunset) {
@@ -381,7 +396,7 @@ impl FacePlayer {
                     } else {
                         ActKind::Evening
                     };
-                    self.request(kind, now);
+                    let _ = self.request(kind, now);
                 }
             }
         }
@@ -421,7 +436,9 @@ impl FacePlayer {
                 .collect();
             let total: u32 = pool.iter().map(|(_, w)| w).sum();
             let mut pick = (unit(&mut self.rng) * total as f32) as u32;
-            let mut kind = pool[0].0;
+            // unit() can hand back exactly 1.0, so pick can land on total and
+            // match no bucket: start at the last one, which is where it belongs
+            let mut kind = pool.last().map(|p| p.0).unwrap_or(ActKind::Humming);
             for (k, w) in &pool {
                 if pick < *w {
                     kind = *k;
@@ -591,6 +608,45 @@ mod tests {
             run(&mut p, &quiet(), t, t + 4.0);
         }
         p.tick(&quiet(), 204.0);
+        assert_eq!(p.current_act(), Some(ActKind::Dizzy));
+    }
+
+    #[test]
+    fn a_dropped_pod_start_does_not_spend_the_rate_limit() {
+        let mut p = player();
+        // fill: one playing, three queued
+        p.on_fx(&FxRequest::GithubStar, 0.0);
+        p.tick(&quiet(), 0.0);
+        p.on_fx(&FxRequest::AppSynced, 0.0);
+        p.on_fx(&FxRequest::TorrentDone, 0.0);
+        p.on_fx(&FxRequest::GithubMerge, 0.0);
+        p.on_fx(&FxRequest::PodStarted, 1.0); // dropped by the cap
+        assert!(!p.queued().contains(&ActKind::OhHi));
+        run(&mut p, &quiet(), 1.0, 14.0); // everything drains
+        p.on_fx(&FxRequest::PodStarted, 14.0); // 13 s later: must not be rate-limited
+        p.tick(&quiet(), 14.0);
+        assert_eq!(p.current_act(), Some(ActKind::OhHi));
+    }
+
+    #[test]
+    fn dizzy_survives_a_full_queue() {
+        let mut p = player();
+        for t in [0.0, 100.0] {
+            p.on_fx(&FxRequest::PodCrashed, t);
+            run(&mut p, &quiet(), t, t + 4.0);
+        }
+        // third crash while the queue is full: dizzy cannot be queued now
+        p.on_fx(&FxRequest::GithubStar, 200.0);
+        p.tick(&quiet(), 200.0);
+        p.on_fx(&FxRequest::AppSynced, 200.0);
+        p.on_fx(&FxRequest::TorrentDone, 200.0);
+        p.on_fx(&FxRequest::GithubMerge, 200.0);
+        p.on_fx(&FxRequest::PodCrashed, 200.0); // severe: goes to the front, merge drops off
+        assert!(!p.queued().contains(&ActKind::Dizzy));
+        // a fourth crash a little later, queue drained: dizzy must now come
+        run(&mut p, &quiet(), 200.0, 215.0);
+        p.on_fx(&FxRequest::PodCrashed, 215.0);
+        run(&mut p, &quiet(), 215.0, 219.0);
         assert_eq!(p.current_act(), Some(ActKind::Dizzy));
     }
 
