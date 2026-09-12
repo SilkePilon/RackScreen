@@ -142,7 +142,8 @@ impl FacePlayer {
             rng,
             queue: VecDeque::new(),
             current: None,
-            rest: ExprTween::new(Expr::CONTENT),
+            // the boot yawn starts with the eyes closed
+            rest: ExprTween::new(Expr::SLEEPY),
             last_mood: Mood::Content,
             last_pod_start: None,
             last_pod_gone: None,
@@ -227,14 +228,30 @@ impl FacePlayer {
             self.crashes.push(now);
         }
         let _ = self.request(kind, now);
-        // only spend the counter when dizzy really got in: a full queue must not
-        // swallow it, the next crash should still make the face dizzy
-        if kind == ActKind::Ouch
-            && self.crashes.len() >= DIZZY_CRASHES
-            && self.request(ActKind::Dizzy, now)
-        {
+        // only spend the counter when dizzy really got in: a dropped request must
+        // not swallow it, the next crash should still make the face dizzy
+        if kind == ActKind::Ouch && self.crashes.len() >= DIZZY_CRASHES && self.request_dizzy(now) {
             self.crashes.clear();
         }
+    }
+
+    /// Dizzy belongs right behind the crash that earned it, not behind
+    /// everything else that happens to be waiting. True when it got in.
+    fn request_dizzy(&mut self, now: Secs) -> bool {
+        let kind = ActKind::Dizzy;
+        if self.queue.contains(&kind)
+            || self.current.is_some_and(|p| p.kind == kind && !p.done(now))
+        {
+            return false;
+        }
+        self.mood.touch(now);
+        let at = usize::from(self.queue.front() == Some(&ActKind::Ouch));
+        if at >= QUEUE_CAP {
+            return false;
+        }
+        self.queue.insert(at, kind);
+        self.queue.truncate(QUEUE_CAP);
+        true
     }
 
     pub fn on_link_down(&mut self, now: Secs) {
@@ -271,18 +288,6 @@ impl FacePlayer {
         {
             return false;
         }
-        // an interruptible habit gives way: jump to its out phase
-        if let Some(cur) = self.current {
-            if cur.kind.is_habit() {
-                let out_start = cur.dur - crate::face_acts::IN_S as Secs;
-                if now - cur.started < out_start {
-                    self.current = Some(Playing {
-                        started: now - out_start,
-                        ..cur
-                    });
-                }
-            }
-        }
         let queued = if kind.is_severe() {
             self.queue.push_front(kind);
             self.queue.truncate(QUEUE_CAP);
@@ -293,6 +298,21 @@ impl FacePlayer {
         } else {
             false
         };
+        // an interruptible habit gives way: jump to its out phase. Only for a
+        // request that really got in: one the cap drops must not cut it short
+        if queued {
+            if let Some(cur) = self.current {
+                if cur.kind.is_habit() {
+                    let out_start = cur.dur - crate::face_acts::IN_S as Secs;
+                    if now - cur.started < out_start {
+                        self.current = Some(Playing {
+                            started: now - out_start,
+                            ..cur
+                        });
+                    }
+                }
+            }
+        }
         // the window only starts once an act really got through: a dropped
         // request must not cost the next one its twenty seconds
         if queued && limited {
@@ -314,7 +334,9 @@ impl FacePlayer {
                 let def = cur.kind.def();
                 let end = Expr::of(def.mood);
                 self.rest = ExprTween::new(end);
-                if !cur.kind.is_habit() {
+                // a habit with a mood of its own (dozing off) still reacts; a
+                // content habit leaves a held reaction alone
+                if !cur.kind.is_habit() || def.mood != Mood::Content {
                     self.mood.react(def.mood, now);
                 }
                 self.current = None;
@@ -635,25 +657,54 @@ mod tests {
     }
 
     #[test]
-    fn dizzy_survives_a_full_queue() {
+    fn dizzy_follows_the_crash_that_earned_it() {
         let mut p = player();
         for t in [0.0, 100.0] {
             p.on_fx(&FxRequest::PodCrashed, t);
             run(&mut p, &quiet(), t, t + 4.0);
         }
-        // third crash while the queue is full: dizzy cannot be queued now
+        // a full queue at the third crash: dizzy still goes right behind ouch
         p.on_fx(&FxRequest::GithubStar, 200.0);
         p.tick(&quiet(), 200.0);
         p.on_fx(&FxRequest::AppSynced, 200.0);
         p.on_fx(&FxRequest::TorrentDone, 200.0);
         p.on_fx(&FxRequest::GithubMerge, 200.0);
-        p.on_fx(&FxRequest::PodCrashed, 200.0); // severe: goes to the front, merge drops off
-        assert!(!p.queued().contains(&ActKind::Dizzy));
-        // a fourth crash a little later, queue drained: dizzy must now come
-        run(&mut p, &quiet(), 200.0, 215.0);
+        assert_eq!(
+            p.queued(),
+            vec![ActKind::Launch, ActKind::GotIt, ActKind::Merge]
+        );
+        p.on_fx(&FxRequest::PodCrashed, 200.0);
+        assert_eq!(
+            p.queued(),
+            vec![ActKind::Ouch, ActKind::Dizzy, ActKind::Launch]
+        );
+    }
+
+    #[test]
+    fn a_rejected_dizzy_does_not_spend_the_crash_counter() {
+        let mut p = player();
+        for t in [0.0, 100.0] {
+            p.on_fx(&FxRequest::PodCrashed, t);
+            run(&mut p, &quiet(), t, t + 4.0);
+        }
+        p.on_fx(&FxRequest::PodCrashed, 200.0);
+        p.tick(&quiet(), 200.0);
+        assert_eq!(p.current_act(), Some(ActKind::Ouch));
+        assert_eq!(p.queued(), vec![ActKind::Dizzy]);
+        // three more crashes while dizzy is still waiting: it cannot be queued
+        // twice, so the counter keeps them
+        for t in [200.5, 201.0, 201.5] {
+            p.on_fx(&FxRequest::PodCrashed, t);
+        }
+        assert_eq!(p.queued(), vec![ActKind::Dizzy], "no second dizzy");
+        run(&mut p, &quiet(), 201.5, 215.0); // everything drains
         p.on_fx(&FxRequest::PodCrashed, 215.0);
         run(&mut p, &quiet(), 215.0, 219.0);
-        assert_eq!(p.current_act(), Some(ActKind::Dizzy));
+        assert_eq!(
+            p.current_act(),
+            Some(ActKind::Dizzy),
+            "the earlier crashes still counted"
+        );
     }
 
     #[test]
@@ -851,6 +902,14 @@ mod tests {
             t += 1.0 / 30.0;
         }
         assert!(dozed);
+        // a habit with a mood of its own still colours the face afterwards
+        let start = t;
+        while t < start + 6.0 {
+            p.tick(&quiet(), t);
+            t += 1.0 / 30.0;
+        }
+        assert_eq!(p.current_act(), None, "the doze is over");
+        assert_eq!(p.mood(), Mood::Sleepy, "dozing off leaves it sleepy");
     }
 
     #[test]
