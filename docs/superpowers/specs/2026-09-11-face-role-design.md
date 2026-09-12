@@ -223,8 +223,8 @@ carry no icon unless listed. The reference for timing is `acts-4.html`.
 | starry-eyes | `GithubStar` | 2.6 | excited | star eyes, six sparkle dots twinkle around the rim |
 | merge | `GithubMerge` | 2.6 | happy | two dots slide in from both sides between the eyes, fuse into one, two nods |
 | party | `GithubRelease` | 3.2 | excited | confetti overlay over the whole grid, wow eyes, bounce |
-| ding | `GithubRun { ok: true }` (icon `check`) | 2.0 | happy | rim flash, wink (left closed, right squints) |
-| eye-roll | `GithubRun { ok: false }` (icon `cross`) | 2.6 | worried | eyes narrow and roll up to the ceiling, sink back down |
+| ding | `GithubRun { ok: true }` (icon `check`, Longhorn green) | 2.0 | happy | rim flash, wink (left closed, right squints) |
+| eye-roll | `GithubRun { ok: false }` (icon `cross`, alert red) | 2.6 | worried | eyes narrow and roll up to the ceiling, sink back down |
 | level-up | today's contributions cross 10 (icon `trophy`, gold) | 3.0 | excited | three stars light above the eyes one by one, proud `^ ^`, face lifts |
 
 **Argo CD** (icon `rocket`, orange)
@@ -412,6 +412,6 @@ the **Thresholds** group with help lines.
 - README: role table row (`face` | everything | two eyes on a dot matrix that
   act out every event and hold the cluster's mood), a "Face role" section with
   the mood table, the act catalogue in short, config fields.
-- `crates/app/examples/gifs.rs`: `face.gif` cycling boot, content, one act per
-  source and the weather habits; regenerated `all.gif`.
+- `crates/app/examples/gifs.rs`: `face.gif` is the standard 8 s role clip (content,
+  a pod crash, a GitHub star, the excited hold); regenerated `all.gif`.
 - Workspace version 0.6.0.
