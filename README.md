@@ -52,8 +52,8 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`moon`** — the illuminated fraction, lit the way the phase is going | **`iss`** — the ring empties toward the next ISS pass; a visible pass sweeps the rack |
 | <img src=".github/media/screens/ups.gif" alt="UPS role" width="200"> | <img src=".github/media/screens/net.gif" alt="NET role" width="200"> |
 | **`ups`** — battery outside, load inside; mains loss sweeps the rack red | **`net`** — download outside, upload inside, crawling with the flow |
-| <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | |
-| **`deploys`** — one arc per Argo CD application; a sync splashes the rocket | |
+| <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | <img src=".github/media/screens/face.gif" alt="FACE role" width="200"> |
+| **`deploys`** — one arc per Argo CD application; a sync splashes the rocket | **`face`** — two eyes on a dot matrix; every event gets its own act, the cluster's health its mood |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -102,7 +102,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Twenty-one roles exist:
+Every screen shows one or more **roles** and cycles through them. Twenty-two roles exist:
 
 | Role | Data source | Ring and badge |
 |---|---|---|
@@ -127,6 +127,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-one rol
 | `ups` | Prometheus (nut-exporter) | battery charge outside, load inside, badge runtime |
 | `net` | Prometheus (node-exporter) | download outside, upload inside, badge Mbit/s |
 | `deploys` | Argo CD | one arc per application by sync and health, badge healthy over total |
+| `face` | everything above | two eyes on a 24×24 dot matrix; one short act per event with the source's icon, the cluster's health as its mood between acts |
 
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`), `m` mixed (each screen alternates a cluster role with an electricity one) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
@@ -163,6 +164,12 @@ The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienr
 `gh-activity` shows your contribution calendar: the outer ring is today against your best day of the last 30, the inner ring the last seven days in the calendar greens. Pushes, new stars, merged pull requests and finished CI runs splash on it, and a published release sweeps the rack green.
 
 Create a fine-grained personal access token at github.com with read access to contents, metadata and Actions on the repositories you care about (contributions and the events feed need no extra permission), turn on `github enabled` and paste it into `github token`. The calendar is refreshed every five minutes and the events feed every `github poll secs` (60, the minimum GitHub allows); together with the Actions checks for repositories pushed to recently that is a few hundred requests an hour, far below the limit. Without a token the role shows a key icon. Note that `/users/{login}/events` only ever returns *public* events to a fine-grained token, so pushes to private repositories still count on the calendar ring but never splash; use a classic token with `repo` scope if you want private activity to splash too.
+
+## Face role
+
+`face` is a pet: two amber eyes on a 24×24 dot matrix that blink, glance around, tilt their head, and play a short **act** for every event the other roles only splash. A crashed pod drops a box on its head (X eyes); a node going down slides a rack in with a cross and a tear; a GitHub push is a commit it catches between the eyes; a release is confetti; an Argo sync launches a rocket; a finished torrent is a package it hugs; mains loss flickers the whole matrix; a hot node makes it sweat; thunder makes it jump; a cheap electricity hour turns its eyes into euro signs. Fifty-six acts in all, each with the source's icon in that source's colour in a slot at the bottom of the screen. While the weather is on, it replays the current conditions every few minutes (shades in the sun, shivering below zero, catching snowflakes), and when nothing happens it hums, peeks off the edge, stretches, scans, sneezes, or dozes off when it has been bored for hours.
+
+Between acts the eyes hold a **mood** from the cluster: scared on battery, sad with a node down, angry with a degraded app, volume or firing alert, hot over the thresholds, worried after a crash, sleepy half an hour before night mode, bored after `face bored after min` without an event, content otherwise. An act's mood (excited, happy, worried) holds `face reaction secs` afterwards unless the cluster state is worse. `face idle habits` and `face weather habits` turn the no-event acts off.
 
 ## Configuration
 
@@ -237,6 +244,12 @@ github:
 argocd:
   enabled: true            # watch applications.argoproj.io for the deploys role
   namespace: argocd
+
+face:
+  bored_after_mins: 120    # no cluster event for this long and the face role looks bored
+  reaction_secs: 60        # how long an act's mood (excited, sad, ...) holds afterwards
+  idle_habits: true        # hum, peek, stretch, scan, sneeze, hiccup, doze off now and then
+  weather_habits: true     # replay the current weather as an act every few minutes (needs weather.enabled)
 
 display:
   brightness: 1.0

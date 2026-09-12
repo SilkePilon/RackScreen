@@ -2529,7 +2529,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rackscreen"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2542,7 +2542,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-app"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2565,11 +2565,11 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-core"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "rackscreen-display"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "minifb",
@@ -2581,7 +2581,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-render"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "fontdue",
@@ -2592,7 +2592,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-setup"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "nix 0.31.3",
@@ -2613,7 +2613,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-sources"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "bytes",
