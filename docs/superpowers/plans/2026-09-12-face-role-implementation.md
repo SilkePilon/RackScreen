@@ -4109,8 +4109,9 @@ fn eyes_of(f: &FaceFrame) -> [Eye; 2] {
     ]
 }
 
-/// Screen point → face-local point (undo translation, then rotation about the
-/// face centre).
+/// Screen point → face-local point. The forward map is `S = T + C + R(rot)·(L − C)`
+/// with `C = (120, 120)` the face centre in local space: translate first, then
+/// tilt the whole translated face about its own centre.
 fn to_local(f: &FaceFrame, now: Secs, x: f32, y: f32) -> (f32, f32) {
     let bob = ((now * 0.9).sin() * 1.5) as f32;
     let tx = f.off.0 + f.gaze.0 * 10.0;
@@ -4119,7 +4120,7 @@ fn to_local(f: &FaceFrame, now: Secs, x: f32, y: f32) -> (f32, f32) {
     if f.rot == 0.0 {
         return (vx, vy);
     }
-    let (cx, cy) = (120.0, 120.0 + f.off.1);
+    let (cx, cy) = (120.0, 120.0);
     let (s, c) = (-f.rot).sin_cos();
     let (dx, dy) = (vx - cx, vy - cy);
     (cx + dx * c - dy * s, cy + dx * s + dy * c)
