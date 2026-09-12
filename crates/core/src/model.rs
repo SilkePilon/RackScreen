@@ -2370,6 +2370,15 @@ mod tests {
     #[test]
     fn link_down_reaches_the_face_and_link_up_after_boot_does_too() {
         let mut m = Model::new(Thresholds::default());
+        m.set_screens(vec![vec![Role::Face]], vec![15.0]);
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 3,
+                not_ready: Vec::new(),
+            },
+            0.0,
+        );
         m.apply(
             Event::Link {
                 target: LinkTarget::K8sApi,
@@ -2389,11 +2398,25 @@ mod tests {
             m.face().current_act(),
             Some(crate::face_acts::ActKind::Hello)
         );
+        // the link-down act plays first; the connecting scene only takes over
+        // once it is over
+        let hello = m.scene(0, 1.0);
+        assert_ne!(hello, crate::scene::connecting_scene(1.0));
+        assert_eq!(hello.items.len(), 49, "the face dot matrix");
+        assert_ne!(
+            m.scene_for_role(Role::Face, 1.0),
+            crate::scene::connecting_scene(1.0)
+        );
         let mut t = 1.0;
         while t < 5.0 {
             m.tick(t);
             t += 0.1;
         }
+        assert_eq!(
+            m.scene(0, 4.9),
+            crate::scene::connecting_scene(4.9),
+            "the act is over: connecting takes the screen"
+        );
         m.apply(
             Event::Link {
                 target: LinkTarget::K8sApi,
