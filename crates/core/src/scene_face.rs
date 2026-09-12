@@ -112,20 +112,48 @@ fn eyes_of(f: &FaceFrame) -> [Eye; 2] {
     ]
 }
 
-/// Screen point → face-local point (undo translation, then rotation about the
-/// face centre).
-fn to_local(f: &FaceFrame, now: Secs, x: f32, y: f32) -> (f32, f32) {
+/// The face centre in the local 240 px space: the eye pair is centred here
+/// before the lift, and the head tilt turns about it.
+const FACE_C: (f32, f32) = (120.0, 120.0);
+
+/// The frame's local → screen map, with the per-frame trigonometry evaluated
+/// once instead of once per sample.
+struct Xform {
+    tx: f32,
+    ty: f32,
+    /// `sin` and `cos` of `-rot`, i.e. of the *inverse* rotation.
+    sin: f32,
+    cos: f32,
+}
+
+/// Build the transform for `f` at `now`: the translation
+/// `T = (off.x + 10·gaze.x, off.y + lift + bob + 8·gaze.y)` with
+/// `bob = 1.5·sin(0.9·now)`, and the inverse of the head tilt `rot`.
+fn xform(f: &FaceFrame, now: Secs) -> Xform {
     let bob = ((now * 0.9).sin() * 1.5) as f32;
-    let tx = f.off.0 + f.gaze.0 * 10.0;
-    let ty = f.off.1 + f.e.lift + bob + f.gaze.1 * 8.0;
-    let (vx, vy) = (x - tx, y - ty);
-    if f.rot == 0.0 {
-        return (vx, vy);
+    let (sin, cos) = (-f.rot).sin_cos();
+    Xform {
+        tx: f.off.0 + f.gaze.0 * 10.0,
+        ty: f.off.1 + f.e.lift + bob + f.gaze.1 * 8.0,
+        sin,
+        cos,
     }
-    let (cx, cy) = (120.0, 120.0 + f.off.1);
-    let (s, c) = (-f.rot).sin_cos();
-    let (dx, dy) = (vx - cx, vy - cy);
-    (cx + dx * c - dy * s, cy + dx * s + dy * c)
+}
+
+/// Screen point → face-local point.
+///
+/// The face is drawn in a local 240 px space and mapped to the screen by
+/// `S = T + C + R(rot)·(L − C)`, where `C = (120, 120)` is the face centre and
+/// `T` is the translation of [`xform`]: the tilt is of the whole translated
+/// face, so the centre moves with it. This is the inverse,
+/// `L = C + R(−rot)·(S − T − C)`.
+fn to_local(xf: &Xform, x: f32, y: f32) -> (f32, f32) {
+    let (cx, cy) = FACE_C;
+    let (dx, dy) = (x - xf.tx - cx, y - xf.ty - cy);
+    (
+        cx + dx * xf.cos - dy * xf.sin,
+        cy + dx * xf.sin + dy * xf.cos,
+    )
 }
 
 fn sprite_hit(p: &Placed, x: f32, y: f32) -> bool {
@@ -160,6 +188,10 @@ fn overlay(f: &FaceFrame, i: usize, j: usize) -> f32 {
 /// Brightness 0..1 of cell `(i, j)` and the tint of the sprite covering it,
 /// before the flicker multiplier.
 pub fn cell_brightness(f: &FaceFrame, now: Secs, i: usize, j: usize) -> (f32, Option<Color>) {
+    cell_brightness_with(f, &xform(f, now), i, j)
+}
+
+fn cell_brightness_with(f: &FaceFrame, xf: &Xform, i: usize, j: usize) -> (f32, Option<Color>) {
     let (cx, cy) = (i as f32 * CELL + 5.0, j as f32 * CELL + 5.0);
     if ((cx - 120.0).powi(2) + (cy - 120.0).powi(2)).sqrt() > VISIBLE_R {
         return (0.0, None);
@@ -170,7 +202,7 @@ pub fn cell_brightness(f: &FaceFrame, now: Secs, i: usize, j: usize) -> (f32, Op
     for dy in [-3.0, 0.0, 3.0] {
         for dx in [-3.0, 0.0, 3.0] {
             let (sx, sy) = (cx + dx, cy + dy);
-            let (lx, ly) = to_local(f, now, sx, sy);
+            let (lx, ly) = to_local(xf, sx, sy);
             let mut v: f32 = if eyes.iter().any(|e| e.inside(lx, ly)) {
                 1.0
             } else {
@@ -200,6 +232,7 @@ pub fn cell_brightness(f: &FaceFrame, now: Secs, i: usize, j: usize) -> (f32, Op
 /// transparent in each.
 pub fn render_frame(f: &FaceFrame, now: Secs) -> Scene {
     let mut s = Scene::new();
+    let xf = xform(f, now);
     let clear = Color { a: 0, ..AMBER };
     for j in 0..N {
         let mut lit = Vec::with_capacity(N);
@@ -207,7 +240,7 @@ pub fn render_frame(f: &FaceFrame, now: Secs) -> Scene {
         for i in 0..N {
             let (cx, cy) = (i as f32 * CELL + 5.0, j as f32 * CELL + 5.0);
             let visible = ((cx - 120.0).powi(2) + (cy - 120.0).powi(2)).sqrt() <= VISIBLE_R;
-            let (b, tint) = cell_brightness(f, now, i, j);
+            let (b, tint) = cell_brightness_with(f, &xf, i, j);
             if !visible {
                 lit.push(clear);
                 unlit.push(clear);
@@ -498,5 +531,42 @@ mod tests {
             .unwrap();
         assert_ne!(l, r, "tilted: the eyes are at different heights");
         assert_eq!(render_frame(&f, 1.0), render_frame(&f, 1.0));
+    }
+
+    #[test]
+    fn rotation_is_about_the_moved_face_centre() {
+        // with the face raised 30 px, a head tilt must not move the eye pair's centroid
+        let centroid = |f: &FaceFrame| {
+            let cells = lit_cells(f);
+            let n = cells.len() as f32;
+            (
+                cells.iter().map(|c| c.0 as f32).sum::<f32>() / n,
+                cells.iter().map(|c| c.1 as f32).sum::<f32>() / n,
+            )
+        };
+        let mut plain = frame(Expr::CONTENT);
+        plain.off = (0.0, -30.0);
+        let mut tilted = plain.clone();
+        tilted.rot = 0.4;
+        let (px, py) = centroid(&plain);
+        let (tx, ty) = centroid(&tilted);
+        assert!(
+            (px - tx).abs() < 0.6 && (py - ty).abs() < 0.6,
+            "centroid moved: {:?} -> {:?}",
+            (px, py),
+            (tx, ty)
+        );
+        assert!(
+            (py - 9.0).abs() < 1.0,
+            "raised face sits around row 9: {py}"
+        );
+        // and the bob is part of the translation, not the rotation centre
+        let mut bobbed = tilted.clone();
+        bobbed.off = (0.0, 0.0);
+        let (_, by) = centroid(&bobbed);
+        assert!(
+            (by - 12.0).abs() < 1.0,
+            "unraised tilted face sits around row 12: {by}"
+        );
     }
 }
