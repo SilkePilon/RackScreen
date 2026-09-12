@@ -4592,8 +4592,9 @@ fn face_mid_act_frames() {
     let mut m = ready_model();
     tick_until(&mut m, 0.0, 2.0);
     m.apply(Event::AppSynced { name: "media".into() }, 2.0);
-    tick_until(&mut m, 2.0, 2.0 + 0.5 * 2.8);
-    check("face_launch_mid", &render_face(&m, 2.0 + 0.5 * 2.8));
+    // 34 % in: the rocket is mid-screen (at 50 % it has already left the top)
+    tick_until(&mut m, 2.0, 2.0 + 0.34 * 2.8);
+    check("face_launch_mid", &render_face(&m, 2.0 + 0.34 * 2.8));
 }
 
 #[test]
