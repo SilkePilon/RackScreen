@@ -71,6 +71,10 @@ pub enum Field {
     GithubPoll,
     ArgoEnabled,
     ArgoNamespace,
+    FaceBored,
+    FaceReaction,
+    FaceIdle,
+    FaceWeather,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,7 +147,7 @@ const fn spec(
 use FieldKind::{Bool, Number, Secret, Text};
 use Group::{Cluster, Display, Energy, Services, Sky, Thresholds};
 
-pub const FIELDS: [FieldSpec; 43] = [
+pub const FIELDS: [FieldSpec; 47] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -488,6 +492,38 @@ pub const FIELDS: [FieldSpec; 43] = [
         Number,
         "Temperature that marks a node hot.",
     ),
+    spec(
+        Field::FaceBored,
+        Thresholds,
+        "Face",
+        "bored after min",
+        Number,
+        "Minutes without a cluster event before it looks bored.",
+    ),
+    spec(
+        Field::FaceReaction,
+        Thresholds,
+        "Face",
+        "reaction secs",
+        Number,
+        "How long an act's mood holds afterwards, 1 to 600.",
+    ),
+    spec(
+        Field::FaceIdle,
+        Thresholds,
+        "Face",
+        "idle habits",
+        Bool,
+        "Hum, peek, stretch, scan, sneeze, doze off now and then.",
+    ),
+    spec(
+        Field::FaceWeather,
+        Thresholds,
+        "Face",
+        "weather habits",
+        Bool,
+        "Replay the current weather every few minutes.",
+    ),
 ];
 
 /// Indices into `FIELDS` for one group, in display order.
@@ -562,6 +598,10 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::GithubPoll => cfg.github.poll_secs.to_string(),
         Field::ArgoEnabled => cfg.argocd.enabled.to_string(),
         Field::ArgoNamespace => cfg.argocd.namespace.clone(),
+        Field::FaceBored => cfg.face.bored_after_mins.to_string(),
+        Field::FaceReaction => cfg.face.reaction_secs.to_string(),
+        Field::FaceIdle => cfg.face.idle_habits.to_string(),
+        Field::FaceWeather => cfg.face.weather_habits.to_string(),
     }
 }
 
@@ -653,6 +693,10 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         Field::GithubPoll => cfg.github.poll_secs = num::<u64>(t, "poll secs")?.max(60),
         Field::ArgoEnabled => cfg.argocd.enabled = t == "true",
         Field::ArgoNamespace => cfg.argocd.namespace = t.into(),
+        Field::FaceBored => cfg.face.bored_after_mins = num::<u32>(t, "minutes")?.max(5),
+        Field::FaceReaction => cfg.face.reaction_secs = num::<u32>(t, "seconds")?.clamp(1, 600),
+        Field::FaceIdle => cfg.face.idle_habits = t == "true",
+        Field::FaceWeather => cfg.face.weather_habits = t == "true",
     }
     Ok(())
 }
@@ -1260,7 +1304,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 43);
+        assert_eq!(FIELDS.len(), 47);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1268,7 +1312,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 43);
+        assert_eq!(FIELDS.len(), 47);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);
@@ -1286,7 +1330,48 @@ mod tests {
             assert!(!group_indices(g).is_empty(), "{g:?} is empty");
         }
         assert_eq!(group_indices(Group::Cluster), vec![0, 1, 2, 3, 4]);
-        assert_eq!(group_indices(Group::Thresholds).len(), 3);
+        assert_eq!(group_indices(Group::Thresholds).len(), 7);
+    }
+
+    #[test]
+    fn face_fields_round_trip_and_clamp() {
+        let mut c = Config::default();
+        assert_eq!(get(&c, Field::FaceBored), "120");
+        assert_eq!(get(&c, Field::FaceReaction), "60");
+        assert_eq!(get(&c, Field::FaceIdle), "true");
+        assert_eq!(get(&c, Field::FaceWeather), "true");
+        set(&mut c, Field::FaceBored, "3").unwrap();
+        assert_eq!(c.face.bored_after_mins, 5, "clamped to the minimum");
+        set(&mut c, Field::FaceReaction, "900").unwrap();
+        assert_eq!(c.face.reaction_secs, 600);
+        set(&mut c, Field::FaceReaction, "0").unwrap();
+        assert_eq!(c.face.reaction_secs, 1);
+        assert!(set(&mut c, Field::FaceBored, "soon").is_err());
+        set(&mut c, Field::FaceIdle, "false").unwrap();
+        assert!(!c.face.idle_habits);
+        assert_eq!(
+            section_enabled(&c, "Face"),
+            None,
+            "no `enabled` toggle for the face"
+        );
+        let face: Vec<Field> = FIELDS
+            .iter()
+            .filter(|s| s.section == "Face")
+            .map(|s| s.field)
+            .collect();
+        assert_eq!(
+            face,
+            vec![
+                Field::FaceBored,
+                Field::FaceReaction,
+                Field::FaceIdle,
+                Field::FaceWeather
+            ]
+        );
+        assert!(FIELDS
+            .iter()
+            .filter(|s| s.section == "Face")
+            .all(|s| s.group == Group::Thresholds));
     }
 
     #[test]
@@ -1323,7 +1408,7 @@ mod tests {
             Group::Thresholds,
             "up from the first field wraps to the end"
         );
-        assert_eq!(FIELDS[screen.row].field, Field::HotTemp);
+        assert_eq!(FIELDS[screen.row].field, Field::FaceWeather);
         screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Cluster);
         for _ in 0..5 {
