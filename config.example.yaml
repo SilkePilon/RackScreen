@@ -66,6 +66,12 @@ argocd:
   enabled: true            # watch applications.argoproj.io for the deploys role
   namespace: argocd
 
+face:
+  bored_after_mins: 120    # no cluster event for this long and the face role looks bored
+  reaction_secs: 60        # how long an act's mood (excited, sad, ...) holds afterwards
+  idle_habits: true        # hum, peek, stretch, scan, sneeze, hiccup, doze off now and then
+  weather_habits: true     # replay the current weather as an act every few minutes (needs weather.enabled)
+
 display:
   brightness: 1.0
   fps: 30

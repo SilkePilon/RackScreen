@@ -10,8 +10,9 @@ use anyhow::Result;
 use chrono::Timelike;
 use rackscreen_core::anim::Secs;
 use rackscreen_core::event::Event;
+use rackscreen_core::face_player::FaceTuning;
 use rackscreen_core::model::{Model, Thresholds};
-use rackscreen_core::night::is_night;
+use rackscreen_core::night::{bedtime_near, is_night};
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
 use rackscreen_render::frame::{dirty_rect, new_pixmap, Orient, Rect};
@@ -71,6 +72,33 @@ pub struct NightWindow {
     pub enabled: bool,
     pub start_min: u32,
     pub end_min: u32,
+}
+
+/// Sleepy around the night window; never when night is disabled or forced.
+pub fn face_bedtime(night: &NightWindow, minutes: u32, override_: Option<bool>) -> bool {
+    night.enabled && override_.is_none() && bedtime_near(minutes, night.start_min, night.end_min)
+}
+
+#[cfg(test)]
+mod bedtime_tests {
+    use super::*;
+
+    #[test]
+    fn bedtime_needs_night_enabled_and_no_override() {
+        let on = NightWindow {
+            enabled: true,
+            start_min: 1380,
+            end_min: 420,
+        };
+        let off = NightWindow {
+            enabled: false,
+            ..on
+        };
+        assert!(face_bedtime(&on, 1360, None));
+        assert!(!face_bedtime(&off, 1360, None));
+        assert!(!face_bedtime(&on, 1360, Some(false)));
+        assert!(!face_bedtime(&on, 720, None));
+    }
 }
 
 /// Multiply every channel by `k` (0 = black, 1 = unchanged).
@@ -138,6 +166,8 @@ pub struct RenderLoop {
     pub github_token_present: bool,
     /// Only one screen may iris at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
+    /// `face:` config, passed to the model once.
+    pub face: FaceTuning,
 }
 
 impl RenderLoop {
@@ -163,6 +193,7 @@ impl RenderLoop {
         model.set_token_present(self.token_present);
         model.set_location_present(self.location_present);
         model.set_github_token_present(self.github_token_present);
+        model.set_face_tuning(self.face);
         model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
@@ -178,6 +209,7 @@ impl RenderLoop {
             model.set_local_slot(minutes / 15);
             model.set_unix_now(unix);
             model.set_utc_offset_secs(offset);
+            model.set_bedtime_near(face_bedtime(&self.night, minutes, model.night_override()));
             model.tick(now);
 
             let night = match model.night_override() {

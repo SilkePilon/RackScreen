@@ -37,6 +37,8 @@ pub struct Config {
     #[serde(default)]
     pub argocd: ArgocdCfg,
     #[serde(default)]
+    pub face: FaceCfg,
+    #[serde(default)]
     pub screens: Vec<ScreenCfg>,
 }
 
@@ -166,6 +168,31 @@ pub struct GithubCfg {
 pub struct ArgocdCfg {
     pub enabled: bool,
     pub namespace: String,
+}
+
+/// The `face` role: how long it stays in a mood and which habits it has.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct FaceCfg {
+    /// Minutes without a cluster event before the face is bored.
+    pub bored_after_mins: u32,
+    /// Seconds an act's mood holds afterwards.
+    pub reaction_secs: u32,
+    /// Hum, peek, stretch, scan, sneeze, hiccup, doze off on a random timer.
+    pub idle_habits: bool,
+    /// Replay the current weather as an act every few minutes.
+    pub weather_habits: bool,
+}
+
+impl FaceCfg {
+    pub fn tuning(&self) -> rackscreen_core::face_player::FaceTuning {
+        rackscreen_core::face_player::FaceTuning {
+            bored_after: self.bored_after_mins as f64 * 60.0,
+            reaction: self.reaction_secs as f64,
+            idle_habits: self.idle_habits,
+            weather_habits: self.weather_habits,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -319,6 +346,16 @@ impl Default for ArgocdCfg {
         Self {
             enabled: true,
             namespace: "argocd".into(),
+        }
+    }
+}
+impl Default for FaceCfg {
+    fn default() -> Self {
+        Self {
+            bored_after_mins: 120,
+            reaction_secs: 60,
+            idle_habits: true,
+            weather_habits: true,
         }
     }
 }
@@ -486,6 +523,16 @@ impl Config {
             self.price.poll_secs >= 900,
             "price.poll_secs must be at least 900; Energy-Charts rate-limits (got {})",
             self.price.poll_secs
+        );
+        anyhow::ensure!(
+            self.face.bored_after_mins >= 5,
+            "face.bored_after_mins must be at least 5 (got {})",
+            self.face.bored_after_mins
+        );
+        anyhow::ensure!(
+            (1..=600).contains(&self.face.reaction_secs),
+            "face.reaction_secs must be between 1 and 600 (got {})",
+            self.face.reaction_secs
         );
         anyhow::ensure!(
             !self.electricity.enabled || !self.electricity.zone.trim().is_empty(),
@@ -811,5 +858,35 @@ mod tests {
         assert_eq!(expand_home_with("/abs", home), PathBuf::from("/abs"));
         assert_eq!(expand_home_with("rel", home), PathBuf::from("rel"));
         assert_eq!(expand_home_with("~x", home), PathBuf::from("~x"));
+    }
+
+    #[test]
+    fn face_defaults_and_validation() {
+        let c = Config::default();
+        assert_eq!(c.face.bored_after_mins, 120);
+        assert_eq!(c.face.reaction_secs, 60);
+        assert!(c.face.idle_habits && c.face.weather_habits);
+        let t = c.face.tuning();
+        assert_eq!(t.bored_after, 7200.0);
+        assert_eq!(t.reaction, 60.0);
+        let mut bad = Config::default();
+        bad.face.bored_after_mins = 4;
+        assert!(bad
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("face.bored_after_mins"));
+        let mut bad = Config::default();
+        bad.face.reaction_secs = 0;
+        assert!(bad
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("face.reaction_secs"));
+        let mut bad = Config::default();
+        bad.face.reaction_secs = 601;
+        assert!(bad.validate().is_err());
+        let c: Config = serde_yaml_ng::from_str("face:\n  idle_habits: false\n").unwrap();
+        assert!(!c.face.idle_habits && c.face.weather_habits);
     }
 }
