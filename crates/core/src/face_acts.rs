@@ -34,6 +34,31 @@ pub enum ActKind {
     Ding,
     EyeRoll,
     LevelUp,
+    // argo cd
+    Launch,
+    Grump,
+    Wink,
+    // qbittorrent
+    Incoming,
+    GotIt,
+    // ups
+    LightsFlicker,
+    Phew,
+    OnFumes,
+    // alerts
+    Alarm,
+    AllClear,
+    // heat and load
+    TooHot,
+    WorkingHard,
+    Stuffed,
+    // longhorn
+    Hmm,
+    DisksFine,
+    SoFull,
+    // link
+    Hello,
+    FoundYou,
 }
 
 impl ActKind {
@@ -50,11 +75,32 @@ impl ActKind {
         ActKind::Ding,
         ActKind::EyeRoll,
         ActKind::LevelUp,
+        ActKind::Launch,
+        ActKind::Grump,
+        ActKind::Wink,
+        ActKind::Incoming,
+        ActKind::GotIt,
+        ActKind::LightsFlicker,
+        ActKind::Phew,
+        ActKind::OnFumes,
+        ActKind::Alarm,
+        ActKind::AllClear,
+        ActKind::TooHot,
+        ActKind::WorkingHard,
+        ActKind::Stuffed,
+        ActKind::Hmm,
+        ActKind::DisksFine,
+        ActKind::SoFull,
+        ActKind::Hello,
+        ActKind::FoundYou,
     ];
 
     /// Jumps the queue.
     pub fn is_severe(self) -> bool {
-        matches!(self, ActKind::Ouch | ActKind::LostOne)
+        matches!(
+            self,
+            ActKind::Ouch | ActKind::LostOne | ActKind::LightsFlicker | ActKind::Hello
+        )
     }
     /// Habits never queue and any event interrupts them.
     pub fn is_habit(self) -> bool {
@@ -101,6 +147,38 @@ impl ActKind {
             ActKind::Ding => d(2.0, Mood::Happy, Some(&CHECK), Some(T_LONGHORN), ding),
             ActKind::EyeRoll => d(2.6, Mood::Worried, Some(&CROSS), Some(T_ALERT), eye_roll),
             ActKind::LevelUp => d(3.0, Mood::Excited, Some(&TROPHY), Some(T_SKY), level_up),
+            ActKind::Launch => d(2.8, Mood::Happy, Some(&ROCKET), Some(T_ARGO), launch),
+            ActKind::Grump => d(2.6, Mood::Angry, Some(&TRI), Some(T_ALERT), grump),
+            ActKind::Wink => d(2.2, Mood::Happy, Some(&ROCKET), Some(T_ARGO), wink),
+            ActKind::Incoming => d(
+                2.8,
+                Mood::Content,
+                Some(&DOWNLOAD),
+                Some(T_TORRENT),
+                incoming,
+            ),
+            ActKind::GotIt => d(3.2, Mood::Happy, Some(&DOWNLOAD), Some(T_TORRENT), got_it),
+            ActKind::LightsFlicker => {
+                d(3.0, Mood::Scared, Some(&BOLT), Some(T_UPS), lights_flicker)
+            }
+            ActKind::Phew => d(2.8, Mood::Content, Some(&BOLT), Some(T_UPS), phew),
+            ActKind::OnFumes => d(3.0, Mood::Worried, Some(&BATLOW), Some(T_UPS), on_fumes),
+            ActKind::Alarm => d(3.0, Mood::Angry, Some(&BELL), Some(T_ALERT), alarm),
+            ActKind::AllClear => d(2.6, Mood::Content, Some(&BELL), Some(T_ALERT), all_clear),
+            ActKind::TooHot => d(3.0, Mood::Hot, Some(&FLAME), Some(T_PROM), too_hot),
+            ActKind::WorkingHard => d(2.8, Mood::Hot, Some(&CPU), Some(T_PROM), working_hard),
+            ActKind::Stuffed => d(2.8, Mood::Hot, Some(&MEM), Some(T_MEM), stuffed),
+            ActKind::Hmm => d(2.8, Mood::Angry, Some(&DISK), Some(T_LONGHORN), hmm),
+            ActKind::DisksFine => d(
+                2.2,
+                Mood::Content,
+                Some(&DISK),
+                Some(T_LONGHORN),
+                disks_fine,
+            ),
+            ActKind::SoFull => d(3.0, Mood::Worried, Some(&DISK), Some(T_LONGHORN), so_full),
+            ActKind::Hello => d(3.2, Mood::Worried, Some(&CLOUD), Some(T_K8S), hello),
+            ActKind::FoundYou => d(2.2, Mood::Happy, Some(&CLOUD), Some(T_K8S), found_you),
         }
     }
 }
@@ -523,6 +601,272 @@ fn level_up(f: &mut Frame) {
     f.hold(&Expr::EXCITED, 0.85, 1.0);
 }
 
+fn sweat(f: &mut Frame, gx: f32, speed: f32) {
+    let d = (f.t * speed).fract();
+    f.dot(gx, 1.0 + d * 6.0, Some(T_TORRENT), 1.0 - d * 0.3);
+}
+
+// ---------------- argo cd ----------------
+
+fn launch(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    let s = ease(seg(q, 0.1, 0.7));
+    f.icon_alpha = 0.0;
+    let gy = f.slot_y - s * 26.0;
+    f.at(&ROCKET, SLOT_X, gy, Some(T_ARGO), 1.0);
+    for k in 1..4 {
+        if (t * 25.0 + k as f32).sin() > 0.0 {
+            let side = if k % 2 == 1 { -0.5 } else { 0.5 };
+            f.dot(
+                SLOT_X + 3.0 + side * (k as f32 - 1.0),
+                gy + 7.0 + k as f32,
+                Some(T_UPS),
+                1.0,
+            );
+        }
+    }
+    f.gaze = (0.0, lerp(0.9, -1.0, s));
+    if inseg(q, 0.1, 0.6) {
+        f.e.open = 1.25;
+    }
+    f.hold(&Expr::HAPPY, 0.65, 0.9);
+}
+
+fn grump(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.icon_alpha = blink(t, 10.0, 0.15);
+    f.hold(&Expr::ANGRY, 0.0, 0.2);
+    if inseg(q, 0.3, 0.55) {
+        f.off.0 += (seg(q, 0.3, 0.55) * PI * 3.0).sin() * 6.0;
+    }
+}
+
+fn wink(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.icon_alpha = 0.7 + 0.3 * (t * 8.0).sin();
+    if inseg(q, 0.1, 0.7) {
+        f.eyes[1].open = Some(0.06);
+        f.e.lower = 0.4;
+    }
+    f.hold(&Expr::HAPPY, 0.7, 1.0);
+}
+
+// ---------------- qbittorrent ----------------
+
+fn incoming(f: &mut Frame) {
+    let q = f.q;
+    let n = (seg(q, 0.1, 0.9) * 12.0).floor() as usize;
+    for k in 0..12 {
+        f.dot(
+            6.0 + k as f32,
+            15.5,
+            Some(T_TORRENT),
+            if k < n { 1.0 } else { 0.25 },
+        );
+    }
+    f.gaze = (-0.6 + seg(q, 0.1, 0.9) * 1.2, 0.9);
+    f.set(&Expr::FOCUS, 1.0);
+    f.off.1 += 3.0;
+}
+
+fn got_it(f: &mut Frame) {
+    let q = f.q;
+    let s = seg(q, 0.0, 0.35);
+    f.at(
+        &COIN,
+        11.0,
+        -2.0 + s * 11.0,
+        Some(T_TORRENT),
+        1.0 - seg(q, 0.75, 0.85),
+    );
+    f.gaze = if s < 1.0 {
+        (0.0, -1.0 + s * 2.0)
+    } else {
+        (0.0, 0.1)
+    };
+    if inseg(q, 0.35, 0.7) {
+        f.sprite = Some([&SQZ_L, &SQZ_R]);
+        f.off.0 += (seg(q, 0.35, 0.7) * PI * 4.0).sin() * 4.0;
+    }
+    f.hold(&Expr::HAPPY, 0.7, 0.9);
+}
+
+// ---------------- ups ----------------
+
+fn lights_flicker(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    if q < 0.3 {
+        f.post.flicker = if (q * 60.0).sin() > -0.2 { 1.0 } else { 0.08 };
+    }
+    f.hold(&Expr::SCARED, 0.3, 0.5);
+    if q > 0.45 {
+        f.off.0 += (t * 70.0).sin() * 1.6;
+    }
+}
+
+fn phew(f: &mut Frame) {
+    let q = f.q;
+    f.over(&CHECK, 1.0, 0.0, Some(T_LONGHORN), seg(q, 0.05, 0.2));
+    f.hold(&Expr::RELIEF, 0.1, 0.3);
+    if inseg(q, 0.3, 0.8) {
+        f.off.1 += 6.0 * ease(seg(q, 0.3, 0.8));
+    }
+    f.hold(&Expr::CONTENT, 0.8, 1.0);
+}
+
+fn on_fumes(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    let on = blink(t, 8.0, 0.2);
+    f.over(&DOT, 1.0, 2.0, Some(T_ALERT), on);
+    f.over(&DOT, 1.0, 3.0, Some(T_ALERT), on);
+    let s = seg(q, 0.1, 0.7);
+    f.e.open = 1.0 - s * 0.7;
+    f.off.1 += s * 6.0;
+    if inseg(q, 0.6, 0.85) {
+        f.e.open = 0.05 + 0.5 * (1.0 - bump(q, 0.6, 0.85));
+    }
+    f.hold(&Expr::WORRIED, 0.85, 1.0);
+}
+
+// ---------------- alerts ----------------
+
+fn alarm(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.icon_frame = Some(if (t * 14.0).sin() > 0.0 {
+        &BELL
+    } else {
+        &BELL2
+    });
+    f.post.rim = 0.45 + 0.45 * (t * 10.0).sin().max(0.0);
+    f.set(&Expr::SCARED, seg(q, 0.0, 0.15));
+    f.gaze = ((t * 5.0).sin() * 0.9, 0.3);
+    f.hold(&Expr::ANGRY, 0.8, 1.0);
+}
+
+fn all_clear(f: &mut Frame) {
+    let q = f.q;
+    f.over(
+        &CHECK,
+        1.0,
+        -1.0,
+        Some(T_LONGHORN),
+        out_back(seg(q, 0.05, 0.3)),
+    );
+    f.post.rim = 0.35 * bump(q, 0.1, 0.5);
+    f.hold(&Expr::RELIEF, 0.2, 0.45);
+    if inseg(q, 0.45, 0.8) {
+        f.off.1 += 5.0 * bump(q, 0.45, 0.8);
+    }
+    f.hold(&Expr::CONTENT, 0.8, 1.0);
+}
+
+// ---------------- heat and load ----------------
+
+fn too_hot(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.hold(&Expr::HOT, 0.0, 0.2);
+    f.off.1 += (t * 12.0).sin().abs() * 3.0;
+    if inseg(q, 0.4, 0.7) {
+        f.off.0 += (seg(q, 0.4, 0.7) * PI * 4.0).sin() * 5.0;
+    }
+    sweat(f, 19.0, 0.8);
+}
+
+fn working_hard(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.hold(&Expr::GRIMACE, 0.0, 0.2);
+    if inseg(q, 0.3, 0.8) {
+        f.off.0 += (t * 40.0).sin() * 1.5;
+    }
+    sweat(f, 5.0, 0.9);
+    f.hold(&Expr::HOT, 0.8, 1.0);
+}
+
+fn stuffed(f: &mut Frame) {
+    let q = f.q;
+    let s = seg(q, 0.1, 0.5);
+    if q < 0.7 {
+        f.e.open = 0.2;
+        f.e.scale = 1.0 + 0.18 * s;
+        f.e.sep = 1.0 + 0.12 * s;
+        f.e.lower = 0.5;
+    }
+    if inseg(q, 0.5, 0.7) {
+        let r = seg(q, 0.5, 0.7);
+        for k in 0..3 {
+            let kk = k as f32;
+            f.dot(11.0 + kk * 0.5, 15.0 + r * 2.0 + kk, None, 1.0 - r);
+        }
+    }
+    f.hold(&Expr::HOT, 0.75, 1.0);
+}
+
+// ---------------- longhorn ----------------
+
+fn hmm(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.over(&CROSS, 1.0, 1.0, Some(T_ALERT), blink(t, 10.0, 0.15));
+    f.hold(&Expr::GRIMACE, 0.0, 0.2);
+    f.eyes[0].open = Some(0.4);
+    f.eyes[1].open = Some(1.15);
+    let s = ease(seg(q, 0.05, 0.35)) * (1.0 - seg(q, 0.8, 1.0));
+    f.rot = -0.12 * s;
+    f.off.0 -= 4.0 * s;
+    f.hold(&Expr::ANGRY, 0.8, 1.0);
+}
+
+fn disks_fine(f: &mut Frame) {
+    let q = f.q;
+    f.over(
+        &CHECK,
+        1.0,
+        0.0,
+        Some(T_LONGHORN),
+        out_back(seg(q, 0.05, 0.3)),
+    );
+    f.hold(&Expr::HAPPY, 0.1, 0.3);
+    if inseg(q, 0.4, 0.65) {
+        f.off.1 += 4.0 * bump(q, 0.4, 0.65);
+    }
+    f.hold(&Expr::CONTENT, 0.8, 1.0);
+}
+
+fn so_full(f: &mut Frame) {
+    let q = f.q;
+    let n = (seg(q, 0.05, 0.7) * 7.0).floor() as usize;
+    f.icon_frame = Some(&DISK_FILL[n.min(7)]);
+    let k = n as f32 / 7.0;
+    f.e.scale = 1.0 + 0.16 * k;
+    f.e.open = 1.1 + 0.1 * k;
+    f.hold(&Expr::WORRIED, 0.8, 1.0);
+}
+
+// ---------------- link ----------------
+
+fn hello(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    let on = (t * 8.0).sin() > 0.0;
+    f.icon_alpha = if on { 0.9 } else { 0.3 };
+    f.over(&CROSS, 1.0, 0.0, Some(T_ALERT), if on { 1.0 } else { 0.25 });
+    f.e.open = 0.5;
+    f.e.lower = 0.2;
+    f.gaze = ((q * 9.0).sin() * 1.2, -0.2);
+    f.hold(&Expr::WORRIED, 0.8, 1.0);
+}
+
+fn found_you(f: &mut Frame) {
+    let q = f.q;
+    f.icon_alpha = 0.3 + 0.7 * seg(q, 0.0, 0.2);
+    let b = (seg(q, 0.1, 0.45) * PI * 2.0).sin();
+    if b > 0.7 {
+        f.e.open = 0.05;
+    }
+    if inseg(q, 0.45, 0.7) {
+        f.e.open = 1.3;
+    }
+    f.hold(&Expr::HAPPY, 0.7, 0.95);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -661,5 +1005,46 @@ mod tests {
         for k in ActKind::ALL {
             assert_eq!(k.def().kind, *k);
         }
+    }
+
+    #[test]
+    fn task_six_acts_exist_with_their_sources() {
+        assert_eq!(ActKind::ALL.len(), 30);
+        let d = ActKind::Launch.def();
+        assert!(
+            std::ptr::eq(d.icon.unwrap(), &ROCKET)
+                && d.tint == Some(T_ARGO)
+                && d.mood == Mood::Happy
+        );
+        let d = ActKind::SoFull.def();
+        assert!(std::ptr::eq(d.icon.unwrap(), &DISK));
+        let f = run_act(&d, 0.6, Expr::CONTENT, (0.0, 0.0));
+        assert!(
+            f.placed[0].sprite.rows[6] == "#######",
+            "disk fills from the bottom"
+        );
+        assert!(ActKind::LightsFlicker.is_severe() && ActKind::Hello.is_severe());
+        let f = run_act(
+            &ActKind::LightsFlicker.def(),
+            0.15,
+            Expr::CONTENT,
+            (0.0, 0.0),
+        );
+        assert!(
+            f.post.flicker < 0.5 || f.post.flicker > 0.9,
+            "flicker toggles"
+        );
+        let f = run_act(&ActKind::Alarm.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!(f.post.rim > 0.4);
+        let f = run_act(&ActKind::GotIt.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!(f
+            .sprite
+            .is_some_and(|s| std::ptr::eq(s[0], &SQZ_L) && std::ptr::eq(s[1], &SQZ_R)));
+        let f = run_act(&ActKind::Hmm.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!(
+            f.eyes[0].open.unwrap() < f.eyes[1].open.unwrap(),
+            "suspicious: left narrow, right wide"
+        );
+        assert!(f.rot < 0.0);
     }
 }
