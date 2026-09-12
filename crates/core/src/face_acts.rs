@@ -59,6 +59,26 @@ pub enum ActKind {
     // link
     Hello,
     FoundYou,
+    // weather habits
+    Sunny,
+    Raining,
+    Windy,
+    Snowing,
+    Foggy,
+    MehClouds,
+    Heatwave,
+    Freezing,
+    // sky and air events
+    Lightning,
+    UhOhRain,
+    Cough,
+    Morning,
+    Evening,
+    Awoo,
+    LookUp,
+    // prices
+    KaChing,
+    Expensive,
 }
 
 impl ActKind {
@@ -93,18 +113,49 @@ impl ActKind {
         ActKind::SoFull,
         ActKind::Hello,
         ActKind::FoundYou,
+        ActKind::Sunny,
+        ActKind::Raining,
+        ActKind::Windy,
+        ActKind::Snowing,
+        ActKind::Foggy,
+        ActKind::MehClouds,
+        ActKind::Heatwave,
+        ActKind::Freezing,
+        ActKind::Lightning,
+        ActKind::UhOhRain,
+        ActKind::Cough,
+        ActKind::Morning,
+        ActKind::Evening,
+        ActKind::Awoo,
+        ActKind::LookUp,
+        ActKind::KaChing,
+        ActKind::Expensive,
     ];
 
     /// Jumps the queue.
     pub fn is_severe(self) -> bool {
         matches!(
             self,
-            ActKind::Ouch | ActKind::LostOne | ActKind::LightsFlicker | ActKind::Hello
+            ActKind::Ouch
+                | ActKind::LostOne
+                | ActKind::LightsFlicker
+                | ActKind::Hello
+                | ActKind::Lightning
         )
     }
     /// Habits never queue and any event interrupts them.
     pub fn is_habit(self) -> bool {
-        false
+        matches!(
+            self,
+            ActKind::Sunny
+                | ActKind::Raining
+                | ActKind::Windy
+                | ActKind::Snowing
+                | ActKind::Foggy
+                | ActKind::MehClouds
+                | ActKind::Heatwave
+                | ActKind::Freezing
+        )
     }
     /// At most one per 20 s.
     pub fn is_rate_limited(self) -> bool {
@@ -179,6 +230,80 @@ impl ActKind {
             ActKind::SoFull => d(3.0, Mood::Worried, Some(&DISK), Some(T_LONGHORN), so_full),
             ActKind::Hello => d(3.2, Mood::Worried, Some(&CLOUD), Some(T_K8S), hello),
             ActKind::FoundYou => d(2.2, Mood::Happy, Some(&CLOUD), Some(T_K8S), found_you),
+            ActKind::Sunny => d(3.2, Mood::Content, Some(&SUN), Some(T_SKY), sunny),
+            ActKind::Raining => d(3.2, Mood::Content, Some(&CLOUD), Some(T_WX), raining),
+            ActKind::Windy => d(3.2, Mood::Content, Some(&WIND), Some(T_WIND), windy),
+            ActKind::Snowing => d(3.6, Mood::Content, Some(&FLAKE), Some(T_SNOW), snowing),
+            ActKind::Foggy => d(3.4, Mood::Content, Some(&FOG), Some(T_WIND), foggy),
+            ActKind::MehClouds => d(3.2, Mood::Content, Some(&CLOUD), Some(T_WIND), meh_clouds),
+            ActKind::Heatwave => d(3.2, Mood::Content, Some(&THERM), Some(T_PROM), heatwave),
+            ActKind::Freezing => d(3.0, Mood::Content, Some(&FLAKE), Some(T_SNOW), freezing),
+            ActKind::Lightning => d(3.0, Mood::Scared, Some(&BOLT), Some(T_WX), lightning),
+            ActKind::UhOhRain => d(3.0, Mood::Content, Some(&CLOUD), Some(T_WX), uh_oh_rain),
+            ActKind::Cough => d(2.6, Mood::Worried, Some(&WIND), Some(T_WIND), cough),
+            ActKind::Morning => d(3.2, Mood::Content, Some(&SUN), Some(T_SKY), morning),
+            ActKind::Evening => d(3.0, Mood::Content, Some(&MOON), Some(T_ISS), evening),
+            ActKind::Awoo => d(3.2, Mood::Content, Some(&MOON), Some(T_ISS), awoo),
+            ActKind::LookUp => d(3.4, Mood::Content, Some(&SAT), Some(T_ISS), look_up),
+            ActKind::KaChing => d(2.8, Mood::Happy, Some(&EURO), Some(T_PRICE), ka_ching),
+            ActKind::Expensive => d(2.8, Mood::Content, Some(&EURO), Some(T_PRICE), expensive),
+        }
+    }
+}
+
+/// Current-conditions category from the WMO code, temperature and gusts.
+/// Thunder (95..=99) is an event, so it returns `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeatherCat {
+    Snow,
+    Rain,
+    Wind,
+    Fog,
+    Cold,
+    Hot,
+    Clouds,
+    Sunny,
+}
+
+pub fn weather_cat(code: u16, temp_c: f32, gust_kmh: f32, is_day: bool) -> Option<WeatherCat> {
+    if matches!(code, 71..=77 | 85 | 86) {
+        return Some(WeatherCat::Snow);
+    }
+    if matches!(code, 51..=67 | 80..=82) {
+        return Some(WeatherCat::Rain);
+    }
+    if gust_kmh >= 50.0 {
+        return Some(WeatherCat::Wind);
+    }
+    if matches!(code, 45 | 48) {
+        return Some(WeatherCat::Fog);
+    }
+    if temp_c <= 0.0 {
+        return Some(WeatherCat::Cold);
+    }
+    if temp_c >= 28.0 {
+        return Some(WeatherCat::Hot);
+    }
+    if matches!(code, 2 | 3) {
+        return Some(WeatherCat::Clouds);
+    }
+    if matches!(code, 0 | 1) && is_day {
+        return Some(WeatherCat::Sunny);
+    }
+    None
+}
+
+impl WeatherCat {
+    pub fn act(self) -> ActKind {
+        match self {
+            WeatherCat::Snow => ActKind::Snowing,
+            WeatherCat::Rain => ActKind::Raining,
+            WeatherCat::Wind => ActKind::Windy,
+            WeatherCat::Fog => ActKind::Foggy,
+            WeatherCat::Cold => ActKind::Freezing,
+            WeatherCat::Hot => ActKind::Heatwave,
+            WeatherCat::Clouds => ActKind::MehClouds,
+            WeatherCat::Sunny => ActKind::Sunny,
         }
     }
 }
@@ -867,6 +992,280 @@ fn found_you(f: &mut Frame) {
     f.hold(&Expr::HAPPY, 0.7, 0.95);
 }
 
+// ---------------- weather habits ----------------
+
+fn sunny(f: &mut Frame) {
+    let q = f.q;
+    if inseg(q, 0.0, 0.35) {
+        f.e.open = 0.3;
+        f.e.lower = 0.3;
+    }
+    if inseg(q, 0.35, 0.9) {
+        f.sprite = Some(both(&SHADE));
+    }
+    f.gaze = (0.0, lerp(0.9, 0.0, seg(q, 0.3, 0.4)));
+    f.hold(&Expr::HAPPY, 0.9, 1.0);
+}
+
+fn raining(f: &mut Frame) {
+    let t = f.t;
+    for k in 0..7 {
+        let kk = k as f32;
+        let fr = (t * 1.2 + kk * 0.14).fract();
+        f.dot(
+            2.0 + kk * 3.2 + (k % 2) as f32,
+            -1.0 + fr * 18.0,
+            Some(T_WX),
+            0.9 * (1.0 - fr * 0.3),
+        );
+    }
+    f.gaze = (0.2, -1.0);
+    f.e.open = 0.55 + if (t * 6.0).sin() > 0.6 { -0.45 } else { 0.0 };
+}
+
+fn windy(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    for k in 0..8 {
+        let kk = k as f32;
+        let fr = (t * 1.6 + kk * 0.125).fract();
+        f.dot(
+            24.0 - fr * 26.0,
+            1.0 + ((k * 5) % 15) as f32 + (fr * 6.0).sin() * 0.6,
+            Some(T_WIND),
+            0.8,
+        );
+    }
+    let s = seg(q, 0.0, 0.3) * (1.0 - seg(q, 0.85, 1.0));
+    f.rot = 0.14 * s;
+    f.off.0 -= 6.0 * s;
+    f.e.open = 1.0 - 0.7 * s;
+}
+
+fn snowing(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    for k in 0..5 {
+        let kk = k as f32;
+        let fr = (t * 0.35 + kk / 5.0).fract();
+        f.at(
+            &COIN,
+            1.0 + ((k * 7) % 20) as f32 + (fr * 7.0 + kk).sin() * 1.2,
+            -2.0 + fr * 19.0,
+            Some(T_SNOW),
+            0.9,
+        );
+    }
+    f.off.0 += (t * 45.0).sin() * 0.6;
+    let fr = seg(q, 0.05, 0.4);
+    if q < 0.8 {
+        f.at(&COIN, 16.0, -2.0 + fr * 7.0, Some(T_SNOW), 1.0);
+    }
+    if inseg(q, 0.4, 0.75) {
+        f.gaze = (0.5, -1.0);
+        f.eyes[0] = EyeOv {
+            open: Some(1.1),
+            tilt: Some(-0.3),
+            scale: None,
+        };
+        f.eyes[1].open = Some(0.8);
+    }
+    if inseg(q, 0.75, 0.9) {
+        f.off.0 += (seg(q, 0.75, 0.9) * PI * 3.0).sin() * 6.0;
+    }
+}
+
+fn foggy(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    f.post.flicker = 1.0 - 0.5 * seg(q, 0.0, 0.2).min(1.0 - seg(q, 0.85, 1.0));
+    f.post.overlay = Overlay::FogBand(t);
+    f.e.open = 0.4;
+    f.e.lower = 0.2;
+    f.gaze = ((t * 2.0).sin() * 0.8, -0.2);
+}
+
+fn meh_clouds(f: &mut Frame) {
+    let q = f.q;
+    f.at(&CLOUD, -8.0 + q * 26.0, 0.0, Some(T_WIND), 1.0);
+    f.set(&Expr::MEH, seg(q, 0.0, 0.2));
+    f.gaze = (lerp(-1.0, 1.0, q), -0.9);
+    if inseg(q, 0.7, 0.9) {
+        f.off.1 -= 5.0 * bump(q, 0.7, 0.9);
+    }
+}
+
+fn heatwave(f: &mut Frame) {
+    let t = f.t;
+    f.e.open = 0.55;
+    f.e.lift = 3.0;
+    f.off.1 += (t * 12.0).sin().abs() * 3.0;
+    sweat(f, 19.0, 0.8);
+    for k in 0..3 {
+        let kk = k as f32;
+        let fr = (t * 0.7 + kk / 3.0).fract();
+        f.dot(
+            8.0 + kk * 4.0 + (fr * 12.0).sin() * 0.7,
+            3.0 - fr * 4.0,
+            Some(T_PROM),
+            (1.0 - fr) * 0.7,
+        );
+    }
+}
+
+fn freezing(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    let s = seg(q, 0.0, 0.2) * (1.0 - seg(q, 0.85, 1.0));
+    f.off.0 += (t * 60.0).sin() * 2.2 * s;
+    f.e.open = 1.0 - 0.85 * s;
+    f.e.scale = 1.0 - 0.15 * s;
+    f.e.sep = 1.0 - 0.15 * s;
+    f.e.lower = 0.3 * s;
+}
+
+// ---------------- sky and air events ----------------
+
+fn lightning(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    if inseg(q, 0.02, 0.08) || inseg(q, 0.14, 0.19) {
+        f.post.flicker = 3.0;
+    }
+    if inseg(q, 0.02, 0.35) {
+        f.off.1 -= 10.0 * bump(q, 0.02, 0.35);
+        f.e.open = 1.4;
+    }
+    if inseg(q, 0.35, 0.85) {
+        f.e.open = 0.05;
+        f.off.0 += (t * 60.0).sin() * 1.5;
+    }
+    f.hold(&Expr::SCARED, 0.85, 1.0);
+}
+
+fn uh_oh_rain(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    for k in 0..4 {
+        let kk = k as f32;
+        let fr = (t + kk * 0.25).fract();
+        f.dot(
+            4.0 + kk * 5.0,
+            -1.0 + fr * 12.0,
+            Some(T_WX),
+            0.9 * (1.0 - fr * 0.3) * seg(q, 0.2, 0.4),
+        );
+    }
+    f.gaze = (0.2, lerp(0.9, -1.0, seg(q, 0.1, 0.3)));
+    if inseg(q, 0.3, 0.9) {
+        f.e.open = 0.5;
+    }
+}
+
+fn cough(f: &mut Frame) {
+    let q = f.q;
+    for (a, b) in [(0.1, 0.35), (0.45, 0.7)] {
+        if inseg(q, a, b) {
+            let s = seg(q, a, b);
+            f.off.1 += 8.0 * (s * PI).sin();
+            f.e.open = 0.08;
+            for k in 0..3 {
+                let kk = k as f32;
+                f.dot(
+                    11.0 + kk + s * 3.0,
+                    15.0 + kk * 0.5 + s * 2.0,
+                    None,
+                    1.0 - s,
+                );
+            }
+        }
+    }
+    f.hold(&Expr::WORRIED, 0.8, 1.0);
+}
+
+fn morning(f: &mut Frame) {
+    let q = f.q;
+    f.icon_alpha = 0.0;
+    let s = ease(seg(q, 0.0, 0.6));
+    let y = f.slot_y - s * 8.0;
+    f.at(&SUN, SLOT_X, y, Some(T_SKY), 1.0);
+    f.gaze = (0.0, 0.9 - s * 0.6);
+    if inseg(q, 0.2, 0.7) {
+        f.e.open = 0.3;
+        f.e.lower = 0.4;
+    }
+    f.hold(&Expr::HAPPY, 0.7, 0.9);
+}
+
+fn evening(f: &mut Frame) {
+    let q = f.q;
+    if inseg(q, 0.3, 0.65) {
+        let r = bump(q, 0.3, 0.65);
+        f.e.open = 1.0 - 0.95 * r;
+        f.rot = -0.1 * r;
+        f.off.1 -= 4.0 * r;
+    }
+    if q >= 0.65 {
+        f.e.open = 0.5;
+        f.e.lower = 0.25;
+    }
+}
+
+fn awoo(f: &mut Frame) {
+    let (q, t) = (f.q, f.t);
+    if inseg(q, 0.15, 0.85) {
+        f.off.1 -= 6.0;
+        f.rot = -0.15;
+        f.e.open = 0.08;
+        for i in 0..3 {
+            let ii = i as f32;
+            let r = (t * 0.6 + ii / 3.0).fract();
+            f.at(
+                &NOTE,
+                9.0 + r * 3.0 + ii,
+                8.0 - r * 8.0 - ii,
+                Some(T_SKY),
+                1.0 - r,
+            );
+        }
+    }
+}
+
+fn look_up(f: &mut Frame) {
+    let q = f.q;
+    let s = seg(q, 0.1, 0.9);
+    let gx = -1.0 + s * 25.0;
+    let gy = 3.0 - (s * PI).sin() * 3.0;
+    f.dot(gx, gy, Some(T_ISS), 1.0);
+    f.gaze = ((gx - 12.0) / 10.0, -1.0);
+    if inseg(q, 0.15, 0.85) {
+        f.e.open = 1.2;
+    }
+}
+
+// ---------------- prices ----------------
+
+fn ka_ching(f: &mut Frame) {
+    let q = f.q;
+    if inseg(q, 0.05, 0.75) {
+        f.sprite = Some(both(&EUROEYE));
+    }
+    let s = seg(q, 0.05, 0.6);
+    f.at(
+        &COIN,
+        -2.0 + s * 8.0,
+        19.0 - (s * PI * 3.0).sin().abs() * (5.0 - s * 4.0),
+        Some(T_PRICE),
+        1.0,
+    );
+    f.hold(&Expr::HAPPY, 0.75, 1.0);
+}
+
+fn expensive(f: &mut Frame) {
+    let q = f.q;
+    let s = ease(seg(q, 0.1, 0.7));
+    if s < 1.0 {
+        f.at(&COIN, SLOT_X - 1.0 - s * 10.0, 19.0, Some(T_PRICE), 1.0);
+    }
+    f.gaze = (lerp(0.0, -1.4, s), 0.9);
+    f.eyes[0].open = Some(0.5);
+    f.eyes[1].open = Some(1.1);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1009,7 +1408,6 @@ mod tests {
 
     #[test]
     fn task_six_acts_exist_with_their_sources() {
-        assert_eq!(ActKind::ALL.len(), 30);
         let d = ActKind::Launch.def();
         assert!(
             std::ptr::eq(d.icon.unwrap(), &ROCKET)
@@ -1046,5 +1444,88 @@ mod tests {
             "suspicious: left narrow, right wide"
         );
         assert!(f.rot < 0.0);
+    }
+
+    #[test]
+    fn weather_category_priority_and_codes() {
+        use WeatherCat::*;
+        assert_eq!(weather_cat(0, 20.0, 10.0, true), Some(Sunny));
+        assert_eq!(weather_cat(1, 20.0, 10.0, true), Some(Sunny));
+        assert_eq!(
+            weather_cat(0, 20.0, 10.0, false),
+            None,
+            "clear night: nothing"
+        );
+        assert_eq!(weather_cat(2, 20.0, 10.0, true), Some(Clouds));
+        assert_eq!(weather_cat(3, 20.0, 10.0, false), Some(Clouds));
+        assert_eq!(weather_cat(45, 20.0, 10.0, true), Some(Fog));
+        assert_eq!(weather_cat(48, 20.0, 10.0, true), Some(Fog));
+        assert_eq!(weather_cat(61, 20.0, 10.0, true), Some(Rain));
+        assert_eq!(weather_cat(80, 20.0, 10.0, true), Some(Rain));
+        assert_eq!(weather_cat(71, -3.0, 10.0, true), Some(Snow));
+        assert_eq!(
+            weather_cat(85, -3.0, 60.0, true),
+            Some(Snow),
+            "snow beats wind and cold"
+        );
+        assert_eq!(
+            weather_cat(61, 5.0, 60.0, true),
+            Some(Rain),
+            "rain beats wind"
+        );
+        assert_eq!(
+            weather_cat(0, 30.0, 60.0, true),
+            Some(Wind),
+            "wind beats heat"
+        );
+        assert_eq!(weather_cat(0, 30.0, 10.0, true), Some(Hot));
+        assert_eq!(weather_cat(0, 28.0, 10.0, true), Some(Hot));
+        assert_eq!(weather_cat(0, 0.0, 10.0, true), Some(Cold));
+        assert_eq!(
+            weather_cat(2, -1.0, 10.0, true),
+            Some(Cold),
+            "cold beats clouds"
+        );
+        assert_eq!(
+            weather_cat(45, -1.0, 10.0, true),
+            Some(Fog),
+            "fog beats cold"
+        );
+        assert_eq!(
+            weather_cat(95, 20.0, 10.0, true),
+            None,
+            "thunder is an event"
+        );
+        assert_eq!(Snow.act(), ActKind::Snowing);
+        assert_eq!(Sunny.act(), ActKind::Sunny);
+        for c in [Snow, Rain, Wind, Fog, Cold, Hot, Clouds, Sunny] {
+            assert!(c.act().is_habit(), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn task_seven_acts_exist() {
+        assert_eq!(ActKind::ALL.len(), 47);
+        assert!(ActKind::Lightning.is_severe());
+        assert!(!ActKind::Lightning.is_habit());
+        let f = run_act(&ActKind::Sunny.def(), 0.6, Expr::CONTENT, (0.0, 0.0));
+        assert!(f.sprite.is_some_and(|s| std::ptr::eq(s[0], &SHADE)));
+        let f = run_act(&ActKind::Foggy.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!((f.post.flicker - 0.5).abs() < 1e-3);
+        assert!(matches!(f.post.overlay, Overlay::FogBand(_)));
+        let f = run_act(&ActKind::Lightning.def(), 0.13, Expr::CONTENT, (0.0, 0.0));
+        assert!(
+            f.post.flicker > 1.5 || f.post.flicker < 1.2,
+            "flash or not, never nan"
+        );
+        let f = run_act(&ActKind::KaChing.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!(f.sprite.is_some_and(|s| std::ptr::eq(s[0], &EUROEYE)));
+        let f = run_act(&ActKind::Morning.def(), 0.5, Expr::CONTENT, (0.0, 0.0));
+        assert!(
+            f.placed
+                .iter()
+                .any(|p| std::ptr::eq(p.sprite, &SUN) && p.y < SLOT_Y - 2.0),
+            "sun rises out of the slot"
+        );
     }
 }
