@@ -20,6 +20,10 @@ pub const HERO_PX: f32 = 64.0;
 pub const HERO_BASELINE: f32 = 100.0;
 pub const HERO_BASELINE_UNIT_BELOW: f32 = 104.0;
 pub const HERO_MAX_W: f32 = 180.0;
+/// The hero group keeps this far inside the ring's inner edge.
+pub const HERO_RING_MARGIN: f32 = 10.0;
+/// A fitted hero size change glides over this long.
+pub const HERO_FIT_GLIDE_SECS: f64 = 0.4;
 /// Superscript unit size relative to the hero size.
 pub const UNIT_SCALE: f32 = 0.36;
 pub const UNIT_GAP: f32 = 2.0;

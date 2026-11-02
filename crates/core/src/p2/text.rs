@@ -98,11 +98,25 @@ pub fn hero(
     color: Color,
     now: Secs,
 ) -> HeroLayout {
+    hero_at(ui, text, scale, CX, baseline, color, now)
+}
+
+/// The rolling hero centred on `cx`.
+#[allow(clippy::too_many_arguments)]
+pub fn hero_at(
+    ui: &mut ScreenUi,
+    text: &str,
+    scale: f32,
+    cx: f32,
+    baseline: f32,
+    color: Color,
+    now: Secs,
+) -> HeroLayout {
     let px = HERO_PX * scale;
     let roll = ui.roll(("hero", 0), text, now);
     let widths = cell_widths(roll.text(), px);
     let total: f32 = widths.iter().sum();
-    let x0 = CX - total / 2.0;
+    let x0 = cx - total / 2.0;
     let mut xs = Vec::with_capacity(widths.len());
     let mut x = x0;
     for w in &widths {
@@ -137,6 +151,44 @@ pub fn hero(
         px,
         baseline,
     }
+}
+
+/// Width of the hero plus its superscript unit (gap included).
+pub fn hero_group_width(text: &str, unit: Option<&str>, scale: f32) -> f32 {
+    let px = HERO_PX * scale;
+    hero_width(text, scale)
+        + unit.map_or(0.0, |u| {
+            UNIT_GAP + measure(FontId::Bold, px * UNIT_SCALE, u, 0.0)
+        })
+}
+
+/// All four corners of the hero group box are at least `HERO_RING_MARGIN`
+/// inside the ring's inner edge.
+pub fn hero_fits(text: &str, unit: Option<&str>, scale: f32, baseline: f32) -> bool {
+    use crate::theme::layout::CY;
+    let half = hero_group_width(text, unit, scale) / 2.0;
+    let top = baseline - cap_height(FontId::Bold, HERO_PX * scale);
+    let limit = RING_R - RING_W / 2.0 - HERO_RING_MARGIN;
+    [top, baseline]
+        .iter()
+        .all(|y| (half * half + (y - CY) * (y - CY)).sqrt() <= limit)
+}
+
+/// The largest scale up to `max_scale` at which the hero group fits the ring.
+pub fn hero_fit_scale(text: &str, unit: Option<&str>, max_scale: f32, baseline: f32) -> f32 {
+    if hero_fits(text, unit, max_scale, baseline) {
+        return max_scale;
+    }
+    let (mut lo, mut hi) = (0.2_f32, max_scale);
+    for _ in 0..16 {
+        let mid = (lo + hi) / 2.0;
+        if hero_fits(text, unit, mid, baseline) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
 }
 
 /// A unit to the right of the hero, Bold at 0.36 × the hero size, its top on
@@ -513,5 +565,32 @@ mod tests {
             (moved[0].0 - (r[0].0 - 30.0)).abs() < 1e-3,
             "30 px/s after the 1.5 s hold"
         );
+    }
+    #[test]
+    fn hero_fit_keeps_short_numbers_and_shrinks_wide_ones() {
+        assert_eq!(hero_fit_scale("42", Some("%"), 1.0, HERO_BASELINE), 1.0);
+        assert!(
+            hero_fit_scale("100", None, 1.0, HERO_BASELINE) > 0.95,
+            "three bare digits barely shrink"
+        );
+        let k = hero_fit_scale("100", Some("%"), 1.0, HERO_BASELINE);
+        assert!(k < 1.0 && k > 0.7, "100 % shrinks a little: {k}");
+        assert!(hero_fits("100", Some("%"), k, HERO_BASELINE));
+        assert!(
+            !hero_fits("100", Some("%"), k + 0.02, HERO_BASELINE),
+            "largest that fits"
+        );
+        assert!(
+            hero_fit_scale("16/16", None, 0.82, HERO_BASELINE) <= 0.82,
+            "the role's scale is a ceiling"
+        );
+        assert!(hero_group_width("42", Some("%"), 1.0) > hero_width("42", 1.0));
+    }
+
+    #[test]
+    fn hero_at_centres_on_the_given_x() {
+        let mut ui = ScreenUi::new();
+        let h = hero_at(&mut ui, "42", 1.0, 100.0, HERO_BASELINE, TEXT, 0.0);
+        assert!(((h.x0 + h.x1) / 2.0 - 100.0).abs() < 1e-3);
     }
 }

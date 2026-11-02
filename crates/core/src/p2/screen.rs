@@ -2,9 +2,12 @@
 
 use crate::anim::Secs;
 use crate::p2::chart::{card_drawables, Card};
+use crate::p2::font::{measure, FontId};
 use crate::p2::layout::*;
 use crate::p2::ring::{RingKind, RingSpec};
-use crate::p2::text::{curved_title, hero, pill, ring_ends, unit_below, unit_superscript};
+use crate::p2::text::{
+    curved_title, hero_at, hero_fit_scale, pill, ring_ends, unit_below, unit_superscript,
+};
 use crate::p2::ui::ScreenUi;
 use crate::scene::{Drawable, Scene};
 use crate::theme::layout::CX;
@@ -86,7 +89,21 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
     } else {
         HERO_BASELINE
     };
-    let h = hero(ui, &s.hero, s.hero_scale, baseline, s.hero_color, now);
+    let unit_sup = s.unit.as_deref().filter(|_| !s.unit_below);
+    let fit = hero_fit_scale(&s.hero, unit_sup, s.hero_scale, baseline);
+    let scale = ui.glide_with(("hero-scale", 0), fit, now, HERO_FIT_GLIDE_SECS);
+    let unit_w = unit_sup.map_or(0.0, |u| {
+        UNIT_GAP + measure(FontId::Bold, HERO_PX * scale * UNIT_SCALE, u, 0.0)
+    });
+    let h = hero_at(
+        ui,
+        &s.hero,
+        scale,
+        CX - unit_w / 2.0,
+        baseline,
+        s.hero_color,
+        now,
+    );
     scene.items.extend(h.drawables.iter().cloned());
     if let Some(u) = &s.unit {
         scene.push(if s.unit_below {

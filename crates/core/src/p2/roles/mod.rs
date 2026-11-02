@@ -66,32 +66,41 @@ pub fn short_node(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::p2::layout::HERO_MAX_W;
-    use crate::p2::text::hero_width;
+
+    use crate::p2::layout::{HERO_BASELINE, HERO_BASELINE_UNIT_BELOW};
+    use crate::p2::text::{hero_fit_scale, hero_fits};
 
     #[test]
-    fn worst_case_heroes_fit_180_px() {
-        for (text, scale) in [
-            ("100", 1.0),      // cpu, mem, storage, ups, renewable, moon
-            ("999", 1.0),      // pods, deploys, contributions, carbon
-            ("16/16", 0.82),   // cluster
-            ("-12", 1.0),      // weather below zero
-            ("59:59", 0.82),   // iss
-            ("-0.123", 0.78),  // price
-            ("1000", 1.0),     // net Mb/s
-            ("120", 1.0),      // wind, aqi, rain minutes
-            ("23:59", 0.82),   // sun
-            ("9999", 1.0),     // media library, restarts
-            ("99.9", 1.0),     // traffic req/s
-            ("6.1k", 1.0),     // fans
-            ("260", 1.0),      // mains
-            ("10.52", 0.82),   // load from 10 up
-            ("12/12", 0.82),   // ci
-            ("1:41:54", 0.62), // jellyfin h:mm:ss
-            ("59:59", 0.82),   // jellyfin m:ss
+    fn worst_case_heroes_fit_the_ring() {
+        // (hero, superscript unit, the role's hero_scale, unit below?)
+        for (text, unit, scale, below) in [
+            ("100", Some("%"), 1.0, false), // cpu, mem, storage, ups, renewable, moon
+            ("999", None, 1.0, false),      // pods, deploys, contributions, carbon
+            ("16/16", None, 0.82, false),   // cluster
+            ("-12", Some("°"), 1.0, false), // weather below zero
+            ("59:59", None, 0.82, false),   // iss
+            ("-0.123", None, 0.78, true),   // price
+            ("1000", None, 1.0, true),      // net Mb/s
+            ("120", None, 1.0, true),       // wind, aqi, rain minutes
+            ("23:59", None, 0.82, false),   // sun
+            ("9999", None, 1.0, false),     // media library, restarts
+            ("99.9", None, 1.0, true),      // traffic req/s
+            ("6.1k", None, 1.0, true),      // fans
+            ("260", Some("V"), 1.0, false), // mains
+            ("82", Some("d"), 1.0, false),  // uptime
+            ("10.52", None, 0.82, false),   // load from 10 up
+            ("12/12", None, 0.82, false),   // ci
+            ("1:41:54", None, 0.62, true),  // jellyfin h:mm:ss
+            ("59:59", None, 0.82, true),    // jellyfin m:ss
         ] {
-            let w = hero_width(text, scale);
-            assert!(w <= HERO_MAX_W, "{text} at {scale}: {w} px");
+            let base = if below {
+                HERO_BASELINE_UNIT_BELOW
+            } else {
+                HERO_BASELINE
+            };
+            let k = hero_fit_scale(text, unit, scale, base);
+            assert!(k <= scale && k > 0.4, "{text}: {k}");
+            assert!(hero_fits(text, unit, k, base), "{text} {unit:?} at {k}");
         }
     }
 
