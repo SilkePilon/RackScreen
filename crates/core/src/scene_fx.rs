@@ -1,7 +1,6 @@
 //! Splash overlays and sweep scenes layered on top of role scenes.
 
 use crate::anim::{pulse, Easing, Secs};
-use crate::face_acts::ActKind;
 use crate::fx::{Splash, Sweep, SweepPhase, SPLASH_SECS};
 use crate::p2::ui::ScreenUi;
 use crate::scene::{connecting_scene, no_data_scene_with, role_scene, Drawable, Scene, SegState};
@@ -184,9 +183,7 @@ impl crate::model::Model {
     /// exception while its link-down act runs: that act plays first, then the
     /// connecting scene takes over.
     fn wants_connecting(&self, role: Role) -> bool {
-        role.is_cluster()
-            && !self.link().api
-            && !(role == Role::Face && self.face().current_act() == Some(ActKind::Hello))
+        role.is_cluster() && !self.link().api
     }
 
     /// Scene for one screen at one instant; the only call the render loop makes.

@@ -2,10 +2,8 @@
 pub mod anim;
 pub mod electricity;
 pub mod event;
-pub mod face_acts;
+pub mod face;
 pub mod face_expr;
-pub mod face_player;
-pub mod face_sprites;
 pub mod format;
 pub mod fx;
 pub mod history;

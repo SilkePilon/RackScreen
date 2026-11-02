@@ -11,7 +11,6 @@ use anyhow::Result;
 use chrono::Timelike;
 use rackscreen_core::anim::Secs;
 use rackscreen_core::event::Event;
-use rackscreen_core::face_player::FaceTuning;
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::{bedtime_near, is_night};
 use rackscreen_core::theme::Role;
@@ -170,8 +169,6 @@ pub struct RenderLoop {
     pub github_token_present: bool,
     /// Only one screen may iris at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
-    /// `face:` config, passed to the model once.
-    pub face: FaceTuning,
 }
 
 impl RenderLoop {
@@ -197,7 +194,6 @@ impl RenderLoop {
         model.set_token_present(self.token_present);
         model.set_location_present(self.location_present);
         model.set_github_token_present(self.github_token_present);
-        model.set_face_tuning(self.face);
         model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;

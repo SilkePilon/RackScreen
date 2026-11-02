@@ -1,5 +1,5 @@
-//! The face's expression: six knobs per mood, tweened, plus the idle behaviour
-//! (blinks, gaze, head tilt, mood wobble) that keeps it alive between acts.
+//! The face's expression: five knobs per mood, tweened, plus the idle life
+//! (blinks, gaze, breathing and mood wobble) that keeps it alive.
 
 use crate::anim::{Easing, Secs};
 use crate::mood::Mood;
@@ -7,22 +7,8 @@ use crate::mood::Mood;
 pub fn lerp(a: f32, b: f32, k: f32) -> f32 {
     a + (b - a) * k
 }
-/// 0 at `p <= a`, 1 at `p >= b`, linear between.
-pub fn seg(p: f32, a: f32, b: f32) -> f32 {
-    ((p - a) / (b - a)).clamp(0.0, 1.0)
-}
-pub fn inseg(p: f32, a: f32, b: f32) -> bool {
-    p >= a && p < b
-}
-/// Rises 0..1..0 over `[a, b]`.
-pub fn bump(p: f32, a: f32, b: f32) -> f32 {
-    (seg(p, a, b) * std::f32::consts::PI).sin()
-}
 pub fn ease(k: f32) -> f32 {
     Easing::InOutCubic.apply(k)
-}
-pub fn out_back(k: f32) -> f32 {
-    Easing::Spring.apply(k)
 }
 /// xorshift64, the same generator `Model` uses for its screen order.
 pub fn xorshift(state: &mut u64) -> u64 {
@@ -38,60 +24,39 @@ pub fn unit(state: &mut u64) -> f32 {
     (xorshift(state) >> 11) as f32 / (1u64 << 53) as f32
 }
 
-/// One expression: lid openness, upper-lid slant (+ inner corners down =
-/// angry, − = sad), lower-lid squint (0.7 is the `^ ^` shape), eye size,
-/// separation and vertical lift in pixels (negative is up).
+/// Lid openness, upper-lid slant (+ inner corners down = angry, − = sad),
+/// lower-lid rise (0.7 is the `^ ^` shape), eye size and vertical lift in
+/// pixels (negative is up).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Expr {
     pub open: f32,
     pub tilt: f32,
     pub lower: f32,
     pub scale: f32,
-    pub sep: f32,
     pub lift: f32,
 }
 
-const fn expr(open: f32, tilt: f32, lower: f32, scale: f32, sep: f32, lift: f32) -> Expr {
+const fn expr(open: f32, tilt: f32, lower: f32, scale: f32, lift: f32) -> Expr {
     Expr {
         open,
         tilt,
         lower,
         scale,
-        sep,
         lift,
     }
 }
 
 impl Expr {
-    pub const CONTENT: Expr = expr(1.00, 0.00, 0.00, 1.00, 1.00, 0.0);
-    pub const HAPPY: Expr = expr(1.00, 0.00, 0.70, 1.00, 1.00, -4.0);
-    pub const EXCITED: Expr = expr(1.20, -0.10, 0.10, 1.10, 1.02, -6.0);
-    pub const WORRIED: Expr = expr(0.85, -0.60, 0.10, 1.00, 1.00, 2.0);
-    pub const SAD: Expr = expr(0.65, -1.00, 0.00, 1.00, 1.00, 8.0);
-    pub const ANGRY: Expr = expr(0.60, 1.00, 0.15, 1.00, 0.96, 0.0);
-    pub const HOT: Expr = expr(0.70, 0.30, 0.20, 1.00, 1.00, 3.0);
-    pub const SCARED: Expr = expr(1.30, -0.40, 0.00, 0.85, 1.00, -2.0);
-    pub const SLEEPY: Expr = expr(0.25, 0.00, 0.00, 1.00, 1.00, 6.0);
-    pub const BORED: Expr = expr(0.50, 0.00, 0.00, 1.00, 1.00, 2.0);
-    // transient poses used inside acts only
-    pub const RELIEF: Expr = expr(0.12, 0.00, 0.40, 1.00, 1.00, 0.0);
-    pub const GRIMACE: Expr = expr(0.55, 0.50, 0.35, 1.00, 0.97, 0.0);
-    pub const WOW: Expr = expr(1.35, 0.00, 0.00, 1.05, 1.00, -3.0);
-    pub const MEH: Expr = expr(0.50, 0.00, 0.00, 1.00, 1.00, 2.0);
-    pub const FOCUS: Expr = expr(0.75, 0.20, 0.10, 1.00, 0.94, 0.0);
-
     pub fn of(m: Mood) -> Expr {
         match m {
-            Mood::Content => Expr::CONTENT,
-            Mood::Happy => Expr::HAPPY,
-            Mood::Excited => Expr::EXCITED,
-            Mood::Worried => Expr::WORRIED,
-            Mood::Sad => Expr::SAD,
-            Mood::Angry => Expr::ANGRY,
-            Mood::Hot => Expr::HOT,
-            Mood::Scared => Expr::SCARED,
-            Mood::Sleepy => Expr::SLEEPY,
-            Mood::Bored => Expr::BORED,
+            Mood::Scared => expr(1.30, -0.40, 0.00, 0.85, -2.0),
+            Mood::Sad => expr(0.65, -1.00, 0.00, 1.00, 8.0),
+            Mood::Angry => expr(0.60, 1.00, 0.15, 1.00, 0.0),
+            Mood::Hot => expr(0.70, 0.30, 0.20, 1.00, 3.0),
+            Mood::Worried => expr(0.85, -0.60, 0.10, 1.00, 2.0),
+            Mood::Sleepy => expr(0.25, 0.00, 0.00, 1.00, 6.0),
+            Mood::Happy => expr(1.00, 0.00, 0.70, 1.00, -4.0),
+            Mood::Content => expr(1.00, 0.00, 0.00, 1.00, 0.0),
         }
     }
     pub fn lerp(a: Expr, b: Expr, k: f32) -> Expr {
@@ -100,7 +65,6 @@ impl Expr {
             lerp(a.tilt, b.tilt, k),
             lerp(a.lower, b.lower, k),
             lerp(a.scale, b.scale, k),
-            lerp(a.sep, b.sep, k),
             lerp(a.lift, b.lift, k),
         )
     }
@@ -109,7 +73,6 @@ impl Expr {
             && (self.tilt - o.tilt).abs() <= eps
             && (self.lower - o.lower).abs() <= eps
             && (self.scale - o.scale).abs() <= eps
-            && (self.sep - o.sep).abs() <= eps
             && (self.lift - o.lift).abs() <= eps
     }
 }
@@ -156,9 +119,7 @@ pub struct IdleOut {
     pub blink: f32,
     /// Where the eyes look, each axis in −1..1.
     pub gaze: (f32, f32),
-    /// Head tilt in radians.
-    pub tilt: f32,
-    /// Mood wobble offset in pixels.
+    /// Breathing bob plus the mood wobble, in pixels.
     pub wobble: (f32, f32),
 }
 
@@ -166,14 +127,11 @@ pub struct IdleOut {
 pub struct Idle {
     next_blink: Secs,
     blink_start: Option<Secs>,
-    double: bool,
     gaze_from: (f32, f32),
     gaze_to: (f32, f32),
     gaze_start: Secs,
     gaze_dur: Secs,
     next_gaze: Secs,
-    tilt_start: Option<(Secs, f32)>,
-    next_tilt: Secs,
 }
 
 impl Default for Idle {
@@ -187,19 +145,16 @@ impl Idle {
         Self {
             next_blink: 1.5,
             blink_start: None,
-            double: false,
             gaze_from: (0.0, 0.0),
             gaze_to: (0.0, 0.0),
             gaze_start: 0.0,
             gaze_dur: 0.26,
             next_gaze: 0.8,
-            tilt_start: None,
-            next_tilt: 10.0,
         }
     }
 
     pub fn tick(&mut self, mood: Mood, now: Secs, rng: &mut u64) -> IdleOut {
-        // blink: every 1.5..4 s, 150 ms, 20 % double
+        // blink: 150 ms every 1.5..4 s, about every 5 s when sleepy
         if self.blink_start.is_none() && now >= self.next_blink {
             self.blink_start = Some(now);
         }
@@ -210,27 +165,24 @@ impl Idle {
                 blink = (p * std::f32::consts::PI).sin();
             } else {
                 self.blink_start = None;
-                if !self.double && unit(rng) < 0.2 {
-                    self.double = true;
-                    self.next_blink = now + 0.12;
-                } else {
-                    self.double = false;
-                    self.next_blink = now + 1.5 + 2.5 * unit(rng) as Secs;
-                }
+                self.next_blink = now
+                    + if mood == Mood::Sleepy {
+                        4.0 + 2.0 * unit(rng) as Secs
+                    } else {
+                        1.5 + 2.5 * unit(rng) as Secs
+                    };
             }
         }
         if matches!(mood, Mood::Scared | Mood::Angry) {
             blink *= 0.6;
         }
-        // gaze: retarget every 0.7..2 s (0.35..0.85 s when jittery)
-        let fast = matches!(mood, Mood::Worried | Mood::Excited | Mood::Scared);
+        // gaze: retarget every 0.7..2 s, 0.35..0.85 s when jittery; sad and sleepy look down
+        let fast = matches!(mood, Mood::Worried | Mood::Scared);
         if now >= self.next_gaze {
             self.gaze_from = self.gaze_value(now);
             self.gaze_to = match mood {
-                Mood::Bored => (if unit(rng) < 0.5 { -1.0 } else { 1.0 }, 0.15),
-                Mood::Sleepy => ((unit(rng) - 0.5) * 0.3, 0.6),
-                Mood::Sad => ((unit(rng) - 0.5) * 0.6, 0.5),
-                _ => ((unit(rng) - 0.5) * 1.6, (unit(rng) - 0.5) * 1.0),
+                Mood::Sad | Mood::Sleepy => ((unit(rng) - 0.5) * 0.6, 0.7),
+                _ => ((unit(rng) - 0.5) * 1.4, (unit(rng) - 0.5) * 0.9),
             };
             self.gaze_start = now;
             self.gaze_dur = if fast { 0.12 } else { 0.26 };
@@ -242,40 +194,23 @@ impl Idle {
                 };
         }
         let gaze = self.gaze_value(now);
-        // head tilt: ±6° for 1.5 s every 10..25 s
-        if self.tilt_start.is_none() && now >= self.next_tilt {
-            let dir = if unit(rng) < 0.5 { -1.0 } else { 1.0 };
-            self.tilt_start = Some((now, dir));
-        }
-        let mut tilt = 0.0;
-        if let Some((start, dir)) = self.tilt_start {
-            let p = ((now - start) / 1.5) as f32;
-            if p < 1.0 {
-                tilt = dir * 6.0_f32.to_radians() * bump(p, 0.0, 1.0);
-            } else {
-                self.tilt_start = None;
-                self.next_tilt = now + 10.0 + 15.0 * unit(rng) as Secs;
-            }
-        }
-        // in f64: `now` is seconds since start, and an f32 clock would stutter
-        // after a few days of uptime
+        // f64 sines: an f32 clock would stutter after a few days of uptime
         let s = |w: f64| (now * w).sin() as f32;
-        let wobble = match mood {
-            Mood::Excited => (0.0, -s(9.0).abs() * 7.0),
+        let mut wobble = (0.0, 1.5 * s(0.9));
+        match mood {
             Mood::Angry => {
-                let burst = if s(1.3) > 0.2 { 1.0 } else { 0.0 };
-                (s(46.0) * 2.2 * burst, 0.0)
+                if s(1.3) > 0.2 {
+                    wobble.0 = s(46.0) * 2.2;
+                }
             }
-            Mood::Scared => (s(70.0) * 1.4, 0.0),
-            Mood::Sleepy => (0.0, s(1.4) * 4.0 + 3.0),
-            Mood::Sad => (0.0, 4.0),
-            Mood::Bored => (0.0, 2.0),
-            _ => (0.0, 0.0),
-        };
+            Mood::Scared => wobble.0 = s(70.0) * 1.4,
+            Mood::Sleepy => wobble.1 += s(1.4) * 4.0 + 3.0,
+            Mood::Hot => wobble.1 += s(2.2) * 1.2,
+            _ => {}
+        }
         IdleOut {
             blink,
             gaze,
-            tilt,
             wobble,
         }
     }
@@ -294,53 +229,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn helpers() {
-        assert_eq!(seg(0.5, 0.0, 1.0), 0.5);
-        assert_eq!(seg(-1.0, 0.0, 1.0), 0.0);
-        assert_eq!(seg(2.0, 0.0, 1.0), 1.0);
-        assert!(inseg(0.2, 0.2, 0.5) && !inseg(0.5, 0.2, 0.5));
-        assert!((bump(0.5, 0.0, 1.0) - 1.0).abs() < 1e-6);
-        assert!(bump(0.0, 0.0, 1.0).abs() < 1e-6);
-        let mut s = 7u64;
-        let a = unit(&mut s);
-        assert!((0.0..1.0).contains(&a));
-        assert_ne!(a, unit(&mut s));
-    }
-
-    #[test]
     fn mood_table_matches_the_spec() {
-        assert_eq!(Expr::of(Mood::Content), Expr::CONTENT);
-        assert_eq!(Expr::HAPPY.lower, 0.70);
-        assert_eq!(Expr::HAPPY.lift, -4.0);
-        assert_eq!(Expr::SAD.tilt, -1.0);
-        assert_eq!(Expr::SAD.lift, 8.0);
-        assert_eq!(Expr::ANGRY.tilt, 1.0);
-        assert_eq!(Expr::SCARED.scale, 0.85);
-        assert_eq!(Expr::SLEEPY.open, 0.25);
-        assert_eq!(Expr::of(Mood::Bored).open, 0.50);
-        let mid = Expr::lerp(Expr::CONTENT, Expr::SAD, 0.5);
-        assert!((mid.lift - 4.0).abs() < 1e-6);
-        assert!((mid.tilt + 0.5).abs() < 1e-6);
+        let check = |m: Mood, open: f32, tilt: f32, lower: f32, scale: f32, lift: f32| {
+            let e = Expr::of(m);
+            assert_eq!(
+                (e.open, e.tilt, e.lower, e.scale, e.lift),
+                (open, tilt, lower, scale, lift),
+                "{m:?}"
+            );
+        };
+        check(Mood::Scared, 1.30, -0.40, 0.0, 0.85, -2.0);
+        check(Mood::Sad, 0.65, -1.00, 0.0, 1.0, 8.0);
+        check(Mood::Angry, 0.60, 1.00, 0.15, 1.0, 0.0);
+        check(Mood::Hot, 0.70, 0.30, 0.20, 1.0, 3.0);
+        check(Mood::Worried, 0.85, -0.60, 0.10, 1.0, 2.0);
+        check(Mood::Sleepy, 0.25, 0.0, 0.0, 1.0, 6.0);
+        check(Mood::Happy, 1.00, 0.0, 0.70, 1.0, -4.0);
+        check(Mood::Content, 1.00, 0.0, 0.0, 1.0, 0.0);
     }
 
     #[test]
     fn expr_tween_retargets_without_a_jump() {
-        let mut t = ExprTween::new(Expr::CONTENT);
-        assert_eq!(t.value(5.0), Expr::CONTENT);
-        t.retarget(Expr::SAD, 10.0);
-        let before = t.value(10.0);
-        assert!(before.close_to(&Expr::CONTENT, 1e-4));
+        let mut t = ExprTween::new(Expr::of(Mood::Content));
+        assert_eq!(t.value(5.0), Expr::of(Mood::Content));
+        t.retarget(Expr::of(Mood::Sad), 10.0);
+        assert!(t.value(10.0).close_to(&Expr::of(Mood::Content), 1e-4));
         let mid = t.value(10.21);
         assert!(mid.lift > 0.5 && mid.lift < 7.5, "half way: {}", mid.lift);
-        assert!(t.value(10.42).close_to(&Expr::SAD, 1e-4));
-        // retarget mid-flight starts from the current value
-        t.retarget(Expr::CONTENT, 10.21);
+        assert!(t.value(10.42).close_to(&Expr::of(Mood::Sad), 1e-4));
+        t.retarget(Expr::of(Mood::Content), 10.21);
         assert!(t.value(10.21).close_to(&mid, 1e-4));
-        assert_eq!(t.target(), Expr::CONTENT);
     }
 
     #[test]
-    fn idle_blinks_and_wanders_deterministically() {
+    fn idle_blinks_wanders_and_is_deterministic() {
         let mut rng = 99u64;
         let mut idle = Idle::new();
         let mut blinked = false;
@@ -354,26 +276,24 @@ mod tests {
             assert!((0.0..=1.0).contains(&o.blink));
             assert!(o.gaze.0.abs() <= 1.0 && o.gaze.1.abs() <= 1.0);
             gazes.insert(((o.gaze.0 * 100.0) as i32, (o.gaze.1 * 100.0) as i32));
+            assert!(o.wobble.1.abs() <= 1.5 + 1e-6, "content only breathes");
             t += 1.0 / 30.0;
         }
         assert!(blinked, "no full blink in 30 s");
         assert!(gazes.len() > 20, "gaze never wandered");
-        // same seed, same story
-        let mut rng2 = 99u64;
-        let mut idle2 = Idle::new();
-        let mut rng3 = 99u64;
-        let mut idle3 = Idle::new();
+        let mut a = (Idle::new(), 7u64);
+        let mut b = (Idle::new(), 7u64);
         for i in 0..900 {
             let t = i as f64 / 30.0;
             assert_eq!(
-                idle2.tick(Mood::Content, t, &mut rng2),
-                idle3.tick(Mood::Content, t, &mut rng3)
+                a.0.tick(Mood::Worried, t, &mut a.1),
+                b.0.tick(Mood::Worried, t, &mut b.1)
             );
         }
     }
 
     #[test]
-    fn scared_and_angry_blink_shallow_and_bored_looks_sideways() {
+    fn moods_shape_the_idle_life() {
         let mut rng = 3u64;
         let mut idle = Idle::new();
         let mut max_blink: f32 = 0.0;
@@ -382,47 +302,41 @@ mod tests {
             max_blink = max_blink.max(idle.tick(Mood::Scared, t, &mut rng).blink);
             t += 1.0 / 30.0;
         }
-        assert!(max_blink > 0.5 && max_blink <= 0.6 + 1e-3, "{max_blink}");
+        assert!(
+            max_blink > 0.5 && max_blink <= 0.6 + 1e-3,
+            "scared blinks 60 %: {max_blink}"
+        );
         let mut idle = Idle::new();
+        let mut down = true;
         let mut t = 0.0;
-        let mut sideways = false;
         while t < 20.0 {
-            let g = idle.tick(Mood::Bored, t, &mut rng).gaze;
-            if g.0.abs() > 0.95 {
-                sideways = true;
+            let g = idle.tick(Mood::Sad, t, &mut rng).gaze;
+            if t > 1.0 && g.1 < 0.3 {
+                down = false;
             }
             t += 1.0 / 30.0;
         }
-        assert!(sideways);
-    }
-
-    #[test]
-    fn wobble_keeps_precision_after_a_month() {
-        // `now` is seconds since start: after a month an f32 clock steps by a
-        // quarter second, which turns the excited bounce into a stutter
-        let mut rng = 5u64;
+        assert!(down, "sad looks down");
         let mut idle = Idle::new();
-        let mut ys = Vec::new();
-        for k in 0..30 {
-            let now = 2.6e6 + k as Secs / 30.0;
-            ys.push(idle.tick(Mood::Excited, now, &mut rng).wobble.1);
+        let mut blinks = 0;
+        let mut was = false;
+        let mut t = 0.0;
+        while t < 60.0 {
+            let b = idle.tick(Mood::Sleepy, t, &mut rng).blink > 0.5;
+            if b && !was {
+                blinks += 1;
+            }
+            was = b;
+            t += 1.0 / 30.0;
         }
         assert!(
-            ys.windows(2).any(|w| w[0] != w[1]),
-            "the bounce froze: {ys:?}"
+            (8..=16).contains(&blinks),
+            "sleepy blinks about every 5 s: {blinks}"
         );
-        for w in ys.windows(2) {
-            assert!((w[1] - w[0]).abs() < 3.0, "jump of {} px", w[1] - w[0]);
-        }
-    }
-
-    #[test]
-    fn wobble_is_zero_for_content_and_sags_for_sad() {
-        let mut rng = 1u64;
         let mut idle = Idle::new();
-        let c = idle.tick(Mood::Content, 1.0, &mut rng).wobble;
-        assert_eq!(c, (0.0, 0.0));
-        let s = idle.tick(Mood::Sad, 1.0, &mut rng).wobble;
-        assert_eq!(s, (0.0, 4.0));
+        let w = idle.tick(Mood::Scared, 1.0, &mut rng).wobble;
+        assert!(w.0.abs() > 0.0, "scared trembles sideways");
+        let s = idle.tick(Mood::Sleepy, 1.0, &mut rng).wobble;
+        assert!(s.1 > 0.0, "sleepy nods down");
     }
 }

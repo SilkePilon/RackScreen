@@ -688,12 +688,12 @@ fn face_content_and_sad() {
     let mut m = ready_model();
     tick_until(&mut m, 0.0, 5.0);
     let px = render_face(&m, 5.0);
-    let (red, g, b) = pixel(&px, 75, 125);
+    let (red, g, b) = pixel(&px, 72, 118);
     assert!(
-        red > 200 && g > 140 && b < 80,
-        "left eye amber, got {red},{g},{b}"
+        red > 200 && g > 200 && b > 200,
+        "left eye off-white, got {red},{g},{b}"
     );
-    let (r2, ..) = pixel(&px, 120, 125);
+    let (r2, ..) = pixel(&px, 120, 118);
     assert!(r2 < 60, "gap between the eyes is dark, got {r2}");
     assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
     check("face_content", &px);
@@ -708,65 +708,12 @@ fn face_content_and_sad() {
     );
     tick_until(&mut m, 5.0, 8.0);
     check("face_sad", &render_face(&m, 8.0));
-}
-
-#[test]
-fn face_mid_act_frames() {
-    let mut m = ready_model();
-    tick_until(&mut m, 0.0, 2.0);
-    m.apply(
-        Event::PodCrashed {
-            ns: "media".into(),
-            name: "sonarr-0".into(),
-        },
-        2.0,
-    );
-    // 55 % into the 2.8 s act: X eyes, box in the slot
-    tick_until(&mut m, 2.0, 2.0 + 0.55 * 2.8);
-    let px = render_face(&m, 2.0 + 0.55 * 2.8);
-    let (_, _, b) = pixel(&px, 125, 175);
-    assert!(b > 150, "the box is kubernetes blue, got b={b}");
-    check("face_ouch_mid", &px);
-
-    let mut m = ready_model();
-    tick_until(&mut m, 0.0, 2.0);
-    m.apply(
-        Event::AppSynced {
-            name: "media".into(),
-        },
-        2.0,
-    );
-    // 34 % in: the rocket is mid-screen
-    tick_until(&mut m, 2.0, 2.0 + 0.34 * 2.8);
-    check("face_launch_mid", &render_face(&m, 2.0 + 0.34 * 2.8));
-}
-
-#[test]
-fn face_sunny_shades_and_sleepy() {
-    let mut m = ready_model();
-    tick_until(&mut m, 0.0, 2.0);
-    m.apply(
-        Event::Weather {
-            temp_c: 21.0,
-            code: 0,
-            is_day: true,
-            wind_kmh: 8.0,
-            gust_kmh: 12.0,
-            wind_from_deg: 180.0,
-            at: "2026-09-07T12:00".into(),
-        },
-        2.0,
-    );
-    // the weather habit starts on the next tick; 60 % in the shades are on
-    m.tick(2.0);
-    tick_until(&mut m, 2.0, 2.0 + 0.6 * 3.2);
-    check("face_sunny_shades", &render_face(&m, 2.0 + 0.6 * 3.2));
 
     let mut m = ready_model();
     m.set_bedtime_near(true);
     tick_until(&mut m, 0.0, 5.0);
     let px = render_face(&m, 5.0);
-    let (red, ..) = pixel(&px, 75, 95);
+    let (red, ..) = pixel(&px, 72, 95);
     assert!(red < 60, "sleepy: the top of the eye is closed, got {red}");
     check("face_sleepy", &px);
 }
