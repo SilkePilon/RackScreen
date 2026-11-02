@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::anim::{Secs, Smooth};
-use crate::electricity::{partition, price_level, Section, Source};
+use crate::electricity::{price_level, Source};
 use crate::event::{App, AppHealth, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
 use crate::face_player::{FaceInputs, FacePlayer, FaceTuning};
 use crate::fx::Fx;
@@ -12,7 +12,7 @@ use crate::mood::MoodInputs;
 use crate::scene_rain::{current_slots, first_wet_minutes, SOON_MINUTES, WET_MM};
 use crate::screens::ScreenState;
 use crate::theme::eaqi_band;
-use crate::theme::layout::{SEG_N, TORRENT_RADII};
+use crate::theme::layout::TORRENT_RADII;
 use crate::theme::Role;
 
 pub const SMOOTH_SECS: Secs = 0.8;
@@ -349,13 +349,6 @@ pub struct Model {
     renewable: Smooth,
     fossil_free: Smooth,
     carbon: Smooth,
-    /// Rotation of the power-mix ring in degrees; non-zero only while a new
-    /// leader is being turned to 12 o'clock.
-    mix_start: Smooth,
-    /// Leader and full partition as last drawn, to know where the new leader
-    /// was before it took the lead.
-    mix_leader: Option<Source>,
-    mix_sections: Vec<Section>,
     /// An Electricity Maps token is configured; without one the electricity
     /// roles show a key instead of the offline cloud.
     token_present: bool,
@@ -452,9 +445,6 @@ impl Model {
             renewable: Smooth::new(0.0, SMOOTH_SECS),
             fossil_free: Smooth::new(0.0, SMOOTH_SECS),
             carbon: Smooth::new(0.0, SMOOTH_SECS),
-            mix_start: Smooth::new(0.0, SMOOTH_SECS),
-            mix_leader: None,
-            mix_sections: Vec::new(),
             token_present: false,
             local_slot: 48,
             price_needle: Smooth::new(0.5, SMOOTH_SECS),
@@ -697,12 +687,6 @@ impl Model {
     pub fn smooth_carbon(&self, now: Secs) -> f32 {
         self.carbon.value(now)
     }
-    /// Degrees the power-mix ring (icons and ticks included) is turned
-    /// clockwise from its natural leader-at-12-o'clock position. Zero unless a
-    /// leader change is being animated.
-    pub fn smooth_mix_start(&self, now: Secs) -> f32 {
-        self.mix_start.value(now)
-    }
     pub fn set_token_present(&mut self, present: bool) {
         self.token_present = present;
     }
@@ -849,7 +833,6 @@ impl Model {
         if self.torrent_anims.len() != before {
             self.reslot_torrents(now);
         }
-        self.track_mix_leader(now);
         let dt = self.net_last_tick.map_or(0.0, |l| (now - l).max(0.0));
         self.net_last_tick = Some(now);
         self.net_rx_phase = (self.net_rx_phase
@@ -906,30 +889,6 @@ impl Model {
         self.screens[i].start_transition(now);
         self.transition_free_at =
             now + crate::screens::TRANSITION_SECS + crate::screens::TRANSITION_GAP_SECS;
-    }
-
-    /// When the drawn partition gets a new leader, `partition` moves that
-    /// source to segment 0 at once. Compensate by turning the whole ring so the
-    /// new leader stays where it was, then ease the turn back to zero: the ring
-    /// rotates the new leader up to 12 o'clock over `SMOOTH_SECS`.
-    fn track_mix_leader(&mut self, now: Secs) {
-        let sections = partition(&self.smooth_shares(now), SEG_N);
-        let leader = sections.first().map(|s| s.source);
-        if let (Some(new), Some(old)) = (leader, self.mix_leader) {
-            if new != old {
-                if let Some(prev) = self.mix_sections.iter().find(|s| s.source == new) {
-                    let pitch = 360.0 / SEG_N as f32;
-                    let deg = prev.start as f32 * pitch + self.mix_start.value(now);
-                    // shortest way round: (-180, 180]
-                    let deg = deg.rem_euclid(360.0);
-                    let deg = if deg > 180.0 { deg - 360.0 } else { deg };
-                    self.mix_start = Smooth::new(deg, SMOOTH_SECS);
-                    self.mix_start.set(0.0, now);
-                }
-            }
-        }
-        self.mix_leader = leader;
-        self.mix_sections = sections;
     }
 
     pub fn all_healthy(&self) -> bool {

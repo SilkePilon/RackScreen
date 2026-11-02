@@ -398,12 +398,6 @@ fn power_mix_ring() {
         &m.scene_for_role(Role::PowerMix, 5.0, &mut ScreenUi::new()),
         &mut px,
     );
-    // segment 0 is the head of the solar section
-    let (red, g, b) = pixel(&px, 120, 18);
-    assert!(
-        red > 200 && g > 150 && b < 80,
-        "segment 0 solar yellow, got {red},{g},{b}"
-    );
     check("power_mix", &px);
 }
 

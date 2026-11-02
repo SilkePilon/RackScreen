@@ -3,6 +3,7 @@
 pub mod cluster;
 pub mod energy;
 pub mod github;
+pub mod power_mix;
 pub mod sky;
 pub mod system;
 

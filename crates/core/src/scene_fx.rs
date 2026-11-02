@@ -477,7 +477,14 @@ mod tests {
         m.apply(electricity_event(), 0.0);
         m.apply(link(LinkTarget::Electricity, true), 0.0);
         let s = m.scene_for_role(Role::PowerMix, 5.0, &mut ScreenUi::new());
-        assert!(s.lit_count() > 0, "power mix ring lit with the link up");
+        assert!(
+            s.items
+                .iter()
+                .filter(|d| matches!(d, Drawable::Arc { .. }))
+                .count()
+                >= 20,
+            "power mix ring lit with the link up"
+        );
         assert!(!has_icon(&s, "cloud-off"));
         m.apply(link(LinkTarget::Electricity, false), 6.0);
         let s = m.scene_for_role(Role::PowerMix, 6.0, &mut ScreenUi::new());
@@ -600,7 +607,13 @@ mod tests {
         assert!(!m.link().api);
         let s = m.scene(0, 5.0, &mut ScreenUi::new());
         assert!(!has_icon(&s, "plug-zap"), "power mix ignores the API link");
-        assert!(s.lit_count() > 0);
+        assert!(
+            s.items
+                .iter()
+                .filter(|d| matches!(d, Drawable::Arc { .. }))
+                .count()
+                >= 20
+        );
         assert!(
             has_icon(&m.scene(1, 5.0, &mut ScreenUi::new()), "plug-zap"),
             "cpu still connects"
