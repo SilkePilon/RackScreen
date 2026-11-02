@@ -292,6 +292,7 @@ fn spawn_github(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx
         rackscreen_sources::github::GithubConfig {
             token: cfg.github.token.clone(),
             poll_secs: cfg.github.poll_secs,
+            ci_repos: cfg.github.ci_repos.clone(),
         },
         ctx.clone(),
     ));

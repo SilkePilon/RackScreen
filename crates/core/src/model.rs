@@ -3,7 +3,8 @@
 use crate::anim::Secs;
 use crate::electricity::{price_level, PriceLevel, Source};
 use crate::event::{
-    App, AppHealth, Download, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
+    App, AppHealth, CiRun, Download, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness,
+    Torrent,
 };
 use crate::face::{Face, FaceFrame};
 use crate::history::{History, Hourly};
@@ -246,6 +247,18 @@ pub struct LoadState {
     pub have: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CiState {
+    /// Newest first, at most 12.
+    pub runs: Vec<CiRun>,
+    pub have: bool,
+    /// Unix time of the newest successful completion seen this run.
+    pub last_pass_at: Option<i64>,
+}
+
+/// A CI pass keeps the face happy for this long (unix clock).
+pub const CI_RECENT_SECS: i64 = 1800;
+
 /// A rising restart counter worries the face for this long.
 pub const RESTART_RECENT_SECS: Secs = 300.0;
 
@@ -308,6 +321,7 @@ pub struct Model {
     fans: FansState,
     mains: MainsState,
     load: LoadState,
+    ci: CiState,
     /// Entrypoint req/s every 3 s, 90 s.
     traffic_hist: History,
     /// Restarts and mean input voltage per unix hour, 24 h.
@@ -393,6 +407,7 @@ impl Model {
             fans: FansState::default(),
             mains: MainsState::default(),
             load: LoadState::default(),
+            ci: CiState::default(),
             traffic_hist: History::new(31, 3.0),
             restarts_hist: Hourly::new(),
             mains_hist: Hourly::new(),
@@ -466,7 +481,10 @@ impl Model {
                 .last_rise_at
                 .is_some_and(|t| now - t < RESTART_RECENT_SECS),
             bedtime: self.bedtime_near,
-            ci_passed_recently: false,
+            ci_passed_recently: self
+                .ci
+                .last_pass_at
+                .is_some_and(|t| self.unix_now - t < CI_RECENT_SECS),
             cheap_price: self.current_price().is_some_and(|p| {
                 price_level(p, self.prices.avg).0.index() <= PriceLevel::Cheap.index()
             }),
@@ -586,6 +604,9 @@ impl Model {
     }
     pub fn load(&self) -> &LoadState {
         &self.load
+    }
+    pub fn ci(&self) -> &CiState {
+        &self.ci
     }
     pub fn set_token_present(&mut self, present: bool) {
         self.token_present = present;
@@ -986,6 +1007,15 @@ impl Model {
             }
             Event::Download(d) => self.media.download = d,
             Event::MediaAdded { title } => self.media.last_added = Some((title, now)),
+            Event::CiRuns(runs) => {
+                self.ci.runs = runs;
+                self.ci.have = true;
+            }
+            Event::CiRun { ok, at, .. } => {
+                if ok {
+                    self.ci.last_pass_at = Some(self.ci.last_pass_at.map_or(at, |t| t.max(at)));
+                }
+            }
             Event::NoExporter { role } => {
                 if !self.exporter_missing.contains(&role) {
                     self.exporter_missing.push(role);
@@ -1100,7 +1130,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{Download, NodeLoad};
+    use crate::event::{CiRun, CiStatus, Download, NodeLoad};
     use crate::p2::ui::ScreenUi;
     use crate::scene::Drawable;
 
@@ -1750,5 +1780,76 @@ mod tests {
         );
         assert_eq!(m.media().last_added, Some(("Dune".to_string(), 2.0)));
         assert!(!m.media().have, "the card alone is not library data");
+    }
+    fn run(id: u64, status: CiStatus, at: i64) -> CiRun {
+        CiRun {
+            id,
+            repo: "silkepilon/RackScreen".into(),
+            status,
+            created_at: at,
+            updated_at: at + 120,
+            duration_secs: Some(120),
+        }
+    }
+
+    #[test]
+    fn ci_runs_are_kept_and_a_fresh_pass_makes_the_face_happy() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_unix_now(1_788_782_400);
+        m.apply(
+            Event::CiRuns(vec![
+                run(2, CiStatus::InProgress, 100),
+                run(1, CiStatus::Success, 50),
+            ]),
+            0.0,
+        );
+        assert!(m.ci().have);
+        assert_eq!(m.ci().runs.len(), 2);
+        assert_eq!(
+            m.ci().last_pass_at,
+            None,
+            "the list alone does not time a pass"
+        );
+        assert!(!m.mood_inputs(0.0).ci_passed_recently);
+        m.apply(
+            Event::CiRun {
+                repo: "silkepilon/RackScreen".into(),
+                ok: false,
+                at: 1_788_782_400 - 60,
+            },
+            1.0,
+        );
+        assert!(
+            !m.mood_inputs(1.0).ci_passed_recently,
+            "a failure is not a pass"
+        );
+        m.apply(
+            Event::CiRun {
+                repo: "silkepilon/RackScreen".into(),
+                ok: true,
+                at: 1_788_782_400 - 60,
+            },
+            2.0,
+        );
+        assert_eq!(m.ci().last_pass_at, Some(1_788_782_400 - 60));
+        assert!(m.mood_inputs(2.0).ci_passed_recently);
+        m.set_unix_now(1_788_782_400 - 60 + CI_RECENT_SECS);
+        assert!(
+            !m.mood_inputs(3.0).ci_passed_recently,
+            "30 min later it is over"
+        );
+        m.apply(
+            Event::CiRun {
+                repo: "x".into(),
+                ok: true,
+                at: 10,
+            },
+            4.0,
+        );
+        assert_eq!(
+            m.ci().last_pass_at,
+            Some(1_788_782_400 - 60),
+            "an older pass does not move it back"
+        );
     }
 }

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, Download, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness,
-    Torrent,
+    App, AppHealth, AppSync, CiRun, CiStatus, Download, Event, IssPass, LinkTarget, MoonPhase,
+    NodeLoad, Robustness, Torrent,
 };
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::mood::Mood;
@@ -68,6 +68,31 @@ fn link(m: &mut Model, target: LinkTarget) {
 }
 
 /// Every source healthy and busy, the clock fixed.
+/// Twelve runs, newest first: the newest in `newest`, the fifth-oldest failed, the rest passed.
+fn ci_runs(newest: CiStatus) -> Vec<CiRun> {
+    (1..=12)
+        .rev()
+        .map(|i| {
+            let status = if i == 12 {
+                newest
+            } else if i == 5 {
+                CiStatus::Failure
+            } else {
+                CiStatus::Success
+            };
+            let duration = (status != CiStatus::InProgress).then_some(120 + i as i64 * 3);
+            CiRun {
+                id: i,
+                repo: "silkepilon/RackScreen".into(),
+                status,
+                created_at: UNIX - (13 - i as i64) * 1800,
+                updated_at: UNIX - (13 - i as i64) * 1800 + duration.unwrap_or(0),
+                duration_secs: duration,
+            }
+        })
+        .collect()
+}
+
 fn full_model() -> Model {
     let mut m = Model::new(Thresholds::default());
     m.set_unix_now(UNIX);
@@ -469,6 +494,7 @@ fn full_model() -> Model {
         })),
         0.0,
     );
+    m.apply(Event::CiRuns(ci_runs(CiStatus::InProgress)), 0.0);
     m.tick(0.0);
     m
 }
@@ -940,4 +966,14 @@ fn media_alternate_states() {
     let mut i = full_model();
     i.apply(Event::Download(None), 0.0);
     check("p2_media_idle", &render(&i, Role::Media, 120.0));
+}
+
+#[test]
+fn ci_alternate_states() {
+    let mut f = full_model();
+    f.apply(Event::CiRuns(ci_runs(CiStatus::Failure)), 0.0);
+    check("p2_ci_warn", &render(&f, Role::Ci, 120.0));
+    let mut p = full_model();
+    p.apply(Event::CiRuns(ci_runs(CiStatus::Success)), 0.0);
+    check("p2_ci_passed", &render(&p, Role::Ci, 120.0));
 }

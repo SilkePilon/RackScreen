@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{Local, NaiveDate, TimeZone};
-use rackscreen_core::event::{Event, LinkTarget};
+use rackscreen_core::event::{CiRun, CiStatus, Event, LinkTarget};
 use serde_json::{json, Value};
 
 use crate::electricity::{backoff_secs, token_rejected, HttpStatus};
@@ -23,10 +23,19 @@ const CALENDAR_SECS: u64 = 300;
 /// Actions runs are checked for at most this many recently pushed repos.
 const MAX_RUN_REPOS: usize = 5;
 
+/// Runs kept for the ci role, and repos discovered when `ci_repos` is empty.
+pub const CI_PER_PAGE: usize = 12;
+pub const CI_MAX_REPOS: usize = 10;
+const CI_RECENT_PUSH_SECS: i64 = 7 * 86_400;
+/// A repo that answers 404/403 is warned about this often.
+const CI_WARN_SECS: u64 = 3600;
+
 #[derive(Clone, Debug)]
 pub struct GithubConfig {
     pub token: String,
     pub poll_secs: u64,
+    /// Repos the ci role watches; empty discovers the ones pushed this week.
+    pub ci_repos: Vec<String>,
 }
 
 /// Thirty dates ending on `today`, oldest first.
@@ -302,6 +311,118 @@ impl RunTracker {
     }
 }
 
+fn rfc3339(s: Option<&str>) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s?)
+        .ok()
+        .map(|d| d.timestamp())
+}
+
+/// Runs of one `GET /repos/{repo}/actions/runs` page; `repo` stands in when
+/// the payload carries no `repository.full_name`.
+pub fn parse_ci_runs(json: &str, repo: &str) -> Result<Vec<CiRun>> {
+    let v: Value = serde_json::from_str(json).context("runs json")?;
+    let arr = v
+        .get("workflow_runs")
+        .and_then(Value::as_array)
+        .context("workflow_runs missing")?;
+    Ok(arr
+        .iter()
+        .filter_map(|r| {
+            let status = match (
+                r.get("status").and_then(Value::as_str)?,
+                r.get("conclusion").and_then(Value::as_str),
+            ) {
+                ("completed", Some("success")) => CiStatus::Success,
+                ("completed", Some("failure") | Some("timed_out")) => CiStatus::Failure,
+                ("completed", _) => CiStatus::Other,
+                _ => CiStatus::InProgress,
+            };
+            let created_at = rfc3339(r.get("created_at").and_then(Value::as_str))?;
+            let updated_at =
+                rfc3339(r.get("updated_at").and_then(Value::as_str)).unwrap_or(created_at);
+            let started = rfc3339(r.get("run_started_at").and_then(Value::as_str));
+            let duration_secs = match (status, started) {
+                (CiStatus::InProgress, _) | (_, None) => None,
+                (_, Some(s)) => Some((updated_at - s).max(0)),
+            };
+            Some(CiRun {
+                id: r.get("id")?.as_u64()?,
+                repo: r
+                    .pointer("/repository/full_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(repo)
+                    .to_string(),
+                status,
+                created_at,
+                updated_at,
+                duration_secs,
+            })
+        })
+        .collect())
+}
+
+/// All repos' runs merged, newest first, the last `CI_PER_PAGE` kept.
+pub fn merge_runs(mut all: Vec<CiRun>) -> Vec<CiRun> {
+    all.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+    all.truncate(CI_PER_PAGE);
+    all
+}
+
+/// Non-fork repos pushed in the last 7 days, most recent first, at most
+/// `CI_MAX_REPOS`, from `GET /user/repos?sort=pushed`.
+pub fn parse_user_repos(json: &str, now_unix: i64) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
+    };
+    let mut repos: Vec<(i64, String)> = arr
+        .iter()
+        .filter(|r| !r.get("fork").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|r| {
+            let pushed = rfc3339(r.get("pushed_at").and_then(Value::as_str))?;
+            let name = r.get("full_name")?.as_str()?.to_string();
+            (now_unix - pushed <= CI_RECENT_PUSH_SECS).then_some((pushed, name))
+        })
+        .collect();
+    repos.sort_by_key(|r| std::cmp::Reverse(r.0));
+    repos.truncate(CI_MAX_REPOS);
+    repos.into_iter().map(|(_, n)| n).collect()
+}
+
+/// Reports each run once, the first time it is seen completed as a pass or a
+/// failure, with its completion time; a repo's first page only primes.
+#[derive(Debug, Default)]
+pub struct CiTracker {
+    primed: HashSet<String>,
+    reported: HashSet<u64>,
+}
+
+impl CiTracker {
+    pub fn diff(&mut self, repo: &str, runs: &[CiRun]) -> Vec<Event> {
+        let completed = runs
+            .iter()
+            .filter(|r| matches!(r.status, CiStatus::Success | CiStatus::Failure));
+        if !self.primed.contains(repo) {
+            self.primed.insert(repo.to_string());
+            self.reported.extend(completed.map(|r| r.id));
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for r in completed {
+            if self.reported.insert(r.id) {
+                out.push(Event::CiRun {
+                    repo: repo.to_string(),
+                    ok: r.status == CiStatus::Success,
+                    at: r.updated_at,
+                });
+            }
+        }
+        out
+    }
+}
+
 /// One trip to the events feed. GitHub asks for a polling interval and hands
 /// out an ETag on a 304 as well, so both survive an unchanged feed.
 pub struct EventsPage {
@@ -386,6 +507,44 @@ impl Http {
         })
     }
 
+    async fn ci_runs(&self, repo: &str) -> Result<Vec<CiRun>> {
+        let resp = self
+            .auth(client().get(format!(
+                "{API}/repos/{repo}/actions/runs?per_page={CI_PER_PAGE}"
+            )))
+            .send()
+            .await
+            .context("ci runs request")?;
+        let status = resp.status();
+        let text = resp.text().await.context("ci runs body")?;
+        if !status.is_success() {
+            return Err(HttpStatus {
+                status: status.as_u16(),
+                body: text.chars().take(120).collect(),
+            }
+            .into());
+        }
+        parse_ci_runs(&text, repo)
+    }
+
+    async fn user_repos(&self) -> Result<String> {
+        let resp = self
+            .auth(client().get(format!("{API}/user/repos?sort=pushed&per_page=30")))
+            .send()
+            .await
+            .context("user repos request")?;
+        let status = resp.status();
+        let text = resp.text().await.context("user repos body")?;
+        if !status.is_success() {
+            return Err(HttpStatus {
+                status: status.as_u16(),
+                body: text.chars().take(120).collect(),
+            }
+            .into());
+        }
+        Ok(text)
+    }
+
     async fn runs(&self, repo: &str) -> Result<Vec<Run>> {
         let resp = self
             .auth(client().get(format!("{API}/repos/{repo}/actions/runs?per_page=5")))
@@ -417,6 +576,10 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
     let mut failures = 0u32;
     let mut warned_about_token = false;
     let mut last_calendar: Option<std::time::Instant> = None;
+    let mut ci = CiTracker::default();
+    let mut ci_repos: Vec<String> = cfg.ci_repos.clone();
+    let mut ci_discovered_at: Option<std::time::Instant> = None;
+    let mut ci_warned: HashMap<String, std::time::Instant> = HashMap::new();
     loop {
         if ctx.shutdown.is_cancelled() {
             return;
@@ -456,6 +619,40 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
                     // link down, and the Status dot keys off that needle.
                     Err(e) => tracing::warn!("github runs for {repo}: {e:#}"),
                 }
+            }
+            if cfg.ci_repos.is_empty()
+                && ci_discovered_at
+                    .is_none_or(|t| t.elapsed() >= Duration::from_secs(CALENDAR_SECS))
+            {
+                let json = http.user_repos().await?;
+                ci_repos = parse_user_repos(&json, chrono::Utc::now().timestamp());
+                ci_discovered_at = Some(std::time::Instant::now());
+                tracing::info!("github: ci watches {} repos", ci_repos.len());
+            }
+            let mut all_runs: Vec<CiRun> = Vec::new();
+            for repo in &ci_repos {
+                match http.ci_runs(repo).await {
+                    Ok(runs) => {
+                        ctx.emit_all(ci.diff(repo, &runs));
+                        all_runs.extend(runs);
+                    }
+                    // a per-repo miss (404 private, 403 no Actions scope) is
+                    // logged once an hour and never takes the link down
+                    Err(e) => {
+                        let due = ci_warned
+                            .get(repo)
+                            .is_none_or(|t| t.elapsed() >= Duration::from_secs(CI_WARN_SECS));
+                        if due {
+                            tracing::warn!("github ci runs for {repo}: {e:#}");
+                            ci_warned.insert(repo.clone(), std::time::Instant::now());
+                        } else {
+                            tracing::debug!("github ci runs for {repo}: {e:#}");
+                        }
+                    }
+                }
+            }
+            if !ci_repos.is_empty() {
+                ctx.emit(Event::CiRuns(merge_runs(all_runs)));
             }
             Ok(())
         }
@@ -661,6 +858,119 @@ mod tests {
         assert!(
             t.diff("r", &skipped).is_empty(),
             "skipped is neither pass nor fail"
+        );
+    }
+    const CI_RUNS: &str = include_str!("../tests/fixtures/github-ci-runs.json");
+    const USER_REPOS: &str = include_str!("../tests/fixtures/github-user-repos.json");
+
+    #[test]
+    fn ci_runs_parse_with_timestamps_and_durations() {
+        let runs = parse_ci_runs(CI_RUNS, "fallback/repo").unwrap();
+        assert_eq!(runs.len(), 4);
+        assert_eq!(runs[0].id, 401);
+        assert_eq!(runs[0].repo, "silkepilon/RackScreen");
+        assert_eq!(runs[0].status, CiStatus::InProgress);
+        assert_eq!(runs[0].duration_secs, None, "still running");
+        assert_eq!(runs[1].status, CiStatus::Failure);
+        assert_eq!(runs[1].duration_secs, Some(134));
+        assert_eq!(runs[2].status, CiStatus::Success);
+        assert_eq!(runs[2].duration_secs, Some(108));
+        assert_eq!(runs[2].created_at, 1_788_775_200);
+        assert_eq!(runs[2].updated_at, 1_788_775_308);
+        assert_eq!(runs[3].status, CiStatus::Other, "cancelled");
+        assert_eq!(runs[3].duration_secs, None, "no run_started_at");
+        let bare = parse_ci_runs(r#"{"workflow_runs":[{"id":1,"status":"queued","conclusion":null,"created_at":"2026-09-07T12:00:00Z","updated_at":"2026-09-07T12:00:00Z"}]}"#, "a/b").unwrap();
+        assert_eq!(
+            (bare[0].repo.as_str(), bare[0].status),
+            ("a/b", CiStatus::InProgress)
+        );
+        assert!(parse_ci_runs("{}", "a/b").is_err());
+    }
+
+    #[test]
+    fn runs_merge_newest_first_and_keep_twelve() {
+        let mut all: Vec<CiRun> = (0..15)
+            .map(|i| CiRun {
+                id: i,
+                repo: if i % 2 == 0 {
+                    "a/b".into()
+                } else {
+                    "c/d".into()
+                },
+                status: CiStatus::Success,
+                created_at: 1000 + i as i64 * 10,
+                updated_at: 1000 + i as i64 * 10 + 5,
+                duration_secs: Some(5),
+            })
+            .collect();
+        all.rotate_left(4);
+        let merged = merge_runs(all);
+        assert_eq!(merged.len(), CI_PER_PAGE);
+        assert_eq!(merged[0].id, 14, "newest first");
+        assert_eq!(merged[11].id, 3);
+    }
+
+    #[test]
+    fn user_repos_pushed_this_week_at_most_ten_no_forks() {
+        let now = 1_788_782_400; // 2026-09-07 12:00Z
+        assert_eq!(
+            parse_user_repos(USER_REPOS, now),
+            vec![
+                "silkepilon/RackScreen".to_string(),
+                "silkepilon/homelab-infrastructure".into()
+            ]
+        );
+        let many: Vec<String> = (0..14)
+            .map(|i| format!("{{\"full_name\":\"u/r{i}\",\"pushed_at\":\"2026-09-07T11:00:00Z\",\"fork\":false}}"))
+            .collect();
+        let json = format!("[{}]", many.join(","));
+        assert_eq!(parse_user_repos(&json, now).len(), CI_MAX_REPOS);
+        assert!(parse_user_repos("nope", now).is_empty());
+    }
+
+    #[test]
+    fn ci_tracker_reports_new_completions_with_their_time() {
+        let runs = parse_ci_runs(CI_RUNS, "r").unwrap();
+        let mut t = CiTracker::default();
+        assert!(t.diff("silkepilon/RackScreen", &runs).is_empty(), "primes");
+        let mut later = runs.clone();
+        later[0].status = CiStatus::Success;
+        later[0].updated_at = 1_788_782_000;
+        later[0].duration_secs = Some(95);
+        assert_eq!(
+            t.diff("silkepilon/RackScreen", &later),
+            vec![Event::CiRun {
+                repo: "silkepilon/RackScreen".into(),
+                ok: true,
+                at: 1_788_782_000,
+            }]
+        );
+        assert!(t.diff("silkepilon/RackScreen", &later).is_empty(), "once");
+        let mut cancelled = later.clone();
+        cancelled.insert(
+            0,
+            CiRun {
+                id: 402,
+                repo: "silkepilon/RackScreen".into(),
+                status: CiStatus::Other,
+                created_at: 1_788_782_100,
+                updated_at: 1_788_782_110,
+                duration_secs: None,
+            },
+        );
+        assert!(
+            t.diff("silkepilon/RackScreen", &cancelled).is_empty(),
+            "cancelled is neither"
+        );
+        let mut failed = cancelled.clone();
+        failed[0].status = CiStatus::Failure;
+        assert_eq!(
+            t.diff("silkepilon/RackScreen", &failed),
+            vec![Event::CiRun {
+                repo: "silkepilon/RackScreen".into(),
+                ok: false,
+                at: 1_788_782_110,
+            }]
         );
     }
 }

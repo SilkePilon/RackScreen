@@ -40,7 +40,8 @@ impl crate::model::Model {
             Role::Mains => !(link.prom && self.mains().have),
             Role::Load => !(link.prom && self.load().have),
             Role::Media => !(link.prom && self.media().have),
-            Role::Ci | Role::Jellyfin => true,
+            Role::Ci => !(link.github && self.ci().have),
+            Role::Jellyfin => true,
         }
     }
 
@@ -88,7 +89,7 @@ impl crate::model::Model {
         );
         let why = if role.is_sky() && !self.location_present() {
             NoData::Location
-        } else if (role == Role::GhActivity && !self.github_token_present())
+        } else if (matches!(role, Role::GhActivity | Role::Ci) && !self.github_token_present())
             || (electricity && !self.token_present())
         {
             NoData::Token
@@ -375,6 +376,10 @@ mod tests {
             pill_of(&for_role(&m, Role::Ups, 1.0)).as_deref(),
             Some("Waiting for data")
         );
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Ci, 1.0)).as_deref(),
+            Some("Token needed")
+        );
         let mut m = ready_model();
         m.set_location_present(true);
         m.set_github_token_present(true);
@@ -384,6 +389,10 @@ mod tests {
         );
         assert_eq!(
             pill_of(&for_role(&m, Role::GhActivity, 1.0)).as_deref(),
+            Some("Waiting for data")
+        );
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Ci, 1.0)).as_deref(),
             Some("Waiting for data")
         );
     }
@@ -422,6 +431,7 @@ mod tests {
     #[test]
     fn new_roles_wait_jellyfin_checks_config_and_exporters_can_be_missing() {
         let mut m = ready_model();
+        m.set_github_token_present(true);
         for role in [Role::Media, Role::Traffic, Role::Load, Role::Ci] {
             assert_eq!(
                 pill_of(&for_role(&m, role, 1.0)).as_deref(),

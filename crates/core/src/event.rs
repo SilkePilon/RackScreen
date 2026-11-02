@@ -128,6 +128,28 @@ pub struct Download {
     pub eta_secs: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CiStatus {
+    Success,
+    Failure,
+    InProgress,
+    /// cancelled, skipped, neutral, …
+    Other,
+}
+
+/// One GitHub Actions workflow run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CiRun {
+    pub id: u64,
+    pub repo: String,
+    pub status: CiStatus,
+    /// unix seconds
+    pub created_at: i64,
+    pub updated_at: i64,
+    /// `updated_at − run_started_at` for completed runs with a start.
+    pub duration_secs: Option<i64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -385,6 +407,14 @@ pub enum Event {
     /// An item left the arr queue completed.
     MediaAdded {
         title: String,
+    },
+    /// The last 12 Actions runs across the watched repos, newest first.
+    CiRuns(Vec<CiRun>),
+    /// A run completed since the last poll; `at` is unix seconds.
+    CiRun {
+        repo: String,
+        ok: bool,
+        at: i64,
     },
     /// Prometheus answered but has no series for the role (exporter not
     /// installed); the next data event for the role clears it.
