@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use fontdue::{Font, FontSettings, Metrics};
-use rackscreen_core::p2::font::{bytes, FontId};
+use rackscreen_core::p2::font::{advance, bytes, cap_height, measure, FontId};
 use rackscreen_core::scene::ClipRect;
 use rackscreen_core::theme::Color;
-use tiny_skia::Pixmap;
+use tiny_skia::{BlendMode, FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
 
 use crate::assets::FONT_BOLD;
 
@@ -19,6 +19,9 @@ pub struct TextRenderer {
     cache: HashMap<(char, u32), (Metrics, Vec<u8>)>,
     /// Glyphs keyed by face, character and size in half pixels.
     run_cache: HashMap<(FontId, char, u32), (Metrics, Vec<u8>)>,
+    /// Tinted glyph pixmaps for rotated drawing, keyed by face, char, half px, rgb.
+    #[allow(clippy::type_complexity)]
+    curved_cache: HashMap<(FontId, char, u32, u32), Option<(Metrics, Pixmap)>>,
 }
 
 struct Glyph {
@@ -47,6 +50,7 @@ impl TextRenderer {
             inter,
             cache: HashMap::new(),
             run_cache: HashMap::new(),
+            curved_cache: HashMap::new(),
         })
     }
 
@@ -63,6 +67,84 @@ impl TextRenderer {
         let g = self.inter[id.index()].rasterize(ch, key.2 as f32 / 2.0);
         self.run_cache.insert(key, g.clone());
         g
+    }
+
+    /// A glyph pre-tinted into its own premultiplied pixmap, for rotated drawing.
+    fn curved_glyph(
+        &mut self,
+        id: FontId,
+        ch: char,
+        px: f32,
+        color: Color,
+    ) -> Option<(Metrics, Pixmap)> {
+        let rgb = ((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32;
+        let key = (id, ch, Self::half_px(px), rgb);
+        if let Some(g) = self.curved_cache.get(&key) {
+            return g.clone();
+        }
+        let (m, cov) = self.inter_glyph(id, ch, px);
+        let built = IntSize::from_wh(m.width as u32, m.height as u32).and_then(|size| {
+            let mut data = Vec::with_capacity(cov.len() * 4);
+            for c in &cov {
+                let a = *c as u32;
+                data.push((color.r as u32 * a / 255) as u8);
+                data.push((color.g as u32 * a / 255) as u8);
+                data.push((color.b as u32 * a / 255) as u8);
+                data.push(*c);
+            }
+            Pixmap::from_vec(data, size).map(|p| (m, p))
+        });
+        self.curved_cache.insert(key, built.clone());
+        built
+    }
+
+    /// Text along a circle of `radius` around `(cx, cy)`, each glyph upright
+    /// away from the centre, the run centred on `centre_deg` (clockwise from
+    /// 12 o'clock) with its cap height centred on the circle.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_curved(
+        &mut self,
+        pix: &mut Pixmap,
+        text: &str,
+        font: FontId,
+        px: f32,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        centre_deg: f32,
+        letter_spacing: f32,
+        color: Color,
+        alpha: f32,
+    ) {
+        if alpha <= 0.0 || text.is_empty() || radius <= 0.0 {
+            return;
+        }
+        let total = measure(font, px, text, letter_spacing);
+        let cap = cap_height(font, px);
+        let mut a = centre_deg.to_radians() - total / 2.0 / radius;
+        let paint = PixmapPaint {
+            opacity: alpha.clamp(0.0, 1.0),
+            blend_mode: BlendMode::SourceOver,
+            quality: FilterQuality::Bilinear,
+        };
+        for ch in text.chars() {
+            let adv = advance(font, px, ch);
+            let w = adv + letter_spacing;
+            let ac = a + w / 2.0 / radius;
+            a += w / radius;
+            let Some((m, glyph)) = self.curved_glyph(font, ch, px, color) else {
+                continue;
+            };
+            let gx = cx + radius * ac.sin();
+            let gy = cy - radius * ac.cos();
+            let ts = Transform::from_translate(gx, gy)
+                .pre_rotate(ac.to_degrees())
+                .pre_translate(
+                    m.xmin as f32 - adv / 2.0,
+                    -(m.height as f32 + m.ymin as f32) + cap / 2.0,
+                );
+            pix.draw_pixmap(0, 0, glyph.as_ref(), &paint, ts, None);
+        }
     }
 
     /// Draw `text` with its left edge at `x` and its baseline at `baseline`,

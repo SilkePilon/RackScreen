@@ -3,6 +3,7 @@
 use crate::anim::{breathe, pulse, Secs};
 use crate::format::{fmt_eta, fmt_speed};
 use crate::model::Model;
+pub use crate::p2::font::FontId;
 use crate::theme::layout::*;
 use crate::theme::{
     Color, Role, BADGE_FILL, BLACK, BLUE, DIM_GREY, GREEN, GREY, RED, VIOLET, WHITE,
@@ -93,6 +94,70 @@ pub enum Drawable {
         cy: f32,
         text: String,
         px: f32,
+        color: Color,
+        alpha: f32,
+    },
+    /// A stroked arc with round caps; angles clockwise from 12 o'clock.
+    Arc {
+        cx: f32,
+        cy: f32,
+        r: f32,
+        width: f32,
+        start_deg: f32,
+        sweep_deg: f32,
+        color: Color,
+        alpha: f32,
+    },
+    RoundRect {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        color: Color,
+        alpha: f32,
+    },
+    Polygon {
+        points: Vec<(f32, f32)>,
+        color: Color,
+        alpha: f32,
+    },
+    Ellipse {
+        cx: f32,
+        cy: f32,
+        rx: f32,
+        ry: f32,
+        color: Color,
+        alpha: f32,
+    },
+    /// Open stroked path with round joins and caps.
+    Polyline {
+        points: Vec<(f32, f32)>,
+        width: f32,
+        color: Color,
+        alpha: f32,
+    },
+    /// Text placed by core: left edge `x`, baseline `baseline`.
+    Run {
+        x: f32,
+        baseline: f32,
+        text: String,
+        font: FontId,
+        px: f32,
+        letter_spacing: f32,
+        color: Color,
+        alpha: f32,
+        clip: Option<ClipRect>,
+    },
+    /// Text set along a circle around the screen centre, upright at the top,
+    /// centred on `centre_deg` (clockwise from 12 o'clock).
+    CurvedText {
+        text: String,
+        radius: f32,
+        centre_deg: f32,
+        px: f32,
+        font: FontId,
+        letter_spacing: f32,
         color: Color,
         alpha: f32,
     },

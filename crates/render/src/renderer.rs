@@ -9,7 +9,8 @@ use tiny_skia::{Pixmap, PixmapPaint, Transform};
 use crate::frame::new_pixmap;
 use crate::icons::IconCache;
 use crate::prims::{
-    circle, circle_stroke, fill, outline, rounded_rect, segment_outline, skia_color, SegmentCache,
+    arc_points, circle, circle_stroke, ellipse_path, fill, outline, polygon_path, polyline_path,
+    rounded_rect, segment_outline, skia_color, stroke, SegmentCache,
 };
 use crate::text::TextRenderer;
 
@@ -200,6 +201,112 @@ impl Painter {
                 self.text
                     .draw_centered(px, text, *text_px, *cx, *cy, *color, *alpha);
             }
+            Drawable::Arc {
+                cx,
+                cy,
+                r,
+                width,
+                start_deg,
+                sweep_deg,
+                color,
+                alpha,
+            } => {
+                if let Some(p) = polyline_path(&arc_points(*cx, *cy, *r, *start_deg, *sweep_deg)) {
+                    stroke(px, &p, *width, *color, *alpha);
+                }
+            }
+            Drawable::RoundRect {
+                x,
+                y,
+                w,
+                h,
+                r,
+                color,
+                alpha,
+            } => {
+                if *w > 0.0 && *h > 0.0 {
+                    fill(px, &rounded_rect(*x, *y, *w, *h, *r), *color, *alpha);
+                }
+            }
+            Drawable::Polygon {
+                points,
+                color,
+                alpha,
+            } => {
+                if let Some(p) = polygon_path(points) {
+                    fill(px, &p, *color, *alpha);
+                }
+            }
+            Drawable::Ellipse {
+                cx,
+                cy,
+                rx,
+                ry,
+                color,
+                alpha,
+            } => {
+                if let Some(p) = ellipse_path(*cx, *cy, *rx, *ry) {
+                    fill(px, &p, *color, *alpha);
+                }
+            }
+            Drawable::Polyline {
+                points,
+                width,
+                color,
+                alpha,
+            } => {
+                if let Some(p) = polyline_path(points) {
+                    stroke(px, &p, *width, *color, *alpha);
+                }
+            }
+            Drawable::Run {
+                x,
+                baseline,
+                text,
+                font,
+                px: size,
+                letter_spacing,
+                color,
+                alpha,
+                clip,
+            } => {
+                self.text.draw_run(
+                    px,
+                    text,
+                    *font,
+                    *size,
+                    *x,
+                    *baseline,
+                    *letter_spacing,
+                    *color,
+                    *alpha,
+                    *clip,
+                );
+            }
+            Drawable::CurvedText {
+                text,
+                radius,
+                centre_deg,
+                px: size,
+                font,
+                letter_spacing,
+                color,
+                alpha,
+            } => {
+                self.text.draw_curved(
+                    px,
+                    text,
+                    *font,
+                    *size,
+                    CX,
+                    CY,
+                    *radius,
+                    *centre_deg,
+                    *letter_spacing,
+                    *color,
+                    *alpha,
+                );
+            }
         }
     }
 }
@@ -339,5 +446,137 @@ mod tests {
         assert!(lit > 200, "glyph pixels in the centre band: {lit}");
         assert_eq!(pixel(&px, 120, 20), (0, 0, 0), "nothing above the text");
         assert_eq!(pixel(&px, 120, 220), (0, 0, 0), "nothing below the text");
+    }
+    use rackscreen_core::p2::font::FontId;
+    use rackscreen_core::theme::WHITE;
+
+    fn render_one(d: Drawable) -> Pixmap {
+        let mut r = Renderer::new().unwrap();
+        let mut px = new_pixmap();
+        let mut s = Scene::new();
+        s.push(d);
+        r.render(&s, &mut px);
+        px
+    }
+
+    fn lit(p: &Pixmap, x: u32, y: u32) -> bool {
+        pixel(p, x, y).0 > 60
+    }
+
+    #[test]
+    fn arc_runs_clockwise_from_twelve_with_round_caps() {
+        let px = render_one(Drawable::Arc {
+            cx: CX,
+            cy: CY,
+            r: 100.0,
+            width: 8.0,
+            start_deg: 0.0,
+            sweep_deg: 90.0,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        assert!(lit(&px, 120, 20), "start at 12 o'clock");
+        assert!(lit(&px, 191, 49), "half way, 45 degrees");
+        assert!(lit(&px, 220, 120), "end at 3 o'clock");
+        assert!(!lit(&px, 120, 220), "nothing at 6 o'clock");
+        assert!(!lit(&px, 20, 120), "nothing at 9 o'clock");
+        assert!(
+            lit(&px, 117, 20),
+            "round cap reaches a little past the start"
+        );
+    }
+
+    #[test]
+    fn filled_shapes_cover_their_interior_only() {
+        let rr = render_one(Drawable::RoundRect {
+            x: 20.0,
+            y: 20.0,
+            w: 60.0,
+            h: 30.0,
+            r: 10.0,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        assert!(lit(&rr, 50, 35));
+        assert!(!lit(&rr, 20, 20), "corner rounded away");
+        let poly = render_one(Drawable::Polygon {
+            points: vec![(120.0, 20.0), (220.0, 120.0), (20.0, 120.0)],
+            color: WHITE,
+            alpha: 1.0,
+        });
+        assert!(lit(&poly, 120, 100));
+        assert!(!lit(&poly, 30, 40));
+        let ell = render_one(Drawable::Ellipse {
+            cx: 120.0,
+            cy: 120.0,
+            rx: 40.0,
+            ry: 10.0,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        assert!(lit(&ell, 150, 120));
+        assert!(!lit(&ell, 120, 100), "ten tall, not forty");
+        let line = render_one(Drawable::Polyline {
+            points: vec![(20.0, 200.0), (120.0, 100.0), (220.0, 200.0)],
+            width: 3.0,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        assert!(lit(&line, 70, 150));
+        assert!(!lit(&line, 120, 200));
+    }
+
+    #[test]
+    fn run_and_curved_text_land_where_asked() {
+        let run = render_one(Drawable::Run {
+            x: 100.0,
+            baseline: 130.0,
+            text: "42".into(),
+            font: FontId::Bold,
+            px: 30.0,
+            letter_spacing: 0.0,
+            color: WHITE,
+            alpha: 1.0,
+            clip: None,
+        });
+        let n = (100..140)
+            .flat_map(|x| (105..131).map(move |y| (x, y)))
+            .filter(|&(x, y)| lit(&run, x, y))
+            .count();
+        assert!(n > 100, "glyph pixels inside the run box: {n}");
+        assert!(
+            !(0..240).any(|x| lit(&run, x, 140)),
+            "nothing below the baseline"
+        );
+        let curved = render_one(Drawable::CurvedText {
+            text: "MEMORY".into(),
+            radius: 106.0,
+            centre_deg: 0.0,
+            px: 10.0,
+            font: FontId::Bold,
+            letter_spacing: 1.5,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        let top = (0..240)
+            .flat_map(|x| (0..40).map(move |y| (x, y)))
+            .filter(|&(x, y)| lit(&curved, x, y))
+            .count();
+        assert!(top > 60, "title pixels near the top: {top}");
+        assert!(
+            !(0..240).any(|x| (60..240).any(|y| lit(&curved, x, y))),
+            "nothing below y = 60"
+        );
+        let bottom = render_one(Drawable::CurvedText {
+            text: "MEMORY".into(),
+            radius: 106.0,
+            centre_deg: 180.0,
+            px: 10.0,
+            font: FontId::Bold,
+            letter_spacing: 1.5,
+            color: WHITE,
+            alpha: 1.0,
+        });
+        assert!((0..240).any(|x| (200..240).any(|y| lit(&bottom, x, y))));
     }
 }
