@@ -272,6 +272,13 @@ pub struct Model {
     face: Face,
     /// Half an hour before night mode and ten minutes after: the face is sleepy.
     bedtime_near: bool,
+    /// Roles whose Prometheus query came back empty on the last poll.
+    exporter_missing: Vec<Role>,
+    /// An arr API key is configured: the media card never falls back to the
+    /// qBittorrent torrent.
+    arr_configured: bool,
+    /// `jellyfin.url` is set; without it the role says "Check config".
+    jellyfin_configured: bool,
 }
 
 impl Model {
@@ -323,6 +330,9 @@ impl Model {
             rng: RNG_SEED,
             face: Face::new(),
             bedtime_near: false,
+            exporter_missing: Vec::new(),
+            arr_configured: false,
+            jellyfin_configured: false,
         }
     }
 
@@ -497,6 +507,26 @@ impl Model {
     }
     pub fn location_present(&self) -> bool {
         self.location_present
+    }
+    pub fn exporter_missing(&self, role: Role) -> bool {
+        self.exporter_missing.contains(&role)
+    }
+    // the apply arms of the Prometheus events call this (Task 3)
+    #[allow(dead_code)]
+    pub(crate) fn clear_exporter(&mut self, role: Role) {
+        self.exporter_missing.retain(|r| *r != role);
+    }
+    pub fn set_arr_configured(&mut self, on: bool) {
+        self.arr_configured = on;
+    }
+    pub fn arr_configured(&self) -> bool {
+        self.arr_configured
+    }
+    pub fn set_jellyfin_configured(&mut self, on: bool) {
+        self.jellyfin_configured = on;
+    }
+    pub fn jellyfin_configured(&self) -> bool {
+        self.jellyfin_configured
     }
     pub fn set_github_token_present(&mut self, present: bool) {
         self.github_token_present = present;
@@ -768,6 +798,11 @@ impl Model {
                 LinkTarget::Github => self.link.github = up,
                 LinkTarget::ArgoCd => self.link.argocd = up,
             },
+            Event::NoExporter { role } => {
+                if !self.exporter_missing.contains(&role) {
+                    self.exporter_missing.push(role);
+                }
+            }
             Event::ForceNight(v) => self.night_override = v,
             Event::Weather {
                 temp_c,
@@ -1306,5 +1341,20 @@ mod tests {
         );
         assert!(m.state().have_temps);
         assert_eq!(m.state().temps.len(), 2);
+    }
+    #[test]
+    fn no_exporter_flags_a_role_until_cleared() {
+        let mut m = Model::new(Thresholds::default());
+        assert!(!m.exporter_missing(Role::Fans));
+        m.apply(Event::NoExporter { role: Role::Fans }, 0.0);
+        m.apply(Event::NoExporter { role: Role::Fans }, 1.0);
+        assert!(m.exporter_missing(Role::Fans));
+        assert!(!m.exporter_missing(Role::Mains));
+        m.clear_exporter(Role::Fans);
+        assert!(!m.exporter_missing(Role::Fans));
+        assert!(!m.arr_configured() && !m.jellyfin_configured());
+        m.set_arr_configured(true);
+        m.set_jellyfin_configured(true);
+        assert!(m.arr_configured() && m.jellyfin_configured());
     }
 }

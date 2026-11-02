@@ -76,10 +76,19 @@ pub enum Role {
     Net,
     Deploys,
     Face,
+    Media,
+    Traffic,
+    Restarts,
+    Uptime,
+    Fans,
+    Mains,
+    Load,
+    Ci,
+    Jellyfin,
 }
 
 impl Role {
-    pub const ALL: [Role; 22] = [
+    pub const ALL: [Role; 31] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -102,6 +111,15 @@ impl Role {
         Role::Net,
         Role::Deploys,
         Role::Face,
+        Role::Media,
+        Role::Traffic,
+        Role::Restarts,
+        Role::Uptime,
+        Role::Fans,
+        Role::Mains,
+        Role::Load,
+        Role::Ci,
+        Role::Jellyfin,
     ];
 
     pub fn index(self) -> usize {
@@ -140,6 +158,15 @@ impl Role {
             Role::Net => "NETWORK",
             Role::Deploys => "DEPLOYS TODAY",
             Role::Face => "FACE",
+            Role::Media => "MEDIA",
+            Role::Traffic => "WEB TRAFFIC",
+            Role::Restarts => "RESTARTS · 24H",
+            Role::Uptime => "UPTIME",
+            Role::Fans => "FANS",
+            Role::Mains => "MAINS",
+            Role::Load => "LOAD",
+            Role::Ci => "CI",
+            Role::Jellyfin => "NOW PLAYING",
         }
     }
 
@@ -167,6 +194,15 @@ impl Role {
             Role::Net => "net",
             Role::Deploys => "deploys",
             Role::Face => "face",
+            Role::Media => "media",
+            Role::Traffic => "traffic",
+            Role::Restarts => "restarts",
+            Role::Uptime => "uptime",
+            Role::Fans => "fans",
+            Role::Mains => "mains",
+            Role::Load => "load",
+            Role::Ci => "ci",
+            Role::Jellyfin => "jellyfin",
         }
     }
     pub fn parse(s: &str) -> Option<Role> {
@@ -187,6 +223,13 @@ impl Role {
                 | Role::Net
                 | Role::Deploys
                 | Role::Face
+                | Role::Media
+                | Role::Traffic
+                | Role::Restarts
+                | Role::Uptime
+                | Role::Fans
+                | Role::Mains
+                | Role::Load
         )
     }
     /// Roles that need `location.lat` / `location.lon` in the config.
@@ -223,6 +266,8 @@ pub mod p2 {
     pub const CYAN: Color = Color::hex(0x67D1EE);
     pub const AMBER: Color = Color::hex(0xF2B84B);
     pub const GREEN: Color = Color::hex(0x4CC38A);
+    /// Movies on the media ring and the Jellyfin movie ring.
+    pub const ORANGE: Color = Color::hex(0xF2A65A);
     /// The dark half of the sun ring.
     pub const NIGHT: Color = Color::hex(0x2A2A33);
     pub const MOON: Color = Color::hex(0xD6D6E0);
@@ -282,6 +327,13 @@ mod tests {
                 Role::Net,
                 Role::Deploys,
                 Role::Face,
+                Role::Media,
+                Role::Traffic,
+                Role::Restarts,
+                Role::Uptime,
+                Role::Fans,
+                Role::Mains,
+                Role::Load,
             ]
         );
         assert!(!Role::PowerMix.is_cluster() && !Role::Price.is_cluster());
@@ -289,14 +341,46 @@ mod tests {
     }
 
     #[test]
-    fn twenty_two_roles_with_unique_names() {
-        assert_eq!(Role::ALL.len(), 22);
+    fn thirty_one_roles_with_unique_names() {
+        assert_eq!(Role::ALL.len(), 31);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 31);
         assert_eq!(Role::parse("face"), Some(Role::Face));
         assert!(Role::Face.is_cluster());
         assert!(!Role::Face.is_sky());
         assert_eq!(Role::ALL[21], Role::Face);
+        assert_eq!(
+            &Role::ALL[22..],
+            &[
+                Role::Media,
+                Role::Traffic,
+                Role::Restarts,
+                Role::Uptime,
+                Role::Fans,
+                Role::Mains,
+                Role::Load,
+                Role::Ci,
+                Role::Jellyfin
+            ]
+        );
+        for (name, role) in [
+            ("media", Role::Media),
+            ("traffic", Role::Traffic),
+            ("restarts", Role::Restarts),
+            ("uptime", Role::Uptime),
+            ("fans", Role::Fans),
+            ("mains", Role::Mains),
+            ("load", Role::Load),
+            ("ci", Role::Ci),
+            ("jellyfin", Role::Jellyfin),
+        ] {
+            assert_eq!(Role::parse(name), Some(role));
+            assert!(!role.is_sky());
+        }
+        assert_eq!(Role::Restarts.title(), "RESTARTS · 24H");
+        assert_eq!(Role::Traffic.title(), "WEB TRAFFIC");
+        assert_eq!(Role::Jellyfin.title(), "NOW PLAYING");
+        assert!(!Role::Ci.is_cluster() && !Role::Jellyfin.is_cluster());
         assert_eq!(Role::parse("gh-activity"), Some(Role::GhActivity));
         assert_eq!(Role::parse("deploys"), Some(Role::Deploys));
         let sky: Vec<Role> = Role::ALL.into_iter().filter(|r| r.is_sky()).collect();
@@ -312,6 +396,7 @@ mod tests {
                 Role::Iss
             ]
         );
+        assert_eq!(p2::ORANGE, Color::hex(0xF2A65A));
     }
 
     #[test]

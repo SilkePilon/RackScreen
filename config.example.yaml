@@ -61,10 +61,24 @@ github:
   enabled: false           # fine-grained token: read access to contributions, events and Actions
   token: ""
   poll_secs: 60
+  ci_repos: []             # owner/repo for the ci role; empty = your repos with runs in the last 7 days
 
 argocd:
   enabled: true            # watch applications.argoproj.io for the deploys role
   namespace: argocd
+
+media:
+  enabled: false           # arr queues for the media role's download card (library counts come from Prometheus)
+  namespace: arr-stack
+  radarr: { service: auto, port: 7878, api_key: "" }
+  sonarr: { service: auto, port: 8989, api_key: "" }
+  lidarr: { service: auto, port: 8686, api_key: "" }
+
+jellyfin:
+  enabled: false           # now playing from a Jellyfin server, outside the cluster
+  url: ""                  # e.g. http://192.168.0.x:8096
+  api_key: ""              # Jellyfin Dashboard → API Keys
+  poll_secs: 5             # >= 2
 
 display:
   brightness: 1.0
@@ -74,7 +88,8 @@ display:
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
-#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face
+#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face,
+#        media, traffic, restarts, uptime, fans, mains, load, ci, jellyfin
 screens:
   - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
   - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }

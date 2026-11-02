@@ -36,6 +36,15 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Sun => system::sun(model, now),
         Role::Moon => system::moon(model, now),
         Role::Renewable => system::renewable(model, now),
+        Role::Media
+        | Role::Traffic
+        | Role::Restarts
+        | Role::Uptime
+        | Role::Fans
+        | Role::Mains
+        | Role::Load
+        | Role::Ci
+        | Role::Jellyfin => return None, // builders arrive with their data (Tasks 4–7)
         Role::PowerMix | Role::Face => return None,
     })
 }
@@ -61,15 +70,23 @@ mod tests {
     #[test]
     fn worst_case_heroes_fit_180_px() {
         for (text, scale) in [
-            ("100", 1.0),     // cpu, mem, storage, ups, renewable, moon
-            ("999", 1.0),     // pods, deploys, contributions, carbon
-            ("16/16", 0.82),  // cluster
-            ("-12", 1.0),     // weather below zero
-            ("59:59", 0.82),  // iss
-            ("-0.123", 0.78), // price
-            ("1000", 1.0),    // net Mb/s
-            ("120", 1.0),     // wind, aqi, rain minutes
-            ("23:59", 0.82),  // sun
+            ("100", 1.0),      // cpu, mem, storage, ups, renewable, moon
+            ("999", 1.0),      // pods, deploys, contributions, carbon
+            ("16/16", 0.82),   // cluster
+            ("-12", 1.0),      // weather below zero
+            ("59:59", 0.82),   // iss
+            ("-0.123", 0.78),  // price
+            ("1000", 1.0),     // net Mb/s
+            ("120", 1.0),      // wind, aqi, rain minutes
+            ("23:59", 0.82),   // sun
+            ("9999", 1.0),     // media library, restarts
+            ("99.9", 1.0),     // traffic req/s
+            ("6.1k", 1.0),     // fans
+            ("260", 1.0),      // mains
+            ("10.52", 0.82),   // load from 10 up
+            ("12/12", 0.82),   // ci
+            ("1:41:54", 0.62), // jellyfin h:mm:ss
+            ("59:59", 0.82),   // jellyfin m:ss
         ] {
             let w = hero_width(text, scale);
             assert!(w <= HERO_MAX_W, "{text} at {scale}: {w} px");

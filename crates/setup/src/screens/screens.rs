@@ -283,6 +283,10 @@ impl Screens {
             r if r.is_sky() => c.location().is_none().then_some("no location"),
             Role::GhActivity => c.github.token.is_empty().then_some("no token"),
             Role::Deploys => (!c.argocd.enabled).then_some("argocd off"),
+            Role::Ci => c.github.token.is_empty().then_some("no token"),
+            Role::Jellyfin => {
+                (!c.jellyfin.enabled || c.jellyfin.url.trim().is_empty()).then_some("no url")
+            }
             _ => None,
         }
     }
@@ -827,6 +831,17 @@ mod tests {
         assert_eq!(s.role_hint(Role::Weather), None);
         assert_eq!(s.role_hint(Role::GhActivity), None);
         assert_eq!(s.role_hint(Role::Deploys), Some("argocd off"));
+        assert_eq!(s.role_hint(Role::Jellyfin), Some("no url"));
+        assert_eq!(s.role_hint(Role::Ci), None, "token set above");
+        assert_eq!(s.role_hint(Role::Media), None);
+        {
+            let cfg = s.cfg.as_mut().unwrap();
+            cfg.github.token.clear();
+            cfg.jellyfin.enabled = true;
+            cfg.jellyfin.url = "http://jf:8096".into();
+        }
+        assert_eq!(s.role_hint(Role::Ci), Some("no token"));
+        assert_eq!(s.role_hint(Role::Jellyfin), None);
     }
 
     #[test]
@@ -852,7 +867,10 @@ mod tests {
         s.handle(KeyEvent::from(KeyCode::Up), &mut sh.clone_for_test(), 0.0);
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
-        assert!(text.contains("▸ ○  face"), "scrolled to the cursor: {text}");
+        assert!(
+            text.contains("▸ ○  jellyfin"),
+            "scrolled to the cursor: {text}"
+        );
     }
 
     #[test]

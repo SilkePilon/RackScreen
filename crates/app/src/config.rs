@@ -37,6 +37,10 @@ pub struct Config {
     #[serde(default)]
     pub argocd: ArgocdCfg,
     #[serde(default)]
+    pub media: MediaCfg,
+    #[serde(default)]
+    pub jellyfin: JellyfinCfg,
+    #[serde(default)]
     pub screens: Vec<ScreenCfg>,
 }
 
@@ -158,6 +162,8 @@ pub struct GithubCfg {
     pub enabled: bool,
     pub token: String,
     pub poll_secs: u64,
+    /// `owner/repo` list for the `ci` role; empty = your repos pushed in the last 7 days.
+    pub ci_repos: Vec<String>,
 }
 
 /// Argo CD applications for the deploys role.
@@ -166,6 +172,49 @@ pub struct GithubCfg {
 pub struct ArgocdCfg {
     pub enabled: bool,
     pub namespace: String,
+}
+
+/// One *arr app reached over the kube tunnel for the media download card.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct ArrCfg {
+    /// Service name, or `auto` = the first service containing the app name on `port`.
+    pub service: String,
+    pub port: u16,
+    pub api_key: String,
+}
+
+/// Radarr, Sonarr and Lidarr queues for the media role's download card.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct MediaCfg {
+    pub enabled: bool,
+    pub namespace: String,
+    pub radarr: ArrCfg,
+    pub sonarr: ArrCfg,
+    pub lidarr: ArrCfg,
+}
+
+impl MediaCfg {
+    /// Media is on and at least one app has an API key: the arr queue is polled
+    /// and the card never falls back to the qBittorrent torrent.
+    pub fn keyed(&self) -> bool {
+        self.enabled
+            && [&self.radarr, &self.sonarr, &self.lidarr]
+                .iter()
+                .any(|a| !a.api_key.trim().is_empty())
+    }
+}
+
+/// Jellyfin now-playing sessions; the server lives outside the cluster.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct JellyfinCfg {
+    pub enabled: bool,
+    /// `http://host:8096`; empty until filled in, the role then says "Check config".
+    pub url: String,
+    pub api_key: String,
+    pub poll_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -311,6 +360,7 @@ impl Default for GithubCfg {
             enabled: false,
             token: String::new(),
             poll_secs: 60,
+            ci_repos: Vec::new(),
         }
     }
 }
@@ -319,6 +369,45 @@ impl Default for ArgocdCfg {
         Self {
             enabled: true,
             namespace: "argocd".into(),
+        }
+    }
+}
+impl Default for ArrCfg {
+    fn default() -> Self {
+        Self {
+            service: "auto".into(),
+            port: 0,
+            api_key: String::new(),
+        }
+    }
+}
+impl Default for MediaCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            namespace: "arr-stack".into(),
+            radarr: ArrCfg {
+                port: 7878,
+                ..ArrCfg::default()
+            },
+            sonarr: ArrCfg {
+                port: 8989,
+                ..ArrCfg::default()
+            },
+            lidarr: ArrCfg {
+                port: 8686,
+                ..ArrCfg::default()
+            },
+        }
+    }
+}
+impl Default for JellyfinCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            api_key: String::new(),
+            poll_secs: 5,
         }
     }
 }
@@ -385,13 +474,26 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Upgrade legacy fields in place.
+    /// Upgrade legacy fields in place and fill the per-app arr ports.
     pub fn normalize(&mut self) {
         for s in &mut self.screens {
             if let Some(r) = s.role.take() {
                 if s.roles.is_empty() {
                     s.roles = vec![r];
                 }
+            }
+        }
+        let defaults = MediaCfg::default();
+        for (app, d) in [
+            (&mut self.media.radarr, &defaults.radarr),
+            (&mut self.media.sonarr, &defaults.sonarr),
+            (&mut self.media.lidarr, &defaults.lidarr),
+        ] {
+            if app.port == 0 {
+                app.port = d.port;
+            }
+            if app.service.trim().is_empty() {
+                app.service = d.service.clone();
             }
         }
     }
@@ -525,6 +627,16 @@ impl Config {
                 "{name}.poll_secs must be at least 60 (got {secs})"
             );
         }
+        anyhow::ensure!(
+            self.jellyfin.poll_secs >= 2,
+            "jellyfin.poll_secs must be at least 2 (got {})",
+            self.jellyfin.poll_secs
+        );
+        let url = self.jellyfin.url.trim();
+        anyhow::ensure!(
+            url.is_empty() || url.starts_with("http://") || url.starts_with("https://"),
+            "jellyfin.url must start with http:// or https:// (got {url})"
+        );
         Ok(())
     }
 }
@@ -828,5 +940,64 @@ mod tests {
             !c.to_yaml().unwrap().contains("face:"),
             "never written back"
         );
+    }
+    #[test]
+    fn media_github_ci_and_jellyfin_defaults_and_validation() {
+        let c = Config::default();
+        assert!(!c.media.enabled);
+        assert_eq!(c.media.namespace, "arr-stack");
+        assert_eq!(
+            (c.media.radarr.service.as_str(), c.media.radarr.port),
+            ("auto", 7878)
+        );
+        assert_eq!(
+            (c.media.sonarr.service.as_str(), c.media.sonarr.port),
+            ("auto", 8989)
+        );
+        assert_eq!(
+            (c.media.lidarr.service.as_str(), c.media.lidarr.port),
+            ("auto", 8686)
+        );
+        assert!(c.media.radarr.api_key.is_empty() && !c.media.keyed());
+        assert!(c.github.ci_repos.is_empty());
+        assert!(!c.jellyfin.enabled && c.jellyfin.url.is_empty() && c.jellyfin.api_key.is_empty());
+        assert_eq!(c.jellyfin.poll_secs, 5);
+        c.validate().unwrap();
+        let mut c = c;
+        c.media.enabled = true;
+        c.media.sonarr.api_key = "k".into();
+        assert!(c.media.keyed());
+        c.media.enabled = false;
+        assert!(!c.media.keyed(), "keys only count while media is on");
+        c.jellyfin.poll_secs = 1;
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("jellyfin.poll_secs"));
+        c.jellyfin.poll_secs = 2;
+        c.jellyfin.url = "192.168.0.10:8096".into();
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("jellyfin.url"));
+        c.jellyfin.url = "http://192.168.0.10:8096".into();
+        c.validate().unwrap();
+        c.jellyfin.url = "https://jf.example".into();
+        c.validate().unwrap();
+        let yaml = "github: { ci_repos: [a/b, c/d] }\njellyfin: { enabled: true, url: \"http://x:8096\", api_key: k }\nmedia: { enabled: true, radarr: { api_key: r } }\n";
+        let c = Config::from_yaml(yaml).unwrap();
+        assert_eq!(
+            c.github.ci_repos,
+            vec!["a/b".to_string(), "c/d".to_string()]
+        );
+        assert!(c.jellyfin.enabled && c.jellyfin.api_key == "k");
+        assert_eq!(
+            c.media.radarr.port, 7878,
+            "partial arr block keeps the defaults"
+        );
+        assert_eq!(c.media.radarr.api_key, "r");
+        assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
     }
 }

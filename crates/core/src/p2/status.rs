@@ -20,6 +20,10 @@ pub enum NoData {
     Token,
     /// `location.lat` / `lon` are missing from the config.
     Location,
+    /// Prometheus answers but has no series for this role.
+    Exporter,
+    /// A URL or similar the role cannot work without is empty in the config.
+    Config,
 }
 
 pub fn no_data_screen(role: Role, why: NoData) -> P2Screen {
@@ -30,6 +34,8 @@ pub fn no_data_screen(role: Role, why: NoData) -> P2Screen {
         NoData::Waiting => ("Waiting for data".into(), TEXT2),
         NoData::Token => ("Token needed".into(), WARN),
         NoData::Location => ("Location needed".into(), WARN),
+        NoData::Exporter => ("No exporter".into(), WARN),
+        NoData::Config => ("Check config".into(), WARN),
     });
     s
 }
@@ -105,6 +111,17 @@ mod tests {
         assert_eq!(
             no_data_screen(Role::Weather, NoData::Waiting).title,
             "WEATHER"
+        );
+        assert_eq!(
+            no_data_screen(Role::Fans, NoData::Exporter).pill,
+            Some(("No exporter".into(), WARN))
+        );
+        assert_eq!(
+            no_data_screen(Role::Jellyfin, NoData::Config),
+            P2Screen {
+                pill: Some(("Check config".into(), WARN)),
+                ..no_data_screen(Role::Jellyfin, NoData::Waiting)
+            }
         );
     }
 

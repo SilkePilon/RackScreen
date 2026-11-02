@@ -167,6 +167,10 @@ pub struct RenderLoop {
     pub location_present: bool,
     /// A GitHub token is configured; without one `gh-activity` shows a key.
     pub github_token_present: bool,
+    /// An arr API key is configured: the media card never shows the torrent.
+    pub arr_configured: bool,
+    /// `jellyfin.url` is set; without it the role says "Check config".
+    pub jellyfin_configured: bool,
     /// Only one screen may iris at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
 }
@@ -194,6 +198,8 @@ impl RenderLoop {
         model.set_token_present(self.token_present);
         model.set_location_present(self.location_present);
         model.set_github_token_present(self.github_token_present);
+        model.set_arr_configured(self.arr_configured);
+        model.set_jellyfin_configured(self.jellyfin_configured);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
         let mut fade_started: Option<Secs> = None;

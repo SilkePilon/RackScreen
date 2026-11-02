@@ -71,6 +71,22 @@ pub enum Field {
     GithubPoll,
     ArgoEnabled,
     ArgoNamespace,
+    GithubCiRepos,
+    MediaEnabled,
+    MediaNamespace,
+    RadarrService,
+    RadarrPort,
+    RadarrKey,
+    SonarrService,
+    SonarrPort,
+    SonarrKey,
+    LidarrService,
+    LidarrPort,
+    LidarrKey,
+    JellyfinEnabled,
+    JellyfinUrl,
+    JellyfinKey,
+    JellyfinPoll,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,16 +95,18 @@ pub enum Group {
     Services,
     Energy,
     Sky,
+    Media,
     Display,
     Thresholds,
 }
 
 impl Group {
-    pub const ALL: [Group; 6] = [
+    pub const ALL: [Group; 7] = [
         Group::Cluster,
         Group::Services,
         Group::Energy,
         Group::Sky,
+        Group::Media,
         Group::Display,
         Group::Thresholds,
     ];
@@ -98,6 +116,7 @@ impl Group {
             Group::Services => "Services",
             Group::Energy => "Energy",
             Group::Sky => "Sky",
+            Group::Media => "Media & Jellyfin",
             Group::Display => "Display",
             Group::Thresholds => "Thresholds",
         }
@@ -141,9 +160,9 @@ const fn spec(
 }
 
 use FieldKind::{Bool, Number, Secret, Text};
-use Group::{Cluster, Display, Energy, Services, Sky, Thresholds};
+use Group::{Cluster, Display, Energy, Media, Services, Sky, Thresholds};
 
-pub const FIELDS: [FieldSpec; 43] = [
+pub const FIELDS: [FieldSpec; 59] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -281,6 +300,14 @@ pub const FIELDS: [FieldSpec; 43] = [
         "Seconds between GitHub polls, at least 60.",
     ),
     spec(
+        Field::GithubCiRepos,
+        Services,
+        "GitHub",
+        "ci repos",
+        Text,
+        "owner/repo, comma separated; empty: your recent repos.",
+    ),
+    spec(
         Field::ElecEnabled,
         Energy,
         "Electricity Maps",
@@ -407,6 +434,126 @@ pub const FIELDS: [FieldSpec; 43] = [
         "min elevation",
         Number,
         "Lowest pass elevation to count, 0 to 90°.",
+    ),
+    spec(
+        Field::MediaEnabled,
+        Media,
+        "Media",
+        "enabled",
+        Bool,
+        "Poll the arr queues for the media download card.",
+    ),
+    spec(
+        Field::MediaNamespace,
+        Media,
+        "Media",
+        "namespace",
+        Text,
+        "Namespace the arr services run in.",
+    ),
+    spec(
+        Field::RadarrService,
+        Media,
+        "Radarr",
+        "service",
+        Text,
+        "Service name, or auto.",
+    ),
+    spec(
+        Field::RadarrPort,
+        Media,
+        "Radarr",
+        "port",
+        Number,
+        "Radarr web port, usually 7878.",
+    ),
+    spec(
+        Field::RadarrKey,
+        Media,
+        "Radarr",
+        "api key",
+        Secret,
+        "Radarr Settings → General → API Key.",
+    ),
+    spec(
+        Field::SonarrService,
+        Media,
+        "Sonarr",
+        "service",
+        Text,
+        "Service name, or auto.",
+    ),
+    spec(
+        Field::SonarrPort,
+        Media,
+        "Sonarr",
+        "port",
+        Number,
+        "Sonarr web port, usually 8989.",
+    ),
+    spec(
+        Field::SonarrKey,
+        Media,
+        "Sonarr",
+        "api key",
+        Secret,
+        "Sonarr Settings → General → API Key.",
+    ),
+    spec(
+        Field::LidarrService,
+        Media,
+        "Lidarr",
+        "service",
+        Text,
+        "Service name, or auto.",
+    ),
+    spec(
+        Field::LidarrPort,
+        Media,
+        "Lidarr",
+        "port",
+        Number,
+        "Lidarr web port, usually 8686.",
+    ),
+    spec(
+        Field::LidarrKey,
+        Media,
+        "Lidarr",
+        "api key",
+        Secret,
+        "Lidarr Settings → General → API Key.",
+    ),
+    spec(
+        Field::JellyfinEnabled,
+        Media,
+        "Jellyfin",
+        "enabled",
+        Bool,
+        "Now playing from your Jellyfin server.",
+    ),
+    spec(
+        Field::JellyfinUrl,
+        Media,
+        "Jellyfin",
+        "url",
+        Text,
+        "http://host:8096; the server is outside the cluster.",
+    ),
+    spec(
+        Field::JellyfinKey,
+        Media,
+        "Jellyfin",
+        "api key",
+        Secret,
+        "Jellyfin Dashboard → API Keys.",
+    ),
+    spec(
+        Field::JellyfinPoll,
+        Media,
+        "Jellyfin",
+        "poll",
+        Number,
+        "Seconds between session polls, at least 2.",
     ),
     spec(
         Field::Brightness,
@@ -562,6 +709,22 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::GithubPoll => cfg.github.poll_secs.to_string(),
         Field::ArgoEnabled => cfg.argocd.enabled.to_string(),
         Field::ArgoNamespace => cfg.argocd.namespace.clone(),
+        Field::GithubCiRepos => cfg.github.ci_repos.join(", "),
+        Field::MediaEnabled => cfg.media.enabled.to_string(),
+        Field::MediaNamespace => cfg.media.namespace.clone(),
+        Field::RadarrService => cfg.media.radarr.service.clone(),
+        Field::RadarrPort => cfg.media.radarr.port.to_string(),
+        Field::RadarrKey => cfg.media.radarr.api_key.clone(),
+        Field::SonarrService => cfg.media.sonarr.service.clone(),
+        Field::SonarrPort => cfg.media.sonarr.port.to_string(),
+        Field::SonarrKey => cfg.media.sonarr.api_key.clone(),
+        Field::LidarrService => cfg.media.lidarr.service.clone(),
+        Field::LidarrPort => cfg.media.lidarr.port.to_string(),
+        Field::LidarrKey => cfg.media.lidarr.api_key.clone(),
+        Field::JellyfinEnabled => cfg.jellyfin.enabled.to_string(),
+        Field::JellyfinUrl => cfg.jellyfin.url.clone(),
+        Field::JellyfinKey => cfg.jellyfin.api_key.clone(),
+        Field::JellyfinPoll => cfg.jellyfin.poll_secs.to_string(),
     }
 }
 
@@ -653,6 +816,34 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         Field::GithubPoll => cfg.github.poll_secs = num::<u64>(t, "poll secs")?.max(60),
         Field::ArgoEnabled => cfg.argocd.enabled = t == "true",
         Field::ArgoNamespace => cfg.argocd.namespace = t.into(),
+        Field::GithubCiRepos => {
+            cfg.github.ci_repos = t
+                .split(',')
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
+        Field::MediaEnabled => cfg.media.enabled = t == "true",
+        Field::MediaNamespace => cfg.media.namespace = t.into(),
+        Field::RadarrService => cfg.media.radarr.service = t.into(),
+        Field::RadarrPort => cfg.media.radarr.port = num(t, "port")?,
+        Field::RadarrKey => cfg.media.radarr.api_key = text.into(),
+        Field::SonarrService => cfg.media.sonarr.service = t.into(),
+        Field::SonarrPort => cfg.media.sonarr.port = num(t, "port")?,
+        Field::SonarrKey => cfg.media.sonarr.api_key = text.into(),
+        Field::LidarrService => cfg.media.lidarr.service = t.into(),
+        Field::LidarrPort => cfg.media.lidarr.port = num(t, "port")?,
+        Field::LidarrKey => cfg.media.lidarr.api_key = text.into(),
+        Field::JellyfinEnabled => cfg.jellyfin.enabled = t == "true",
+        Field::JellyfinUrl => {
+            if !t.is_empty() && !t.starts_with("http://") && !t.starts_with("https://") {
+                return Err("url must start with http:// or https://".into());
+            }
+            cfg.jellyfin.url = t.into();
+        }
+        Field::JellyfinKey => cfg.jellyfin.api_key = text.into(),
+        Field::JellyfinPoll => cfg.jellyfin.poll_secs = num::<u64>(t, "poll secs")?.max(2),
     }
     Ok(())
 }
@@ -796,7 +987,7 @@ impl Screen for Configure {
                 KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.move_group(-1),
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.move_group(1),
-                KeyCode::Char(c @ '1'..='6') => {
+                KeyCode::Char(c @ '1'..='7') => {
                     self.jump_to(Group::ALL[(c as u8 - b'1') as usize]);
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
@@ -1057,7 +1248,7 @@ impl Screen for Configure {
 
     fn keys(&self) -> String {
         match self.mode {
-            Mode::Browse => "↑↓ field  Tab/←→ group  1-6 jump  ⏎ edit  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  Tab/←→ group  1-7 jump  ⏎ edit  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
             Mode::AskDiscard => "y discard  Esc keep".into(),
@@ -1078,7 +1269,7 @@ impl Screen for Configure {
     fn sidebar(&self) -> Option<SidebarView> {
         Some(SidebarView {
             title: "Configure".into(),
-            // Numbered, so the `1-6` jump keys explain themselves.
+            // Numbered, so the `1-7` jump keys explain themselves.
             items: Group::ALL
                 .iter()
                 .enumerate()
@@ -1260,7 +1451,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 43);
+        assert_eq!(FIELDS.len(), 59);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1268,7 +1459,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 43);
+        assert_eq!(FIELDS.len(), 59);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);
@@ -1352,7 +1543,7 @@ mod tests {
             screen.sidebar().unwrap().selected,
             Group::Thresholds.index()
         );
-        assert_eq!(screen.sidebar().unwrap().items.len(), 6);
+        assert_eq!(screen.sidebar().unwrap().items.len(), 7);
     }
 
     #[test]
@@ -1367,14 +1558,17 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::BackTab), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Services);
         screen.handle(KeyEvent::from(KeyCode::Char('5')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Media);
+        assert_eq!(FIELDS[screen.row].field, Field::MediaEnabled);
+        screen.handle(KeyEvent::from(KeyCode::Char('6')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Display);
         assert_eq!(FIELDS[screen.row].field, Field::Brightness);
         screen.handle(KeyEvent::from(KeyCode::Char('1')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Cluster);
-        screen.handle(KeyEvent::from(KeyCode::Char('6')), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Char('7')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Thresholds);
         assert!(!screen.dirty, "navigation never dirties the form");
-        assert!(screen.keys().contains("1-6 jump"));
+        assert!(screen.keys().contains("1-7 jump"));
     }
 
     #[test]
@@ -1430,5 +1624,51 @@ mod tests {
         assert!(t.contains("● on"), "qBittorrent is on by default: {t}");
         assert!(t.contains("○ off"), "GitHub is off by default: {t}");
         assert!(!t.contains("Kubernetes"), "other groups are not drawn");
+    }
+    #[test]
+    fn media_and_jellyfin_fields() {
+        let mut c = Config::default();
+        assert_eq!(get(&c, Field::MediaEnabled), "false");
+        assert_eq!(get(&c, Field::RadarrPort), "7878");
+        assert_eq!(get(&c, Field::LidarrService), "auto");
+        assert_eq!(get(&c, Field::JellyfinPoll), "5");
+        assert_eq!(get(&c, Field::GithubCiRepos), "");
+        set(&mut c, Field::GithubCiRepos, " a/b, c/d ,,").unwrap();
+        assert_eq!(
+            c.github.ci_repos,
+            vec!["a/b".to_string(), "c/d".to_string()]
+        );
+        assert_eq!(get(&c, Field::GithubCiRepos), "a/b, c/d");
+        set(&mut c, Field::RadarrKey, "rk").unwrap();
+        assert_eq!(c.media.radarr.api_key, "rk");
+        set(&mut c, Field::SonarrPort, "8990").unwrap();
+        assert_eq!(c.media.sonarr.port, 8990);
+        assert!(set(&mut c, Field::SonarrPort, "x").is_err());
+        set(&mut c, Field::JellyfinUrl, "http://jf:8096").unwrap();
+        assert!(set(&mut c, Field::JellyfinUrl, "jf:8096")
+            .unwrap_err()
+            .contains("http"));
+        set(&mut c, Field::JellyfinUrl, "").unwrap();
+        set(&mut c, Field::JellyfinPoll, "1").unwrap();
+        assert_eq!(c.jellyfin.poll_secs, 2, "floored at 2");
+        set(&mut c, Field::JellyfinKey, "jk").unwrap();
+        assert_eq!(c.jellyfin.api_key, "jk");
+        for f in [
+            Field::RadarrKey,
+            Field::SonarrKey,
+            Field::LidarrKey,
+            Field::JellyfinKey,
+        ] {
+            assert!(
+                FIELDS
+                    .iter()
+                    .any(|s| s.field == f && s.kind == FieldKind::Secret),
+                "{f:?} is masked"
+            );
+        }
+        assert_eq!(Group::Media.name(), "Media & Jellyfin");
+        assert_eq!(Group::ALL[4], Group::Media);
+        assert_eq!(group_indices(Group::Media).len(), 15);
+        assert!(c.validate().is_ok());
     }
 }

@@ -1,6 +1,7 @@
 //! Events emitted by sources and folded into the model.
 
 use crate::electricity::Source;
+use crate::theme::Role;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Torrent {
@@ -316,6 +317,11 @@ pub enum Event {
     Link {
         target: LinkTarget,
         up: bool,
+    },
+    /// Prometheus answered but has no series for the role (exporter not
+    /// installed); the next data event for the role clears it.
+    NoExporter {
+        role: Role,
     },
     /// Simulator override: Some(true) forces night, Some(false) forces day, None back to clock.
     ForceNight(Option<bool>),

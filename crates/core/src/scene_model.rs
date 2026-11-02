@@ -33,6 +33,15 @@ impl crate::model::Model {
             Role::Rain => !(link.rain && self.rain().have),
             Role::Sun | Role::Moon => !self.sky().have,
             Role::Iss => !self.iss().have,
+            Role::Media
+            | Role::Traffic
+            | Role::Restarts
+            | Role::Uptime
+            | Role::Fans
+            | Role::Mains
+            | Role::Load
+            | Role::Ci
+            | Role::Jellyfin => true,
         }
     }
 
@@ -62,6 +71,14 @@ impl crate::model::Model {
     pub fn scene_for_role(&self, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
         if self.wants_connecting(role) {
             return connecting_scene(now);
+        }
+        if role == Role::Jellyfin && !self.jellyfin_configured() {
+            ui.for_role(role);
+            return compose(&no_data_screen(role, NoData::Config), ui, now);
+        }
+        if self.link().prom && self.exporter_missing(role) {
+            ui.for_role(role);
+            return compose(&no_data_screen(role, NoData::Exporter), ui, now);
         }
         if !self.needs_data(role) {
             return role_scene(self, role, now, ui);
@@ -402,5 +419,47 @@ mod tests {
         let s = m.scene(0, 3.4, &mut ScreenUi::new());
         assert!(s.zoom < 1.0, "mid transition");
         assert!(connecting(&s), "incoming cpu half is the connecting scene");
+    }
+    #[test]
+    fn new_roles_wait_jellyfin_checks_config_and_exporters_can_be_missing() {
+        let mut m = ready_model();
+        for role in [Role::Media, Role::Traffic, Role::Load, Role::Ci] {
+            assert_eq!(
+                pill_of(&for_role(&m, role, 1.0)).as_deref(),
+                Some("Waiting for data"),
+                "{role:?}"
+            );
+        }
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Jellyfin, 1.0)).as_deref(),
+            Some("Check config")
+        );
+        m.set_jellyfin_configured(true);
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Jellyfin, 1.0)).as_deref(),
+            Some("Waiting for data")
+        );
+        m.apply(Event::NoExporter { role: Role::Fans }, 1.0);
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Fans, 1.0)).as_deref(),
+            Some("No exporter")
+        );
+        m.apply(link(LinkTarget::Prometheus, false), 2.0);
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Fans, 2.0)).as_deref(),
+            Some("Waiting for data"),
+            "a missing exporter only means something while Prometheus answers"
+        );
+        assert!(!connecting(&m.scene_for_role(
+            Role::Uptime,
+            2.0,
+            &mut ScreenUi::new()
+        )));
+        m.apply(link(LinkTarget::K8sApi, false), 3.0);
+        assert!(connecting(&for_role(&m, Role::Uptime, 3.0)), "cluster role");
+        assert!(
+            !connecting(&for_role(&m, Role::Ci, 3.0)),
+            "ci is not a cluster role"
+        );
     }
 }

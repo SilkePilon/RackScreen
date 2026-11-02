@@ -142,6 +142,9 @@ impl Monitor {
             location_present: matches!(source, SourceKind::Fake) || cfg.location().is_some(),
             github_token_present: matches!(source, SourceKind::Fake)
                 || (cfg.github.enabled && !cfg.github.token.is_empty()),
+            arr_configured: matches!(source, SourceKind::Fake) || cfg.media.keyed(),
+            jellyfin_configured: matches!(source, SourceKind::Fake)
+                || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
             one_at_a_time: cfg.display.one_at_a_time,
         };
         let render_thread = std::thread::Builder::new()
