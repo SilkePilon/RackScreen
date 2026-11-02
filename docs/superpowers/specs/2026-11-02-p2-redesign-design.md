@@ -258,8 +258,9 @@ Added:
 - `Ellipse { cx, cy, rx, ry, color, alpha }` fill.
 - `Polyline { points, width, color, alpha }` round joins (sparklines; core
   samples the cubic into points).
-- `Text` gains `font: Font` (Medium/SemiBold/Bold), `align` (left, centre,
-  right), `letter_spacing`, `clip: Option<Rect>` and `dy` (roll offset).
+- `Run { x, baseline, text, font, px, letter_spacing, color, alpha, clip }`:
+  text placed by core (left x, baseline y), font Medium/SemiBold/Bold,
+  optional clip rect. Replaces `Text` and `Badge` text.
 - `CurvedText { text, radius, centre_deg, px, font, letter_spacing, color }`.
 - `Image { name, cx, cy, size, color }` tinted alpha mask (power-mix icons;
   reuses the existing icon rasteriser).
@@ -304,6 +305,27 @@ reveal sweeps the ring arc in over 0.8 s).
   still carry the block load with a single warning; the keys are ignored. The
   setup TUI drops the face fields from the Configure thresholds group.
 - No new required fields. Thresholds keep their current names.
+
+### Decisions added while planning (2026-11-02)
+
+- **Splashes and sweeps are removed** (`fx.rs` splash/sweep kinds,
+  `scene_fx::splash_overlay`, `sweep_scene`, the Boot sweep). They are event
+  reactions drawn with icons and ripples, which P2 rules out ("no icons", "no
+  reactions", calm motion). State changes show through ring and pill colours.
+  Role-change transitions keep `Scene::zoom` (zoom out, swap, zoom in);
+  `Scene::ring_reveal` is removed.
+- **Fonts live in core**: the three Inter instances are `include_bytes!`'d in
+  `core/src/p2/font.rs`, which also holds read-only fontdue metrics (advance
+  widths, digit cell width, cap height) so core can lay text out (centre,
+  pill width, marquee overflow, roll cells). `render` takes the bytes from
+  core for rasterising; nothing is embedded twice.
+- **Text is positioned by core**: a `Run` drawable carries a left x and a
+  baseline y, a font, size, letter spacing, colour, alpha and an optional
+  clip rect; `render` just draws it. Rolling digits are one `Run` per glyph.
+- **Per-screen state** (`ScreenUi`) is passed into `Model::scene(screen, now,
+  ui: &mut ScreenUi)`; the runloop and the gifs example own one per screen.
+  `scene_for_role` keeps a `&mut ScreenUi` argument too (tests pass a fresh
+  one).
 
 ## Errors and edge cases
 
