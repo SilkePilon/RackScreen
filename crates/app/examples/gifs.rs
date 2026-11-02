@@ -129,6 +129,20 @@ fn clips() -> Vec<Clip> {
                     (1.5, Step::Cmd(FakeCmd::NodeDown)),
                     (5.0, Step::Cmd(FakeCmd::NodeUp)),
                 ],
+                Role::Media => vec![(3.0, Step::Cmd(FakeCmd::MediaDone))],
+                Role::Restarts => vec![(2.5, Step::Cmd(FakeCmd::KickRestart))],
+                Role::Mains => vec![
+                    (2.5, Step::Cmd(FakeCmd::Brownout)),
+                    (6.0, Step::Cmd(FakeCmd::Brownout)),
+                ],
+                Role::Ci => vec![
+                    (2.0, Step::Cmd(FakeCmd::CiFailure)),
+                    (5.0, Step::Cmd(FakeCmd::CiPass)),
+                ],
+                Role::Jellyfin => vec![
+                    (3.0, Step::Cmd(FakeCmd::JellyfinToggle)),
+                    (6.0, Step::Cmd(FakeCmd::JellyfinToggle)),
+                ],
                 _ => Vec::new(),
             };
             Clip::role(role, script)
@@ -182,6 +196,8 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     model.set_local_slot(SLOT);
     model.set_location_present(true);
     model.set_github_token_present(true);
+    model.set_jellyfin_configured(true);
+    model.set_arr_configured(true);
     model.set_utc_offset_secs(UTC_OFFSET);
     // the clock before the first events: day-bucketed data (deploys per hour) needs it
     model.set_unix_now(UNIX_START);

@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, Event, IssPass, LinkTarget, Robustness, Torrent,
+    App, AppHealth, AppSync, CiRun, CiStatus, Download, Event, IssPass, JfKind, JfSession,
+    JfStatus, LinkTarget, NodeLoad, Robustness, Torrent,
 };
 
 use crate::astro::sky_event;
@@ -94,6 +95,32 @@ const DEGRADED_APP: usize = 5;
 /// Minutes until the demo ISS pass, and its length.
 const ISS_PASS_IN_SECS: i64 = 42 * 60;
 const ISS_PASS_SECS: i64 = 6 * 60;
+/// Media library counts and the demo download.
+const MEDIA_LIBRARY: (u32, u32, u32) = (37, 30, 54);
+const DOWNLOAD_TITLE: &str = "The Lord of the Rings: The Return of the King";
+/// Restarts per hour over the last day, oldest first.
+const RESTART_SEED: [f32; 24] = [
+    0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 7.0, 9.0, 11.0, 6.0, 3.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+    0.0, 0.0, 0.0, 0.0, 0.0,
+];
+const WORST_POD: &str = "n8n-worker";
+/// Days up per node (same order as `NODES`); the two short ones rebooted lately.
+const UPTIME_DAYS: [f64; 7] = [79.6, 79.6, 79.6, 82.1, 41.0, 0.375, 4.4];
+/// Fan rpm for the four Pis (`NODES[3..]`).
+const FAN_SEED: [f32; 4] = [4885.0, 4538.0, 6059.0, 5104.0];
+const MAINS_V: f32 = 234.0;
+const BROWNOUT_V: f32 = 212.0;
+/// 1-minute load and cores per node.
+const LOAD_SEED: [(f32, u32); 7] = [
+    (0.81, 8),
+    (0.02, 12),
+    (0.12, 16),
+    (0.22, 4),
+    (0.13, 4),
+    (3.1, 4),
+    (1.02, 4),
+];
+const CI_REPO: &str = "silkepilon/RackScreen";
 
 /// Sources Electricity Maps counts as renewable; fossil-free adds nuclear.
 fn is_renewable(s: Source) -> bool {
@@ -132,6 +159,11 @@ pub enum FakeCmd {
     Thunder,
     RainSoon,
     IssPassNow,
+    MediaDone,
+    KickRestart,
+    Brownout,
+    JellyfinToggle,
+    CiPass,
 }
 
 impl FakeCmd {
@@ -159,6 +191,11 @@ impl FakeCmd {
             'l' => FakeCmd::Thunder,
             'w' => FakeCmd::RainSoon,
             'i' => FakeCmd::IssPassNow,
+            'm' => FakeCmd::MediaDone,
+            'k' => FakeCmd::KickRestart,
+            'b' => FakeCmd::Brownout,
+            'j' => FakeCmd::JellyfinToggle,
+            'c' => FakeCmd::CiPass,
             _ => return None,
         })
     }
@@ -205,6 +242,21 @@ pub struct FakeState {
     gh_days: Vec<u32>,
     iss_start: i64,
     ticks: u64,
+    /// Download progress 0..1, `None` between downloads; `dl_restart_at` is the tick a new one starts.
+    dl_progress: Option<f32>,
+    dl_restart_at: u64,
+    traffic_rps: f32,
+    restart_hours: Vec<f32>,
+    pub(crate) restart_total: u32,
+    uptime_days: Vec<f64>,
+    fans: Vec<f32>,
+    brownout: bool,
+    loads: Vec<f32>,
+    /// Newest first, at most 12.
+    ci_runs: Vec<CiStatus>,
+    /// 0 playing, 1 paused, 2 idle.
+    jf_state: u8,
+    jf_pos: f64,
 }
 
 impl FakeState {
@@ -259,6 +311,24 @@ impl FakeState {
             gh_days: GH_SEED.to_vec(),
             iss_start: 0,
             ticks: 0,
+            dl_progress: Some(0.35),
+            dl_restart_at: 0,
+            traffic_rps: 3.4,
+            restart_hours: RESTART_SEED.to_vec(),
+            restart_total: RESTART_SEED.iter().sum::<f32>() as u32,
+            uptime_days: UPTIME_DAYS.to_vec(),
+            fans: FAN_SEED.to_vec(),
+            brownout: false,
+            loads: LOAD_SEED.iter().map(|(l, _)| *l).collect(),
+            ci_runs: (0..12)
+                .map(|i| match i {
+                    0 => CiStatus::InProgress,
+                    7 => CiStatus::Failure,
+                    _ => CiStatus::Success,
+                })
+                .collect(),
+            jf_state: 0,
+            jf_pos: 3720.0,
         };
         s.iss_start = s.unix_start + ISS_PASS_IN_SECS;
         s
@@ -521,6 +591,186 @@ impl FakeState {
         }
     }
 
+    fn media_library(&self) -> Event {
+        Event::MediaLibrary {
+            movies: MEDIA_LIBRARY.0,
+            series: MEDIA_LIBRARY.1,
+            artists: MEDIA_LIBRARY.2,
+        }
+    }
+
+    fn download(&self) -> Event {
+        Event::Download(self.dl_progress.map(|p| Download {
+            title: DOWNLOAD_TITLE.into(),
+            progress: p,
+            eta_secs: ((1.0 - p) * 1800.0) as i64,
+        }))
+    }
+
+    fn traffic(&self) -> Event {
+        let total = self.traffic_rps.max(0.1);
+        Event::Traffic {
+            req_per_sec: self.traffic_rps,
+            top: vec![
+                ("n8n".into(), total * 0.48),
+                ("portfolio".into(), total * 0.27),
+                ("grafana".into(), total * 0.15),
+            ],
+            service_rps: total,
+            error_share: 0.0,
+        }
+    }
+
+    fn traffic_history(&self) -> Event {
+        Event::TrafficHistory {
+            req_per_sec: (0..31)
+                .map(|i| (self.traffic_rps + 1.6 * ((i as f32) * 0.4).sin()).max(0.0))
+                .collect(),
+        }
+    }
+
+    fn restarts(&self) -> Event {
+        let worst_n = self.restart_hours.iter().cloned().fold(0.0_f32, f32::max) as u32 + 22;
+        Event::Restarts {
+            total_24h: self.restart_total,
+            worst: (self.restart_total > 0)
+                .then(|| (WORST_POD.to_string(), worst_n.min(self.restart_total))),
+        }
+    }
+
+    fn restarts_history(&self) -> Event {
+        let hour = self.unix_now().div_euclid(3600);
+        Event::RestartsHistory {
+            hourly: self
+                .restart_hours
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (hour - 23 + i as i64, *v))
+                .collect(),
+        }
+    }
+
+    fn uptime(&self) -> Event {
+        Event::Uptime(
+            NODES
+                .iter()
+                .zip(&self.uptime_days)
+                .map(|((n, _), d)| ((*n).to_string(), d * 86_400.0 + self.ticks as f64))
+                .collect(),
+        )
+    }
+
+    fn fans(&self) -> Event {
+        Event::Fans(
+            NODES[3..]
+                .iter()
+                .zip(&self.fans)
+                .map(|((n, _), rpm)| ((*n).to_string(), *rpm))
+                .collect(),
+        )
+    }
+
+    fn mains(&self) -> Event {
+        Event::Mains {
+            volts: if self.brownout { BROWNOUT_V } else { MAINS_V },
+            ups_load_pct: 7.0,
+        }
+    }
+
+    fn mains_history(&self) -> Event {
+        let hour = self.unix_now().div_euclid(3600);
+        Event::MainsHistory {
+            hourly: (0..24)
+                .map(|i| {
+                    (
+                        hour - 23 + i,
+                        MAINS_V - 1.0 + 2.0 * ((i as f32) / 3.0).sin(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn load(&self) -> Event {
+        Event::Load(
+            NODES
+                .iter()
+                .zip(LOAD_SEED.iter().zip(&self.loads))
+                .map(|((n, _), ((_, cores), l1))| NodeLoad {
+                    node: (*n).to_string(),
+                    load1: *l1,
+                    load5: l1 * 0.85,
+                    load15: l1 * 0.7,
+                    cores: *cores,
+                })
+                .collect(),
+        )
+    }
+
+    fn ci_runs(&self) -> Event {
+        let now = self.unix_now();
+        Event::CiRuns(
+            self.ci_runs
+                .iter()
+                .enumerate()
+                .map(|(i, status)| {
+                    let created_at = now - (i as i64 + 1) * 1800;
+                    let duration = (*status != CiStatus::InProgress).then_some(120 + i as i64 * 3);
+                    CiRun {
+                        id: 500 - i as u64,
+                        repo: CI_REPO.into(),
+                        status: *status,
+                        created_at,
+                        updated_at: created_at + duration.unwrap_or(0),
+                        duration_secs: duration,
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    fn jellyfin(&self) -> Event {
+        let sessions = match self.jf_state {
+            2 => Vec::new(),
+            st => vec![
+                JfSession {
+                    title: "Blade Runner 2049".into(),
+                    kind: JfKind::Movie,
+                    series: None,
+                    season: None,
+                    episode: None,
+                    year: Some(2017),
+                    runtime_secs: 9840.0,
+                    position_secs: self.jf_pos,
+                    paused: st == 1,
+                    transcoding: false,
+                    user: "silke".into(),
+                    device: "Living room TV".into(),
+                    last_activity: "2026-09-07T12:00:05.000Z".into(),
+                },
+                JfSession {
+                    title: "Home".into(),
+                    kind: JfKind::Episode,
+                    series: Some("The Expanse".into()),
+                    season: Some(2),
+                    episode: Some(5),
+                    year: None,
+                    runtime_secs: 2640.0,
+                    position_secs: self.jf_pos + 2000.0,
+                    paused: true,
+                    transcoding: true,
+                    user: "sam".into(),
+                    device: "iPad".into(),
+                    last_activity: "2026-09-07T11:50:02.000Z".into(),
+                },
+            ],
+        };
+        Event::Jellyfin {
+            status: JfStatus::Ok,
+            sessions,
+        }
+    }
+
     pub fn initial(&self) -> Vec<Event> {
         vec![
             Event::Link {
@@ -584,6 +834,19 @@ impl FakeState {
             self.net(),
             self.apps(),
             self.app_sync_history(),
+            self.media_library(),
+            self.download(),
+            self.traffic_history(),
+            self.traffic(),
+            self.restarts_history(),
+            self.restarts(),
+            self.uptime(),
+            self.fans(),
+            self.mains_history(),
+            self.mains(),
+            self.load(),
+            self.ci_runs(),
+            self.jellyfin(),
         ]
     }
 
@@ -620,6 +883,20 @@ impl FakeState {
         }
         let mut out = vec![self.metrics()];
         out.push(self.net());
+        self.traffic_rps = (self.traffic_rps + self.rng.f32() * 0.8 - 0.4).clamp(0.5, 9.0);
+        out.push(self.traffic());
+        if let Some(p) = self.dl_progress.as_mut() {
+            *p = (*p + 0.004).min(0.99);
+        } else if self.ticks >= self.dl_restart_at {
+            self.dl_progress = Some(0.05);
+        }
+        out.push(self.download());
+        if self.jf_state == 0 {
+            self.jf_pos = (self.jf_pos + 1.0).min(9839.0);
+        }
+        if self.ticks.is_multiple_of(2) {
+            out.push(self.jellyfin());
+        }
         if self.pending > 0 && self.rng.f32() < 0.5 {
             self.pending -= 1;
             self.running += 1;
@@ -647,6 +924,16 @@ impl FakeState {
             out.push(self.ups());
             self.rain.rotate_left(1);
             out.push(self.rain());
+            for l in self.loads.iter_mut() {
+                *l = (*l + self.rng.f32() * 0.1 - 0.05).max(0.01);
+            }
+            for f in self.fans.iter_mut() {
+                *f = (*f + self.rng.f32() * 120.0 - 60.0).clamp(3000.0, 7900.0);
+            }
+            out.push(self.load());
+            out.push(self.fans());
+            out.push(self.mains());
+            out.push(self.uptime());
         }
         if self.ticks.is_multiple_of(10) {
             out.push(self.node_temps());
@@ -655,11 +942,14 @@ impl FakeState {
             out.push(self.electricity());
             out.push(self.air());
             out.push(self.air_history());
+            out.push(self.media_library());
+            out.push(self.restarts());
         }
         if self.ticks.is_multiple_of(30) {
             self.weather_idx += 1;
             out.push(self.weather());
             out.push(self.forecast());
+            out.push(self.ci_runs());
         }
         if self.ticks.is_multiple_of(60) {
             out.push(self.sky());
@@ -881,10 +1171,57 @@ impl FakeState {
             FakeCmd::GithubStar => vec![Event::GithubStar {
                 repo: "silkepilon/RackScreen".into(),
             }],
-            FakeCmd::CiFailure => vec![Event::GithubRun {
-                repo: "silkepilon/RackScreen".into(),
-                ok: false,
-            }],
+            FakeCmd::CiFailure => {
+                self.ci_runs.insert(0, CiStatus::Failure);
+                self.ci_runs.truncate(12);
+                vec![
+                    Event::GithubRun {
+                        repo: CI_REPO.into(),
+                        ok: false,
+                    },
+                    Event::CiRun {
+                        repo: CI_REPO.into(),
+                        ok: false,
+                        at: self.unix_now(),
+                    },
+                    self.ci_runs(),
+                ]
+            }
+            FakeCmd::MediaDone => {
+                self.dl_progress = None;
+                self.dl_restart_at = self.ticks + 45;
+                vec![
+                    Event::MediaAdded {
+                        title: DOWNLOAD_TITLE.into(),
+                    },
+                    self.download(),
+                ]
+            }
+            FakeCmd::KickRestart => {
+                self.restart_hours[23] += 6.0;
+                self.restart_total += 6;
+                vec![self.restarts(), self.restarts_history()]
+            }
+            FakeCmd::Brownout => {
+                self.brownout = !self.brownout;
+                vec![self.mains()]
+            }
+            FakeCmd::JellyfinToggle => {
+                self.jf_state = (self.jf_state + 1) % 3;
+                vec![self.jellyfin()]
+            }
+            FakeCmd::CiPass => {
+                self.ci_runs.insert(0, CiStatus::Success);
+                self.ci_runs.truncate(12);
+                vec![
+                    Event::CiRun {
+                        repo: CI_REPO.into(),
+                        ok: true,
+                        at: self.unix_now(),
+                    },
+                    self.ci_runs(),
+                ]
+            }
             FakeCmd::Thunder => {
                 self.weather_idx = 3; // WEATHER_CYCLE[3] is thunder
                 vec![self.weather()]
@@ -942,6 +1279,11 @@ mod tests {
         assert_eq!(FakeCmd::from_key('l'), Some(FakeCmd::Thunder));
         assert_eq!(FakeCmd::from_key('w'), Some(FakeCmd::RainSoon));
         assert_eq!(FakeCmd::from_key('i'), Some(FakeCmd::IssPassNow));
+        assert_eq!(FakeCmd::from_key('m'), Some(FakeCmd::MediaDone));
+        assert_eq!(FakeCmd::from_key('k'), Some(FakeCmd::KickRestart));
+        assert_eq!(FakeCmd::from_key('b'), Some(FakeCmd::Brownout));
+        assert_eq!(FakeCmd::from_key('j'), Some(FakeCmd::JellyfinToggle));
+        assert_eq!(FakeCmd::from_key('c'), Some(FakeCmd::CiPass));
         assert_eq!(FakeCmd::from_key('x'), None);
     }
 
@@ -1003,6 +1345,44 @@ mod tests {
             .iter()
             .any(|e| matches!(e, Event::AppSyncHistory { .. })));
         assert!(evs.iter().any(|e| matches!(e, Event::VolumeSizes(_))));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Event::MediaLibrary {
+                movies: 37,
+                series: 30,
+                artists: 54
+            }
+        )));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Download(Some(d)) if d.progress > 0.3)));
+        assert!(evs.iter().any(
+            |e| matches!(e, Event::TrafficHistory { req_per_sec } if req_per_sec.len() == 31)
+        ));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Traffic { top, .. } if top.len() == 3)));
+        assert!(evs.iter().any(|e| matches!(e, Event::RestartsHistory { hourly } if hourly.len() == 24 && hourly[23].0 == 1_788_782_400 / 3600)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Restarts { total_24h, worst: Some(_) } if *total_24h > 0)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Uptime(n) if n.len() == 7)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Fans(f) if f.len() == 4)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::MainsHistory { hourly } if hourly.len() == 24)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Mains { volts, .. } if (*volts - 234.0).abs() < 1e-3)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::Load(n) if n.len() == 7)));
+        assert!(evs.iter().any(|e| matches!(e, Event::CiRuns(r) if r.len() == 12 && r[0].status == CiStatus::InProgress)));
+        assert!(evs.iter().any(|e| matches!(e, Event::Jellyfin { status: JfStatus::Ok, sessions } if sessions.len() == 2)));
     }
 
     #[test]
@@ -1033,10 +1413,10 @@ mod tests {
             s.command(FakeCmd::GithubStar).as_slice(),
             [Event::GithubStar { .. }]
         ));
-        assert!(matches!(
-            s.command(FakeCmd::CiFailure).as_slice(),
-            [Event::GithubRun { ok: false, .. }]
-        ));
+        assert!(s
+            .command(FakeCmd::CiFailure)
+            .iter()
+            .any(|e| matches!(e, Event::GithubRun { ok: false, .. })));
         assert!(matches!(
             s.command(FakeCmd::Thunder).as_slice(),
             [Event::Weather { code: 95, .. }]
@@ -1301,5 +1681,70 @@ mod tests {
             s.command(FakeCmd::ToggleNight),
             vec![Event::ForceNight(None)]
         );
+    }
+    #[test]
+    fn new_screen_commands_drive_their_tiles() {
+        let mut s = FakeState::new(1);
+        s.set_clock(1_788_782_400, 7200);
+        let evs = s.command(FakeCmd::MediaDone);
+        assert_eq!(
+            evs[0],
+            Event::MediaAdded {
+                title: "The Lord of the Rings: The Return of the King".into()
+            }
+        );
+        assert!(matches!(evs[1], Event::Download(None)));
+        let later: Vec<Event> = (0..60).flat_map(|_| s.tick()).collect();
+        assert!(
+            later.iter().any(|e| matches!(e, Event::Download(Some(_)))),
+            "a new download starts within a minute"
+        );
+        let before = s.restart_total;
+        let evs = s.command(FakeCmd::KickRestart);
+        assert!(
+            matches!(&evs[0], Event::Restarts { total_24h, worst: Some((_, n)) } if *total_24h == before + 6 && *n >= 6)
+        );
+        assert!(matches!(&evs[1], Event::RestartsHistory { hourly } if hourly[23].1 >= 6.0));
+        assert!(
+            matches!(s.command(FakeCmd::Brownout).as_slice(), [Event::Mains { volts, .. }] if *volts < 220.0)
+        );
+        assert!(
+            matches!(s.command(FakeCmd::Brownout).as_slice(), [Event::Mains { volts, .. }] if *volts > 230.0)
+        );
+        assert!(
+            matches!(s.command(FakeCmd::JellyfinToggle).as_slice(), [Event::Jellyfin { sessions, .. }] if sessions[0].paused)
+        );
+        assert!(
+            matches!(s.command(FakeCmd::JellyfinToggle).as_slice(), [Event::Jellyfin { sessions, .. }] if sessions.is_empty())
+        );
+        assert!(
+            matches!(s.command(FakeCmd::JellyfinToggle).as_slice(), [Event::Jellyfin { sessions, .. }] if !sessions.is_empty() && !sessions[0].paused)
+        );
+        let evs = s.command(FakeCmd::CiFailure);
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::GithubRun { ok: false, .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::CiRun { ok: false, .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::CiRuns(r) if r[0].status == CiStatus::Failure)));
+        let evs = s.command(FakeCmd::CiPass);
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::CiRun { ok: true, .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::CiRuns(r) if r[0].status == CiStatus::Success)));
+        let ten: Vec<Event> = (0..10).flat_map(|_| s.tick()).collect();
+        assert!(ten.iter().any(|e| matches!(e, Event::Traffic { .. })));
+        assert!(ten.iter().any(|e| matches!(e, Event::Jellyfin { .. })));
+        assert!(ten.iter().any(|e| matches!(e, Event::Load(_))));
+        assert!(ten.iter().any(|e| matches!(e, Event::Fans(_))));
+        assert!(ten.iter().any(|e| matches!(e, Event::Mains { .. })));
+        assert!(ten.iter().any(|e| matches!(e, Event::Uptime(_))));
+        assert!(ten.iter().any(|e| matches!(e, Event::Restarts { .. })));
+        assert!(ten.iter().any(|e| matches!(e, Event::MediaLibrary { .. })));
     }
 }

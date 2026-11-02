@@ -24,7 +24,7 @@
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a curved title in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles with a zoom transition. Nine roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house and one from GitHub, so the same rack can show pods on one panel and today's electricity price on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a curved title in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles with a zoom transition. Sixteen roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and today's electricity price on the next.
 
 ## Screens
 
@@ -54,6 +54,16 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`ups`** — battery charge, on mains or on battery, runtime and load | **`net`** — total traffic, download and upload in the pill, download as a sparkline |
 | <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | <img src=".github/media/screens/face.gif" alt="FACE role" width="200"> |
 | **`deploys`** — Argo CD syncs today, one segment per application, syncs per hour | **`face`** — two eyes whose mood comes from the rack: scared on battery, sad with a node down, angry on an alert, happy on a clear day |
+| <img src=".github/media/screens/media.gif" alt="MEDIA role" width="200"> | <img src=".github/media/screens/traffic.gif" alt="WEB TRAFFIC role" width="200"> |
+| **`media`** — movies, series and artists on the ring; the active arr download in the card, or the last item added | **`traffic`** — Traefik requests per second, the three busiest services on the ring, the error share in the pill |
+| <img src=".github/media/screens/restarts.gif" alt="RESTARTS role" width="200"> | <img src=".github/media/screens/uptime.gif" alt="UPTIME role" width="200"> |
+| **`restarts`** — container restarts in 24 h, one segment per hour coloured by count, the worst pod in the pill | **`uptime`** — the longest node uptime, a segment per node, amber for a reboot in the last day |
+| <img src=".github/media/screens/fans.gif" alt="FANS role" width="200"> | <img src=".github/media/screens/mains.gif" alt="MAINS role" width="200"> |
+| **`fans`** — the loudest fan in rpm, a bar per node with a fan | **`mains`** — UPS input voltage on six bands over 200–260 V, the last 24 h as a sparkline |
+| <img src=".github/media/screens/load.gif" alt="LOAD role" width="200"> | <img src=".github/media/screens/ci.gif" alt="CI role" width="200"> |
+| **`load`** — the highest 1-minute load, a segment per node by load per core, cluster means in the card | **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill |
+| <img src=".github/media/screens/jellyfin.gif" alt="NOW PLAYING role" width="200"> | |
+| **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card | |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -92,7 +102,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 - **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
 - **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels in a true-colour terminal, assumed unless `TERM` is a plain `xterm`/`screen`/`linux`; set `RACKSCREEN_TRUECOLOR=0` or `1` to force it; otherwise a drawn circle), the other panels are a strip in the info column to the right. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
-- **Configure** — every setting in six groups (Cluster, Services, Energy, Sky, Display, Thresholds) listed in the sidebar: `Tab`/`←→` step through them, `1`–`6` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
+- **Configure** — every setting in seven groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds) listed in the sidebar: `Tab`/`←→` step through them, `1`–`7` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
 - **Status** — the full service detail, links, boot files and the log tail; `l` for the log view, `r` to restart.
 - **Run here** — run the daemon in the foreground with its logs, without touching the service.
 - **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
@@ -100,7 +110,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Twenty-two roles exist:
+Every screen shows one or more **roles** and cycles through them. Thirty-one roles exist:
 
 | Role | Data source | Tile |
 |---|---|---|
@@ -126,6 +136,15 @@ Every screen shows one or more **roles** and cycles through them. Twenty-two rol
 | `net` | Prometheus (node-exporter) | ring the total, pill down and up, card a download sparkline |
 | `deploys` | Argo CD | syncs today, a segment per application, card syncs per hour |
 | `face` | everything above | two vector eyes; the mood comes from the rack, first match wins |
+| `media` | Prometheus (scraparr) + Radarr/Sonarr/Lidarr | ring movies, series and artists, pill the download count or the library size, card the active download or the last item added |
+| `traffic` | Prometheus (Traefik) | req/s, ring the three busiest services, pill the busiest and the 5xx share, card the last 90 s |
+| `restarts` | Prometheus (kube-state-metrics) | restarts in 24 h, a segment per hour (green 1, amber 2–5, red 6+), pill the worst pod, card restarts per hour |
+| `uptime` | Prometheus (node-exporter) | longest uptime in days, a segment per node, pill the latest reboot, card days per node |
+| `fans` | Prometheus (node-exporter hwmon) | loudest fan in rpm, ring over 8000, pill the node, card a bar per node |
+| `mains` | Prometheus (nut-exporter) | input voltage on six bands, pill stable or low/high voltage with the UPS load, card the last 24 h |
+| `load` | Prometheus (node-exporter) | highest 1-minute load, a segment per node by load per core, card the cluster means |
+| `ci` | GitHub Actions | passes over the last twelve runs, a segment per run, pill the newest run, card average run time and failures |
+| `jellyfin` | Jellyfin | time left, ring the position (amber movie, cyan episode, dim when paused), pill direct play / transcoding / paused, card title, episode or year and viewer |
 
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`), `m` mixed (each screen alternates a cluster role with an electricity one) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
@@ -165,7 +184,19 @@ Create a fine-grained personal access token at github.com with read access to co
 
 ## Face role
 
-`face` shows two off-white eyes that blink, glance around and breathe. Their mood is read from the rack every frame, first match wins: scared on battery, sad with a node down, angry on a firing alert or a degraded app or volume, hot over the thresholds, worried with a failed pod, sleepy half an hour before night mode, happy on a clear day or a cheap electricity hour, content otherwise. A mood change glides over 0.4 s. There is nothing to configure.
+`face` shows two off-white eyes that blink, glance around and breathe. Their mood is read from the rack every frame, first match wins: scared on battery, sad with a node down, angry on a firing alert or a degraded app or volume, hot over the thresholds, worried with a failed pod or a container restart in the last five minutes, sleepy half an hour before night mode, happy on a clear day, a cheap electricity hour or within half an hour of a passing CI run, content otherwise. A mood change glides over 0.4 s. There is nothing to configure.
+
+## Media role
+
+`media` reads the library counts the [scraparr](https://github.com/thecfu/scraparr) exporter puts in Prometheus (`radarr_movies_total`, `sonarr_series_total`, `lidarr_artists_total`). The card shows the download with the least time left from the Radarr, Sonarr and Lidarr queues: turn on `media enabled` in **Configure** and paste each app's API key (Settings → General) into `radarr api key`, `sonarr api key` and `lidarr api key`; an app without a key is skipped. The services are reached over the same kube tunnel as Prometheus, in `media namespace` (`arr-stack`), `service: auto` picking the first service whose name contains the app's. Without any key the card falls back to the most complete qBittorrent torrent. When an item leaves a queue completed the card says "added just now" for a minute, then shows the last item added and its age.
+
+## CI role
+
+`ci` shows the last twelve GitHub Actions runs across your repositories: passes over total as the number, one segment per run (green passed, red failed, blue running, dark cancelled), the newest run in the pill and the average run time in the card. It uses the `github token`; set `github ci repos` to a comma-separated `owner/repo` list, or leave it empty to watch your non-fork repositories pushed in the last seven days (at most ten). A repository the token cannot read is skipped with one warning an hour. A run that passes keeps the face happy for half an hour.
+
+## Jellyfin role
+
+`jellyfin` shows what is playing on your Jellyfin server: the time left as the number, the position on the ring (amber for a movie, cyan for an episode, dimmed while paused), "Direct play", "Transcoding" or "Paused" in the pill, and the title, episode or year and the viewer in the card. With several sessions it picks the one that started most recently. Turn on `jellyfin enabled`, set `jellyfin url` to the server (`http://192.168.0.x:8096`; it lives outside the cluster, so the Pi must reach it directly) and paste a key from Dashboard → API Keys into `jellyfin api key`; `jellyfin poll` is 5 s by default. While the URL is empty the tile says "Check config"; an unreachable server says "Jellyfin offline" and a rejected key "Check API key". With nothing playing it shows the last thing watched this run.
 
 ## Configuration
 
@@ -236,10 +267,24 @@ github:
   enabled: false           # fine-grained token: read access to contributions, events and Actions
   token: ""
   poll_secs: 60
+  ci_repos: []             # owner/repo for the ci role; empty = your repos with runs in the last 7 days
 
 argocd:
   enabled: true            # watch applications.argoproj.io for the deploys role
   namespace: argocd
+
+media:
+  enabled: false           # arr queues for the media role's download card (library counts come from Prometheus)
+  namespace: arr-stack
+  radarr: { service: auto, port: 7878, api_key: "" }
+  sonarr: { service: auto, port: 8989, api_key: "" }
+  lidarr: { service: auto, port: 8686, api_key: "" }
+
+jellyfin:
+  enabled: false           # now playing from a Jellyfin server, outside the cluster
+  url: ""                  # e.g. http://192.168.0.x:8096
+  api_key: ""              # Jellyfin Dashboard → API Keys
+  poll_secs: 5             # >= 2
 
 display:
   brightness: 1.0
@@ -249,7 +294,8 @@ display:
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
-#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face
+#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face,
+#        media, traffic, restarts, uptime, fans, mains, load, ci, jellyfin
 screens:
   - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
   - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
@@ -266,8 +312,10 @@ screens:
 - **`thresholds`** — when a node counts as hot: the CPU and memory percentages that turn `cpu` amber and make the face hot, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
 - **`electricity`** and **`price`** — see [Electricity mode](#electricity-mode).
 - **`location`**, **`weather`**, **`rain`**, **`iss`** — see [Sky roles](#sky-roles).
-- **`github`** — see [GitHub role](#github-role).
+- **`github`** — see [GitHub role](#github-role) and [CI role](#ci-role).
 - **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
+- **`media`** — see [Media role](#media-role).
+- **`jellyfin`** — see [Jellyfin role](#jellyfin-role).
 - **`display`** — global brightness, frame rate, the SPI write chunk and whether screens iris one at a time.
 - **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
 
@@ -293,7 +341,7 @@ The simulator draws the same scenes in a window, so none of this needs a Pi:
     cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
     cargo run -- calibrate --sim --config /tmp/rs.yaml
 
-Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `Esc` quit. `--sim-grid` shows all four panels at once.
+Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `m` the download finishes, `k` a restart burst, `b` a mains brownout and back, `j` Jellyfin playing → paused → idle, `c` a passing CI run, `Esc` quit. `--sim-grid` shows all four panels at once.
 
 Tests: `cargo test --workspace --features sim,pi`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
 
