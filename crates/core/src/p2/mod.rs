@@ -4,6 +4,7 @@ pub mod font;
 pub mod layout;
 pub mod marquee;
 pub mod ring;
+pub mod roles;
 pub mod roll;
 pub mod screen;
 pub mod text;

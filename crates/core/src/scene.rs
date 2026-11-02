@@ -4,6 +4,7 @@ use crate::anim::{breathe, pulse, Secs};
 use crate::format::{fmt_eta, fmt_speed};
 use crate::model::Model;
 pub use crate::p2::font::FontId;
+use crate::p2::screen::compose;
 use crate::p2::ui::ScreenUi;
 use crate::theme::layout::*;
 use crate::theme::{
@@ -420,6 +421,9 @@ fn heartbeat(now: Secs) -> f32 {
 
 pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
     ui.for_role(role);
+    if let Some(screen) = crate::p2::roles::screen(model, role, now) {
+        return compose(&screen, ui, now);
+    }
     match role {
         Role::Cpu => {
             let pct = model.smooth_cpu(now);
@@ -759,113 +763,6 @@ mod tests {
     }
 
     #[test]
-    fn cpu_scene_after_settling_shows_value() {
-        let m = model_with_cpu(42.0);
-        let s = role_scene(&m, Role::Cpu, 5.0, &mut ScreenUi::new());
-        assert_eq!(s.lit_count(), 25);
-        let badge_text = s.items.iter().find_map(|d| match d {
-            Drawable::Badge { text, .. } => Some(text.clone()),
-            _ => None,
-        });
-        assert_eq!(badge_text.as_deref(), Some("42%"));
-        assert!(matches!(s.items[0], Drawable::Clear(_)));
-    }
-
-    #[test]
-    fn health_scene_switches_to_torrent_mode() {
-        let mut m = Model::new(Thresholds::default());
-        m.apply(
-            Event::NodeSnapshot {
-                ready: 2,
-                total: 2,
-                not_ready: vec![],
-            },
-            0.0,
-        );
-        let s = role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new());
-        assert_eq!(s.lit_count(), 60);
-        let dots = s
-            .items
-            .iter()
-            .filter(|d| matches!(d, Drawable::Dots { .. }))
-            .count();
-        assert_eq!(dots, 1);
-        m.apply(
-            Event::Link {
-                target: LinkTarget::QBittorrent,
-                up: true,
-            },
-            0.0,
-        );
-        m.apply(
-            Event::Torrents(vec![
-                Torrent {
-                    name: "a".into(),
-                    progress: 50.0,
-                    eta_secs: 60,
-                    speed_bps: 2_097_152,
-                },
-                Torrent {
-                    name: "b".into(),
-                    progress: 90.0,
-                    eta_secs: 30,
-                    speed_bps: 1_048_576,
-                },
-            ]),
-            0.0,
-        );
-        // the rings sweep in from empty, so read them once the sweep has settled
-        let s = role_scene(&m, Role::Health, 1.0, &mut ScreenUi::new());
-        let rings: Vec<_> = s
-            .items
-            .iter()
-            .filter(|d| matches!(d, Drawable::Ring { .. }))
-            .collect();
-        assert_eq!(rings.len(), 2);
-        if let Drawable::Ring { radius, .. } = rings[0] {
-            assert_eq!(*radius, 102.0);
-        }
-        assert_eq!(s.lit_count(), 54, "outer ring is the 90% torrent");
-        assert_eq!(
-            role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new()).lit_count(),
-            0,
-            "at the arrival instant both rings are still empty"
-        );
-        let text = s.items.iter().find_map(|d| match d {
-            Drawable::Badge { text, .. } => Some(text.clone()),
-            _ => None,
-        });
-        assert_eq!(text.as_deref(), Some("3.0M"));
-        let s2 = role_scene(&m, Role::Health, 5.5, &mut ScreenUi::new());
-        let text2 = s2.items.iter().find_map(|d| match d {
-            Drawable::Badge { text, .. } => Some(text.clone()),
-            _ => None,
-        });
-        assert_eq!(text2.as_deref(), Some("30s"));
-    }
-
-    #[test]
-    fn health_not_ready_shows_red_tail() {
-        let mut m = Model::new(Thresholds::default());
-        m.apply(
-            Event::NodeSnapshot {
-                ready: 3,
-                total: 4,
-                not_ready: vec!["n4".into()],
-            },
-            0.0,
-        );
-        let s = role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new());
-        assert_eq!(s.lit_count(), 60);
-        if let Some(Drawable::Ring { states, .. }) =
-            s.items.iter().find(|d| matches!(d, Drawable::Ring { .. }))
-        {
-            assert!(matches!(states[59], SegState::On(c, _) if c == RED));
-            assert!(matches!(states[0], SegState::On(c, _) if c == GREEN));
-        }
-    }
-
-    #[test]
     fn connecting_has_comet_and_big_icon() {
         let s = connecting_scene(0.0);
         assert_eq!(s.lit_count(), 4);
@@ -897,5 +794,60 @@ mod tests {
             }
         ));
         assert_eq!(k.lit_count(), 60);
+    }
+    fn title_of(s: &Scene) -> Option<String> {
+        s.items.iter().find_map(|d| match d {
+            Drawable::CurvedText { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn cpu_scene_is_a_p2_tile() {
+        let m = model_with_cpu(42.0);
+        let s = role_scene(&m, Role::Cpu, 5.0, &mut ScreenUi::new());
+        assert_eq!(title_of(&s).as_deref(), Some("CPU"));
+        assert!(matches!(s.items[0], Drawable::Clear(_)));
+        assert!(!s.items.iter().any(|d| matches!(
+            d,
+            Drawable::Ring { .. } | Drawable::Icon { .. } | Drawable::Badge { .. }
+        )));
+    }
+
+    #[test]
+    fn health_scene_switches_to_torrent_mode() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::NodeSnapshot {
+                ready: 2,
+                total: 2,
+                not_ready: vec![],
+            },
+            0.0,
+        );
+        assert_eq!(
+            title_of(&role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new())).as_deref(),
+            Some("CLUSTER")
+        );
+        m.apply(
+            Event::Link {
+                target: LinkTarget::QBittorrent,
+                up: true,
+            },
+            0.0,
+        );
+        m.apply(
+            Event::Torrents(vec![Torrent {
+                name: "a".into(),
+                progress: 50.0,
+                eta_secs: 60,
+                speed_bps: 2_097_152,
+            }]),
+            0.0,
+        );
+        assert_eq!(
+            title_of(&role_scene(&m, Role::Health, 1.0, &mut ScreenUi::new())).as_deref(),
+            Some("DOWNLOADS")
+        );
     }
 }

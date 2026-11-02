@@ -343,14 +343,6 @@ mod tests {
         m
     }
 
-    fn amberish((r, g, b): (u8, u8, u8)) -> bool {
-        r > 200 && g > 140 && b < 80
-    }
-
-    fn off_grey((r, ..): (u8, u8, u8)) -> bool {
-        (20..=40).contains(&r)
-    }
-
     #[test]
     fn zoom_scales_the_scene_about_the_centre() {
         let m = cpu_model(42.0);
@@ -358,18 +350,22 @@ mod tests {
         let mut px = new_pixmap();
         let mut s = m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new());
         r.render(&s, &mut px);
-        assert!(amberish(pixel(&px, 120, 18)), "segment 0 lit at full scale");
+        let bluish = |(r, g, b): (u8, u8, u8)| b > 200 && r < 160 && g > 120;
+        assert!(
+            bluish(pixel(&px, 226, 120)),
+            "ring fill at 3 o'clock at full scale"
+        );
         s.zoom = 0.5;
         r.render(&s, &mut px);
         assert_eq!(
-            pixel(&px, 120, 18),
+            pixel(&px, 226, 120),
             (0, 0, 0),
-            "full-scale segment 0 is gone"
+            "the full-scale ring is gone"
         );
         assert!(
-            amberish(pixel(&px, 120, 69)),
-            "segment 0 at half scale, got {:?}",
-            pixel(&px, 120, 69)
+            bluish(pixel(&px, 173, 120)),
+            "ring at half scale, got {:?}",
+            pixel(&px, 173, 120)
         );
         s.zoom = 0.0;
         r.render(&s, &mut px);
@@ -379,27 +375,6 @@ mod tests {
             .filter(|p| p[..3] != [0, 0, 0])
             .count();
         assert_eq!(lit, 0, "zoom 0 draws nothing but black");
-    }
-
-    #[test]
-    fn ring_reveal_truncates_lit_segments() {
-        let m = cpu_model(100.0);
-        let mut r = Renderer::new().unwrap();
-        let mut px = new_pixmap();
-        let mut s = m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new());
-        r.render(&s, &mut px);
-        assert!(
-            amberish(pixel(&px, 120, 222)),
-            "segment 30 lit on a full ring"
-        );
-        s.ring_reveal = 0.5;
-        r.render(&s, &mut px);
-        assert!(amberish(pixel(&px, 120, 18)), "segment 0 still lit");
-        assert!(
-            off_grey(pixel(&px, 120, 222)),
-            "segment 30 is OFF, got {:?}",
-            pixel(&px, 120, 222)
-        );
     }
 
     #[test]

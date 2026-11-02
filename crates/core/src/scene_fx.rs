@@ -351,51 +351,6 @@ mod tests {
     }
 
     #[test]
-    fn splash_swaps_icon_with_overshoot_and_ripple() {
-        let mut m = ready_model();
-        m.apply(
-            Event::PodCrashed {
-                ns: "a".into(),
-                name: "b".into(),
-            },
-            1.0,
-        );
-        m.tick(1.0);
-        let s = m.scene(Role::Pods.index(), 1.15, &mut ScreenUi::new());
-        assert!(s.items.iter().any(|d| matches!(d, Drawable::Ripple { .. })));
-        let s = m.scene(Role::Pods.index(), 1.35, &mut ScreenUi::new());
-        let ic = icons(&s);
-        let (_, role_alpha, _) = ic.iter().find(|(n, ..)| *n == "box").unwrap();
-        let (_, ev_alpha, ev_scale) = ic.iter().find(|(n, ..)| *n == "package-x").unwrap();
-        assert!(*role_alpha < 0.6);
-        assert!(*ev_alpha > 0.5);
-        assert!(*ev_scale > 1.0, "spring overshoot around 60% of swap");
-        let s = m.scene(Role::Pods.index(), 3.6, &mut ScreenUi::new());
-        assert!(icons(&s).iter().all(|(n, ..)| *n != "package-x"));
-    }
-
-    #[test]
-    fn splash_counter_in_badge() {
-        let mut m = ready_model();
-        for _ in 0..3 {
-            m.apply(
-                Event::PodStarted {
-                    ns: "a".into(),
-                    name: "b".into(),
-                },
-                1.0,
-            );
-        }
-        m.tick(1.0);
-        let s = m.scene(Role::Pods.index(), 1.5, &mut ScreenUi::new());
-        let text = s.items.iter().find_map(|d| match d {
-            Drawable::Badge { text, .. } => Some(text.clone()),
-            _ => None,
-        });
-        assert_eq!(text.as_deref(), Some("+3"));
-    }
-
-    #[test]
     fn sweep_takes_over_all_screens_and_suppresses_splash() {
         let mut m = ready_model();
         m.apply(
@@ -437,6 +392,13 @@ mod tests {
         );
     }
 
+    fn title_of(s: &Scene) -> Option<String> {
+        s.items.iter().find_map(|d| match d {
+            Drawable::CurvedText { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+    }
+
     #[test]
     fn cycling_screen_transitions_with_iris() {
         let mut m = ready_model();
@@ -445,12 +407,14 @@ mod tests {
             m.tick(i as f64 * 0.033);
         }
         // at 3.3 s: transition started at ~3.0, first half shows cpu shrinking
-        let s = m.scene(0, 3.15, &mut ScreenUi::new());
+        let mut ui = ScreenUi::new();
+        let s = m.scene(0, 3.15, &mut ui);
         assert!(s.zoom < 1.0 && s.zoom > 0.0);
-        assert!(icons(&s).iter().any(|(n, ..)| *n == "cpu"));
-        let s = m.scene(0, 3.4, &mut ScreenUi::new());
-        assert!(
-            icons(&s).iter().any(|(n, ..)| *n == "memory-stick"),
+        assert_eq!(title_of(&s).as_deref(), Some("CPU"));
+        let s = m.scene(0, 3.4, &mut ui);
+        assert_eq!(
+            title_of(&s).as_deref(),
+            Some("MEMORY"),
             "second half shows the incoming role"
         );
         // transition ends at ~3.53 s, then mem dwells; settled by 5.94 s
@@ -582,10 +546,10 @@ mod tests {
             &m.scene_for_role(Role::Thermal, 1.0, &mut ScreenUi::new()),
             "thermometer"
         ));
-        assert!(has_icon(
-            &m.scene_for_role(Role::Storage, 1.0, &mut ScreenUi::new()),
-            "database"
-        ));
+        assert_eq!(
+            title_of(&m.scene_for_role(Role::Storage, 1.0, &mut ScreenUi::new())).as_deref(),
+            Some("STORAGE")
+        );
         m.apply(link(LinkTarget::Prometheus, false), 2.0);
         assert!(has_icon(
             &m.scene_for_role(Role::Thermal, 2.0, &mut ScreenUi::new()),

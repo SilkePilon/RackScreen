@@ -61,6 +61,72 @@ pub fn fmt_mbit(bps: f64) -> String {
     }
 }
 
+/// Seconds since something happened: `just now`, `42 s ago`, `2 m ago`, `2 h ago`.
+pub fn fmt_ago(secs: f64) -> String {
+    let s = secs.max(0.0);
+    if s < 4.0 {
+        "just now".into()
+    } else if s < 60.0 {
+        format!("{} s ago", s as i64)
+    } else if s < 3600.0 {
+        format!("{} m ago", (s / 60.0) as i64)
+    } else {
+        format!("{} h ago", (s / 3600.0) as i64)
+    }
+}
+
+/// Seconds of the local day (any offset) as `HH:MM`.
+pub fn fmt_hhmm(local_secs: i64) -> String {
+    let s = local_secs.rem_euclid(86_400);
+    format!("{:02}:{:02}", s / 3600, (s % 3600) / 60)
+}
+
+/// Time until something: `in 2h 14m`, `in 15 min`, `now`.
+pub fn fmt_in(secs: i64) -> String {
+    let mins = (secs + 30) / 60;
+    if mins < 1 {
+        "now".into()
+    } else if mins < 60 {
+        format!("in {mins} min")
+    } else {
+        format!("in {}h {:02}m", mins / 60, mins % 60)
+    }
+}
+
+/// A length of time as `8h 56m`.
+pub fn fmt_hm(secs: i64) -> String {
+    let mins = secs.max(0) / 60;
+    format!("{}h {:02}m", mins / 60, mins % 60)
+}
+
+/// A countdown as `mm:ss` under 100 minutes, `1h40` above.
+pub fn fmt_mmss(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 100 * 60 {
+        format!("{:02}:{:02}", s / 60, s % 60)
+    } else {
+        format!("{}h{:02}", s / 3600, (s % 3600) / 60)
+    }
+}
+
+/// `("1.2 of 3.1 TB", "1.9 TB free")`, in GB when the capacity is under a TiB.
+pub fn fmt_capacity(used: u64, cap: u64) -> (String, String) {
+    const TB: f64 = 1_099_511_627_776.0;
+    const GB: f64 = 1_073_741_824.0;
+    let free = cap.saturating_sub(used);
+    if cap as f64 >= TB {
+        (
+            format!("{:.1} of {:.1} TB", used as f64 / TB, cap as f64 / TB),
+            format!("{:.1} TB free", free as f64 / TB),
+        )
+    } else {
+        (
+            format!("{:.0} of {:.0} GB", used as f64 / GB, cap as f64 / GB),
+            format!("{:.0} GB free", free as f64 / GB),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +161,32 @@ mod tests {
         assert_eq!(fmt_eta(3900), "1h05");
         assert_eq!(fmt_eta(-1), "--");
         assert_eq!(fmt_eta(8_640_000), "--");
+    }
+    #[test]
+    fn p2_formatters() {
+        assert_eq!(fmt_ago(2.0), "just now");
+        assert_eq!(fmt_ago(42.0), "42 s ago");
+        assert_eq!(fmt_ago(150.0), "2 m ago");
+        assert_eq!(fmt_ago(7300.0), "2 h ago");
+        assert_eq!(fmt_hhmm(16 * 3600 + 48 * 60), "16:48");
+        assert_eq!(fmt_hhmm(86_400 + 5 * 60), "00:05", "wraps the day");
+        assert_eq!(fmt_in(2 * 3600 + 14 * 60), "in 2h 14m");
+        assert_eq!(fmt_in(14 * 60 + 30), "in 15 min");
+        assert_eq!(fmt_in(20), "now");
+        assert_eq!(fmt_hm(8 * 3600 + 56 * 60), "8h 56m");
+        assert_eq!(fmt_mmss(14 * 60 + 32), "14:32");
+        assert_eq!(fmt_mmss(5), "00:05");
+        assert_eq!(fmt_mmss(100 * 60), "1h40");
+        let tb = 1u64 << 40;
+        assert_eq!(
+            fmt_capacity(tb + tb / 5, 3 * tb + tb / 10),
+            ("1.2 of 3.1 TB".to_string(), "1.9 TB free".to_string())
+        );
+        let gb = 1u64 << 30;
+        assert_eq!(
+            fmt_capacity(49 * gb, 128 * gb),
+            ("49 of 128 GB".to_string(), "79 GB free".to_string())
+        );
+        assert_eq!(fmt_capacity(0, 0).0, "0 of 0 GB");
     }
 }

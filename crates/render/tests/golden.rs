@@ -116,13 +116,6 @@ fn cpu_idle() {
         &m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new()),
         &mut px,
     );
-    let (red, g, b) = pixel(&px, 120, 18);
-    assert!(
-        red > 200 && g > 140 && b < 80,
-        "segment 0 amber, got {red},{g},{b}"
-    );
-    let (o, ..) = pixel(&px, 120, 222);
-    assert!((20..=40).contains(&o), "segment 30 is off, got {o}");
     assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
     check("cpu_idle", &px);
 }
@@ -346,11 +339,6 @@ fn storage_idle_and_degraded() {
     r.render(
         &m.scene_for_role(Role::Storage, 5.0, &mut ScreenUi::new()),
         &mut px,
-    );
-    let (red, g, b) = pixel(&px, 120, 18);
-    assert!(
-        red > 130 && b > 200 && g < 180,
-        "segment 0 violet, got {red},{g},{b}"
     );
     check("storage", &px);
 
