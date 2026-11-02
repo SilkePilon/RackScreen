@@ -455,6 +455,18 @@ impl FakeState {
         Event::Apps(self.apps.clone())
     }
 
+    /// A plausible last minute, so the simulator's sparklines start full.
+    fn metrics_history(&self) -> Event {
+        let wave = |i: usize, base: f32, amp: f32, k: f32| base + amp * ((i as f32) * k).sin();
+        Event::MetricsHistory {
+            cpu: (0..31).map(|i| wave(i, self.cpu, 8.0, 0.45)).collect(),
+            mem: (0..31).map(|i| wave(i, self.mem, 1.5, 0.3)).collect(),
+            net_rx_mbps: (0..31)
+                .map(|i| wave(i, self.net_rx as f32 / 1e6, 12.0, 0.5).max(0.0))
+                .collect(),
+        }
+    }
+
     pub fn initial(&self) -> Vec<Event> {
         vec![
             Event::Link {
@@ -494,6 +506,7 @@ impl FakeState {
                 up: true,
             },
             self.metrics(),
+            self.metrics_history(),
             self.pod_snapshot(),
             self.node_snapshot(),
             Event::AlertSnapshot {
@@ -919,6 +932,9 @@ mod tests {
         assert!(evs
             .iter()
             .any(|e| matches!(e, Event::Apps(a) if a.len() == 16)));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::MetricsHistory { cpu, .. } if cpu.len() == 31)));
     }
 
     #[test]

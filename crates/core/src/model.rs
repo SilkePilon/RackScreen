@@ -7,6 +7,7 @@ use crate::electricity::{partition, price_level, Section, Source};
 use crate::event::{App, AppHealth, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
 use crate::face_player::{FaceInputs, FacePlayer, FaceTuning};
 use crate::fx::Fx;
+use crate::history::{History, Hourly};
 use crate::mood::MoodInputs;
 use crate::scene_rain::{current_slots, first_wet_minutes, SOON_MINUTES, WET_MM};
 use crate::screens::ScreenState;
@@ -319,6 +320,13 @@ pub struct Model {
     net_rx_phase: f64,
     net_tx_phase: f64,
     net_last_tick: Option<Secs>,
+    /// The sparkline buffers: cpu % at 2 s, mem % at 3 s, download Mb/s at 2 s.
+    cpu_hist: History,
+    mem_hist: History,
+    net_hist: History,
+    /// Carbon intensity and renewable share per unix hour, 24 h.
+    carbon_hist: Hourly,
+    renewable_hist: Hourly,
     /// Percent of total production per source, eased.
     shares: HashMap<Source, Smooth>,
     renewable: Smooth,
@@ -417,6 +425,11 @@ impl Model {
             net_rx_phase: 0.0,
             net_tx_phase: 0.0,
             net_last_tick: None,
+            cpu_hist: History::new(31, 2.0),
+            mem_hist: History::new(31, 3.0),
+            net_hist: History::new(31, 2.0),
+            carbon_hist: Hourly::new(),
+            renewable_hist: Hourly::new(),
             shares: HashMap::new(),
             renewable: Smooth::new(0.0, SMOOTH_SECS),
             fossil_free: Smooth::new(0.0, SMOOTH_SECS),
@@ -534,6 +547,25 @@ impl Model {
     }
     pub fn smooth_storage_pct(&self, now: Secs) -> f32 {
         self.storage_pct.value(now)
+    }
+    pub fn cpu_history(&self) -> &History {
+        &self.cpu_hist
+    }
+    pub fn mem_history(&self) -> &History {
+        &self.mem_hist
+    }
+    pub fn net_history(&self) -> &History {
+        &self.net_hist
+    }
+    pub fn carbon_hourly(&self) -> &Hourly {
+        &self.carbon_hist
+    }
+    pub fn renewable_hourly(&self) -> &Hourly {
+        &self.renewable_hist
+    }
+    /// The current unix hour, the hourly buffers' key.
+    pub fn unix_hour(&self) -> i64 {
+        self.unix_now.div_euclid(3600)
     }
     pub fn electricity(&self) -> &ElectricityState {
         &self.electricity
@@ -1008,6 +1040,8 @@ impl Model {
                 self.state.have_metrics = true;
                 self.cpu.set(cpu_pct, now);
                 self.mem.set(mem_pct, now);
+                self.cpu_hist.push(cpu_pct, now);
+                self.mem_hist.push(mem_pct, now);
                 let th = self.thresholds;
                 self.check_hot(Role::Cpu, hot_cpu, th.hot_cpu, now);
                 self.check_hot(Role::Mem, hot_mem, th.hot_mem, now);
@@ -1120,6 +1154,9 @@ impl Model {
                 self.renewable.set(renewable_pct, now);
                 self.fossil_free.set(fossil_free_pct, now);
                 self.carbon.set(carbon_gco2, now);
+                let hour = self.unix_hour();
+                self.carbon_hist.push(hour, carbon_gco2);
+                self.renewable_hist.push(hour, renewable_pct);
                 self.electricity = ElectricityState {
                     zone,
                     mix: mix_mw,
@@ -1165,7 +1202,17 @@ impl Model {
             }
             Event::UpsOnBattery => self.fx.push(FxRequest::UpsOnBattery),
             Event::UpsOnline => self.fx.push(FxRequest::UpsOnline),
+            Event::MetricsHistory {
+                cpu,
+                mem,
+                net_rx_mbps,
+            } => {
+                self.cpu_hist.prefill(&cpu, now);
+                self.mem_hist.prefill(&mem, now);
+                self.net_hist.prefill(&net_rx_mbps, now);
+            }
             Event::Network { rx_bps, tx_bps } => {
+                self.net_hist.push((rx_bps / 1e6) as f32, now);
                 self.net_rx.set(net_fill(rx_bps), now);
                 self.net_tx.set(net_fill(tx_bps), now);
                 self.net = NetState {
@@ -2498,5 +2545,64 @@ mod tests {
             s,
             "pure in `now`"
         );
+    }
+    #[test]
+    fn metrics_and_network_feed_the_histories_and_prefill_fills_them() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(metrics(42.0, None), 0.0);
+        m.apply(metrics(44.0, None), 2.0);
+        assert_eq!(m.cpu_history().series(), vec![42.0, 44.0]);
+        assert_eq!(m.mem_history().series(), vec![50.0, 50.0]);
+        m.apply(
+            Event::Network {
+                rx_bps: 40e6,
+                tx_bps: 1e6,
+            },
+            3.0,
+        );
+        assert_eq!(m.net_history().series(), vec![40.0], "download in Mb/s");
+        m.apply(
+            Event::MetricsHistory {
+                cpu: (0..40).map(|i| i as f32).collect(),
+                mem: vec![1.0; 10],
+                net_rx_mbps: vec![],
+            },
+            4.0,
+        );
+        assert_eq!(m.cpu_history().len(), 31);
+        assert_eq!(m.cpu_history().series()[30], 39.0);
+        assert_eq!(m.cpu_history().prev(), Some(8.0));
+        assert_eq!(m.mem_history().len(), 10);
+        assert_eq!(m.net_history().len(), 0, "an empty prefill clears");
+    }
+
+    #[test]
+    fn electricity_samples_land_in_hourly_slots_by_unix_hour() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_unix_now(3600 * 1000 + 100);
+        m.apply(electricity_sample(214.0, 61.0), 0.0);
+        m.set_unix_now(3600 * 1000 + 1800);
+        m.apply(electricity_sample(220.0, 62.0), 1.0);
+        assert_eq!(
+            m.carbon_hourly().values(),
+            vec![220.0],
+            "same hour replaces"
+        );
+        m.set_unix_now(3600 * 1001);
+        m.apply(electricity_sample(180.0, 70.0), 2.0);
+        assert_eq!(m.carbon_hourly().values(), vec![220.0, 180.0]);
+        assert_eq!(m.renewable_hourly().values(), vec![62.0, 70.0]);
+        assert_eq!(m.unix_hour(), 1001);
+    }
+
+    fn electricity_sample(carbon: f32, renewable: f32) -> Event {
+        Event::Electricity {
+            zone: "NL".into(),
+            mix_mw: vec![(Source::Wind, 50.0), (Source::Gas, 50.0)],
+            renewable_pct: renewable,
+            fossil_free_pct: renewable + 5.0,
+            carbon_gco2: carbon,
+            updated_at: String::new(),
+        }
     }
 }

@@ -8,6 +8,7 @@ pub mod face_player;
 pub mod face_sprites;
 pub mod format;
 pub mod fx;
+pub mod history;
 pub mod model;
 pub mod mood;
 pub mod night;

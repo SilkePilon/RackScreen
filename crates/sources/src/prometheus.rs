@@ -115,6 +115,65 @@ pub fn parse_vector(json: &str) -> Vec<(HashMap<String, String>, f64)> {
         .collect()
 }
 
+/// Values of the first series of a `query_range` matrix, in time order;
+/// Prometheus' `"NaN"` strings come through as NaN.
+pub fn parse_matrix(json: &str) -> Vec<f64> {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    let Some(first) = v
+        .get("data")
+        .and_then(|d| d.get("result"))
+        .and_then(|r| r.as_array())
+        .and_then(|r| r.first())
+    else {
+        return Vec::new();
+    };
+    first
+        .get("values")
+        .and_then(|vs| vs.as_array())
+        .map(|vs| {
+            vs.iter()
+                .filter_map(|pair| pair.as_array()?.get(1)?.as_str()?.parse::<f64>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn range_path(q: &str, start: i64, end: i64, step: u32) -> String {
+    format!(
+        "/api/v1/query_range?query={}&start={start}&end={end}&step={step}",
+        urlencoding::encode(q)
+    )
+}
+
+pub fn history_event(cpu: Vec<f64>, mem: Vec<f64>, net_rx_bps: Vec<f64>) -> Event {
+    Event::MetricsHistory {
+        cpu: cpu.into_iter().map(|v| v as f32).collect(),
+        mem: mem.into_iter().map(|v| v as f32).collect(),
+        net_rx_mbps: net_rx_bps.into_iter().map(|v| (v / 1e6) as f32).collect(),
+    }
+}
+
+async fn query_range(t: &mut Tunnel, q: &str, start: i64, end: i64, step: u32) -> Result<String> {
+    let r = t.get(&range_path(q, start, end, step), &[]).await?;
+    anyhow::ensure!(r.status == 200, "prometheus HTTP {}", r.status);
+    Ok(r.body)
+}
+
+/// One range query per sparkline so the lines are full at boot: cpu and
+/// download over the last 60 s at 2 s, memory over 90 s at 3 s.
+async fn prefill(t: &mut Tunnel) -> Result<Event> {
+    let end = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let cpu = parse_matrix(&query_range(t, Q_CPU, end - 60, end, 2).await?);
+    let mem = parse_matrix(&query_range(t, Q_MEM, end - 90, end, 3).await?);
+    let net = parse_matrix(&query_range(t, Q_NET_RX, end - 60, end, 2).await?);
+    Ok(history_event(cpu, mem, net))
+}
+
 /// `192.168.1.5:9100` -> `.5`
 pub fn node_tag(instance: &str) -> String {
     let ip = instance.split(':').next().unwrap_or(instance);
@@ -414,6 +473,7 @@ pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
     let mut storage = StorageTracker::new();
     let mut ups = UpsTracker::default();
     let mut backoff = 5u64;
+    let mut prefilled = false;
     loop {
         if ctx.shutdown.is_cancelled() {
             return;
@@ -451,6 +511,15 @@ pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
             }
         };
         backoff = 5;
+        if !prefilled {
+            match prefill(&mut t).await {
+                Ok(ev) => {
+                    ctx.emit(ev);
+                    prefilled = true;
+                }
+                Err(e) => tracing::warn!("prometheus prefill: {e:#}"),
+            }
+        }
         let mut failures = 0;
         loop {
             match poll(&mut t, &mut alerts, &mut storage, &mut ups).await {
@@ -737,5 +806,32 @@ mod tests {
     fn query_path_is_encoded() {
         let p = format!("/api/v1/query?query={}", urlencoding::encode(Q_CPU));
         assert!(p.contains("%7Bmode%3D%22idle%22%7D"));
+    }
+    const MATRIX: &str = r#"{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1,"4.5"],[3,"4.7"],[5,"NaN"],[7,"5.1"]]}]}}"#;
+
+    #[test]
+    fn matrix_values_in_order_with_nan_as_nan() {
+        let v = parse_matrix(MATRIX);
+        assert_eq!(v.len(), 4);
+        assert_eq!((v[0], v[1], v[3]), (4.5, 4.7, 5.1));
+        assert!(v[2].is_nan());
+        assert!(parse_matrix(r#"{"data":{"result":[]}}"#).is_empty());
+        assert!(parse_matrix("nope").is_empty());
+    }
+
+    #[test]
+    fn range_path_covers_the_spark_window() {
+        let p = range_path(Q_CPU, 1000, 1060, 2);
+        assert!(p.starts_with("/api/v1/query_range?query="));
+        assert!(p.ends_with("&start=1000&end=1060&step=2"));
+        let ev = history_event(vec![1.0, 2.0], vec![3.0], vec![4e6, 8e6]);
+        assert_eq!(
+            ev,
+            Event::MetricsHistory {
+                cpu: vec![1.0, 2.0],
+                mem: vec![3.0],
+                net_rx_mbps: vec![4.0, 8.0],
+            }
+        );
     }
 }

@@ -116,6 +116,13 @@ pub enum Event {
         hot_cpu: Option<(String, f32)>,
         hot_mem: Option<(String, f32)>,
     },
+    /// Recent samples from a Prometheus range query at start, oldest first:
+    /// cpu % every 2 s, mem % every 3 s, download Mb/s every 2 s.
+    MetricsHistory {
+        cpu: Vec<f32>,
+        mem: Vec<f32>,
+        net_rx_mbps: Vec<f32>,
+    },
     PodSnapshot {
         running: u32,
         pending: u32,
