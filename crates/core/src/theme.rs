@@ -253,9 +253,9 @@ pub mod p2 {
     pub const BG: Color = Color::hex(0x000000);
     pub const TEXT: Color = Color::hex(0xEDEDEF);
     pub const TEXT2: Color = Color::hex(0x8E8E93);
-    pub const TEXT3: Color = Color::hex(0x4A4A4F);
-    pub const TRACK: Color = Color::hex(0x17171A);
-    pub const CARD: Color = Color::hex(0x121214);
+    pub const TEXT3: Color = Color::hex(0x80808A);
+    pub const TRACK: Color = Color::hex(0x2C2C33);
+    pub const CARD: Color = Color::hex(0x24242A);
     pub const OK: Color = Color::hex(0x5BD18B);
     pub const WARN: Color = Color::hex(0xF2B84B);
     pub const CRIT: Color = Color::hex(0xF0605D);
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn p2_tokens_and_titles() {
         assert_eq!(p2::TEXT, Color::hex(0xEDEDEF));
-        assert_eq!(p2::TRACK, Color::hex(0x17171A));
+        assert_eq!(p2::TRACK, Color::hex(0x2C2C33));
         assert_eq!(p2::WARN, p2::AMBER);
         assert_eq!(Role::Health.title(), "CLUSTER");
         assert_eq!(Role::Deploys.title(), "DEPLOYS TODAY");

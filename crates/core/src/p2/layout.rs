@@ -34,7 +34,7 @@ pub const PILL_R: f32 = 10.0;
 pub const PILL_PAD: f32 = 20.0;
 pub const PILL_PX: f32 = 10.5;
 pub const PILL_MAX_TEXT_W: f32 = 132.0;
-pub const PILL_FILL_ALPHA: f32 = 0.16;
+pub const PILL_FILL_ALPHA: f32 = 0.30;
 
 pub const CARD_W: f32 = 108.0;
 pub const CARD_H: f32 = 48.0;

@@ -77,7 +77,7 @@ pub fn price(model: &Model, _now: Secs) -> P2Screen {
             })
             .collect(),
         now: (model.local_slot() / 4) as usize,
-        past_alpha: 0.28,
+        past_alpha: 0.45,
         caption: "today".into(),
     });
     s

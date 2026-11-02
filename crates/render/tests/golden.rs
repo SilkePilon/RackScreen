@@ -1074,3 +1074,79 @@ fn jellyfin_alternate_states() {
     c.set_jellyfin_configured(false);
     check("p2_jellyfin_config", &render(&c, Role::Jellyfin, 120.0));
 }
+
+/// Brightest channel of a colour as it lands on black.
+fn lit(c: rackscreen_core::theme::Color, alpha: f32) -> u8 {
+    let k = (c.a as f32 / 255.0) * alpha.clamp(0.0, 1.0);
+    [c.r, c.g, c.b]
+        .iter()
+        .map(|v| (*v as f32 * k).round() as u8)
+        .max()
+        .unwrap()
+}
+
+fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
+    use rackscreen_core::scene::Drawable as D;
+    use rackscreen_core::theme::p2::INK;
+    use rackscreen_core::theme::BLACK;
+    let cut_out = |c: rackscreen_core::theme::Color| {
+        (c.r, c.g, c.b) == (BLACK.r, BLACK.g, BLACK.b) || (c.r, c.g, c.b) == (INK.r, INK.g, INK.b)
+    };
+    let mut bad = Vec::new();
+    for d in &s.items {
+        let (what, color, alpha, min) = match d {
+            D::Clear(_) => continue,
+            D::Arc { color, alpha, .. } => ("arc", *color, *alpha, 0x2A),
+            D::RoundRect { color, alpha, .. } => ("rect", *color, *alpha, 0x2A),
+            D::Polygon { color, alpha, .. } => ("polygon", *color, *alpha, 0x2A),
+            D::Ellipse { color, alpha, .. } => ("ellipse", *color, *alpha, 0x2A),
+            D::Polyline { color, alpha, .. } => ("polyline", *color, *alpha, 0x2A),
+            D::Icon { color, alpha, .. } => ("icon", *color, *alpha, 0x2A),
+            D::Run {
+                color, alpha, text, ..
+            } => {
+                if text.trim().is_empty() {
+                    continue;
+                }
+                ("run", *color, *alpha, 0x78)
+            }
+            D::CurvedText { color, alpha, .. } => ("title", *color, *alpha, 0x78),
+        };
+        if cut_out(color) || alpha <= 0.0 {
+            continue;
+        }
+        let v = lit(color, alpha);
+        if v < min {
+            bad.push(format!(
+                "{what} {color:?} × {alpha} = {v:#04x} < {min:#04x}"
+            ));
+        }
+    }
+    bad
+}
+
+#[test]
+fn contrast_floor_on_every_role() {
+    let full = full_model();
+    let mut bare = Model::new(Thresholds::default());
+    bare.set_token_present(true);
+    bare.set_location_present(true);
+    bare.set_github_token_present(true);
+    bare.set_jellyfin_configured(true);
+    link(&mut bare, LinkTarget::K8sApi);
+    link(&mut bare, LinkTarget::Prometheus);
+    let mut problems = Vec::new();
+    for (label, m) in [("normal", &full), ("no data", &bare)] {
+        for role in Role::ALL {
+            let s = m.scene_for_role(role, 120.0, &mut ScreenUi::new());
+            for p in floor_violations(&s) {
+                problems.push(format!("{} ({label}): {p}", role.name()));
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "too dark for the panel:\n{}",
+        problems.join("\n")
+    );
+}

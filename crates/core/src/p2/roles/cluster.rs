@@ -245,7 +245,7 @@ pub fn deploys(model: &Model, now: Secs) -> P2Screen {
         values: log.hours.iter().map(|h| *h as f32).collect(),
         colors: vec![INDIGO; 24],
         now: model.local_hour(),
-        past_alpha: 0.28,
+        past_alpha: 0.45,
         caption: "per hour".into(),
     });
     s
@@ -534,7 +534,7 @@ mod tests {
         assert!(matches!(&s.ring.kind, RingKind::Discrete(c) if c == &vec![OK, BLUE, CRIT, TEXT3]));
         assert_eq!(pill(&s), ("no syncs yet".into(), TEXT2));
         assert!(
-            matches!(&s.card, Some(Card::Bars { values, now, past_alpha, caption, .. }) if values.len() == 24 && *now == 14 && *past_alpha == 0.28 && caption == "per hour")
+            matches!(&s.card, Some(Card::Bars { values, now, past_alpha, caption, .. }) if values.len() == 24 && *now == 14 && *past_alpha == 0.45 && caption == "per hour")
         );
         m.apply(
             Event::AppSynced {
