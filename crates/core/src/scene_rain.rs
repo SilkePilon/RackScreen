@@ -4,7 +4,7 @@ pub const RAIN_SLOTS: usize = 24;
 pub const SLOT_SECS: i64 = 300;
 /// A slot at or above this counts as rain.
 pub const WET_MM: f32 = 0.1;
-/// Rain moving inside this many minutes while it is dry splashes the umbrella.
+/// Rain within this many minutes counts as "soon".
 pub const SOON_MINUTES: u32 = 15;
 
 /// The slots still ahead: elapsed ones are dropped from the front so slot 0

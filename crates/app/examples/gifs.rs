@@ -183,6 +183,8 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     model.set_location_present(true);
     model.set_github_token_present(true);
     model.set_utc_offset_secs(UTC_OFFSET);
+    // the clock before the first events: day-bucketed data (deploys per hour) needs it
+    model.set_unix_now(UNIX_START);
 
     let mut fake = FakeState::new(SEED);
     fake.set_clock(UNIX_START, UTC_OFFSET);

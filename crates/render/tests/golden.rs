@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
-use rackscreen_core::event::{Event, LinkTarget, Robustness, Torrent};
+use rackscreen_core::event::{
+    App, AppHealth, AppSync, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent,
+};
 use rackscreen_core::model::{Model, Thresholds};
+use rackscreen_core::mood::Mood;
 use rackscreen_core::p2::ui::ScreenUi;
 use rackscreen_core::theme::Role;
 use rackscreen_render::frame::new_pixmap;
@@ -48,22 +51,42 @@ fn pixel(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
     (p.data()[i], p.data()[i + 1], p.data()[i + 2])
 }
 
-fn ready_model() -> Model {
+fn render(m: &Model, role: Role, now: f64) -> Pixmap {
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(role, now, &mut ScreenUi::new()), &mut px);
+    assert_eq!(pixel(&px, 4, 4), (0, 0, 0), "{role:?}: the corner is black");
+    px
+}
+
+const UNIX: i64 = 1_788_782_400; // 2026-09-07 12:00 UTC, Amsterdam (+2): a Monday, 14:00 local
+const OFFSET: i32 = 7200;
+
+fn link(m: &mut Model, target: LinkTarget) {
+    m.apply(Event::Link { target, up: true }, 0.0);
+}
+
+/// Every source healthy and busy, the clock fixed.
+fn full_model() -> Model {
     let mut m = Model::new(Thresholds::default());
-    m.apply(
-        Event::Link {
-            target: LinkTarget::K8sApi,
-            up: true,
-        },
-        0.0,
-    );
-    m.apply(
-        Event::Link {
-            target: LinkTarget::Prometheus,
-            up: true,
-        },
-        0.0,
-    );
+    m.set_unix_now(UNIX);
+    m.set_utc_offset_secs(OFFSET);
+    m.set_local_slot(56);
+    m.set_token_present(true);
+    m.set_location_present(true);
+    m.set_github_token_present(true);
+    for t in [
+        LinkTarget::K8sApi,
+        LinkTarget::Prometheus,
+        LinkTarget::Electricity,
+        LinkTarget::Prices,
+        LinkTarget::Weather,
+        LinkTarget::Rain,
+        LinkTarget::Github,
+        LinkTarget::ArgoCd,
+    ] {
+        link(&mut m, t);
+    }
     m.apply(
         Event::Metrics {
             cpu_pct: 42.0,
@@ -76,141 +99,46 @@ fn ready_model() -> Model {
         0.0,
     );
     m.apply(
+        Event::MetricsHistory {
+            cpu: (0..31)
+                .map(|i| 34.0 + 16.0 * ((i as f32) * 0.45).sin())
+                .collect(),
+            mem: (0..31)
+                .map(|i| 66.0 + 3.0 * ((i as f32) * 0.3).sin())
+                .collect(),
+            net_rx_mbps: (0..31)
+                .map(|i| 40.0 + 25.0 * ((i as f32) * 0.5).sin())
+                .collect(),
+        },
+        0.0,
+    );
+    m.apply(
         Event::PodSnapshot {
-            running: 53,
+            running: 38,
             pending: 2,
             failed: 0,
-            total: 55,
+            total: 40,
         },
         0.0,
     );
     m.apply(
         Event::NodeSnapshot {
-            ready: 4,
-            total: 4,
+            ready: 7,
+            total: 7,
             not_ready: vec![],
         },
         0.0,
     );
-    m.set_screens(
-        vec![
-            vec![Role::Cpu],
-            vec![Role::Mem],
-            vec![Role::Pods],
-            vec![Role::Health],
-        ],
-        vec![15.0; 4],
-    );
-    m
-}
-
-/// The four roles with goldens; the six newer roles get theirs with their scenes.
-const CLASSIC: [Role; 4] = [Role::Cpu, Role::Mem, Role::Pods, Role::Health];
-
-#[test]
-fn cpu_idle() {
-    let m = ready_model();
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new()),
-        &mut px,
-    );
-    assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
-    check("cpu_idle", &px);
-}
-
-#[test]
-fn all_roles_idle() {
-    let m = ready_model();
-    let mut r = Renderer::new().unwrap();
-    for role in CLASSIC {
-        let mut px = new_pixmap();
-        r.render(&m.scene_for_role(role, 5.0, &mut ScreenUi::new()), &mut px);
-        check(&format!("idle_{}", role.name()), &px);
-    }
-}
-
-#[test]
-fn connecting_and_no_data() {
-    let mut r = Renderer::new().unwrap();
-    let m = Model::new(Thresholds::default());
-    let mut px = new_pixmap();
-    // `scene` (not `scene_for_role`): the connecting scene comes from the link check.
-    r.render(&m.scene(0, 0.0, &mut ScreenUi::new()), &mut px);
-    check("connecting", &px);
-    let mut m2 = Model::new(Thresholds::default());
-    m2.apply(
-        Event::Link {
-            target: LinkTarget::K8sApi,
-            up: true,
-        },
-        0.0,
-    );
-    let mut px2 = new_pixmap();
-    r.render(
-        &m2.scene_for_role(Role::Cpu, 0.5, &mut ScreenUi::new()),
-        &mut px2,
-    );
-    check("no_data", &px2);
-}
-
-#[test]
-fn torrent_mode() {
-    let mut m = ready_model();
-    m.apply(
-        Event::Link {
-            target: LinkTarget::QBittorrent,
-            up: true,
-        },
-        0.0,
-    );
-    m.apply(
-        Event::Torrents(vec![
-            Torrent {
-                name: "a".into(),
-                progress: 78.0,
-                eta_secs: 900,
-                speed_bps: 9_000_000,
-            },
-            Torrent {
-                name: "b".into(),
-                progress: 41.0,
-                eta_secs: 3000,
-                speed_bps: 3_000_000,
-            },
-            Torrent {
-                name: "c".into(),
-                progress: 12.0,
-                eta_secs: 9000,
-                speed_bps: 1_000_000,
-            },
-        ]),
-        0.0,
-    );
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Health, 5.0, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("torrent", &px);
-}
-
-/// The outer ring unwinding after its torrent finished, with the other two
-/// holding their slots until it is gone.
-fn temps_model() -> Model {
-    let mut m = ready_model();
     m.apply(
         Event::NodeTemps(
             [
-                ("rack-1", 44.0),
-                ("rack-2", 51.0),
-                ("rack-3", 68.0),
-                ("rack-4", 39.0),
-                ("rack-5", 47.0),
-                ("rack-6", 55.0),
-                ("rack-7", 42.0),
+                ("hp-elitedesk-800-g5-i7", 46.0),
+                ("hp-elitedesk-800-g6-i5", 44.0),
+                ("hp-elitedesk-800-g6-i7", 47.0),
+                ("raspberrypi-5-16gb-1", 52.0),
+                ("raspberrypi-5-8gb-1", 49.0),
+                ("raspberrypi-5-8gb-2", 54.0),
+                ("raspberrypi-5-8gb-3", 51.0),
             ]
             .iter()
             .map(|(n, c)| (n.to_string(), *c))
@@ -218,219 +146,126 @@ fn temps_model() -> Model {
         ),
         0.0,
     );
-    m
-}
-
-fn storage_model(volumes: Vec<(String, Robustness)>) -> Model {
-    let mut m = ready_model();
+    let tb = 1u64 << 40;
     m.apply(
         Event::Storage {
-            volumes,
-            used_bytes: 49 * (1 << 30),
-            capacity_bytes: 128 * (1 << 30),
-        },
-        0.0,
-    );
-    m
-}
-
-fn volumes(n: usize, degraded: &[usize]) -> Vec<(String, Robustness)> {
-    (0..n)
-        .map(|i| {
-            let r = if degraded.contains(&i) {
-                Robustness::Degraded
-            } else {
-                Robustness::Healthy
-            };
-            (format!("pvc-{i}"), r)
-        })
-        .collect()
-}
-
-#[test]
-fn thermal_idle() {
-    let m = temps_model();
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    // 2.5 s, not 5.0: the temperature badge fades in over each 5 s window, so at
-    // exactly 5.0 it would be fully transparent.
-    r.render(
-        &m.scene_for_role(Role::Thermal, 2.5, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("thermal", &px);
-}
-
-#[test]
-fn storage_idle_and_degraded() {
-    let mut r = Renderer::new().unwrap();
-    let m = storage_model(volumes(21, &[]));
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Storage, 5.0, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("storage", &px);
-
-    let m2 = storage_model(volumes(6, &[2]));
-    let mut px2 = new_pixmap();
-    r.render(
-        &m2.scene_for_role(Role::Storage, 5.0, &mut ScreenUi::new()),
-        &mut px2,
-    );
-    check("storage_degraded", &px2);
-}
-
-fn electricity_model() -> Model {
-    let mut m = ready_model();
-    m.set_token_present(true);
-    // the pollers raise their link before the first payload; without it the
-    // roles are treated as having no live data
-    for target in [LinkTarget::Electricity, LinkTarget::Prices] {
-        m.apply(Event::Link { target, up: true }, 0.0);
-    }
-    m.apply(
-        Event::Electricity {
-            zone: "NL".into(),
-            mix_mw: vec![
-                (Source::Solar, 4800.0),
-                (Source::Wind, 2400.0),
-                (Source::Gas, 1300.0),
-                (Source::Coal, 700.0),
-                (Source::Nuclear, 400.0),
-                (Source::Biomass, 200.0),
-                (Source::Hydro, 200.0),
+            volumes: vec![
+                ("prom".into(), Robustness::Healthy),
+                ("qbit".into(), Robustness::Healthy),
+                ("graf".into(), Robustness::Healthy),
             ],
-            renewable_pct: 61.0,
-            fossil_free_pct: 73.0,
-            carbon_gco2: 214.0,
-            updated_at: "2026-09-07T12:00:00Z".into(),
+            used_bytes: tb + tb / 5,
+            capacity_bytes: 3 * tb + tb / 10,
         },
         0.0,
     );
-    // 14:00 on a day that climbs from 0.062 to 0.292 €/kWh, 0.221 at 14:00,
-    // against a three-day mean of 0.18: PRICEY
-    m.set_local_slot(56);
-    let mut eur: Vec<f32> = (0..96).map(|i| (6.2 + (i / 4) as f32) / 100.0).collect();
-    eur[56] = 0.221;
+    m.apply(
+        Event::VolumeSizes(vec![
+            ("prom".into(), tb / 2),
+            ("qbit".into(), 2 * tb / 5),
+            ("graf".into(), 3 * tb / 10),
+        ]),
+        0.0,
+    );
+    for h in 0..24 {
+        m.set_unix_now(UNIX - (23 - h) * 3600);
+        m.apply(
+            Event::Electricity {
+                zone: "NL".into(),
+                mix_mw: vec![
+                    (Source::Wind, 3800.0),
+                    (Source::Solar, 2400.0),
+                    (Source::Gas, 1400.0),
+                    (Source::Nuclear, 1200.0),
+                    (Source::Coal, 700.0),
+                    (Source::Biomass, 500.0),
+                ],
+                renewable_pct: 55.0
+                    + 20.0 * (((h as f32) - 6.0) / 24.0 * std::f32::consts::TAU).sin(),
+                fossil_free_pct: 82.0,
+                carbon_gco2: 230.0 + 80.0 * (-((h as f32 - 19.0).powi(2)) / 8.0).exp()
+                    - 90.0 * (-((h as f32 - 13.0).powi(2)) / 10.0).exp(),
+                updated_at: String::new(),
+            },
+            0.0,
+        );
+    }
+    m.set_unix_now(UNIX);
+    let eur: Vec<f32> = (0..96)
+        .map(|i| {
+            let h = (i / 4) as f32;
+            0.11 + 0.06 * (-((h - 19.0).powi(2)) / 5.0).exp()
+                + 0.035 * (-((h - 8.0).powi(2)) / 3.0).exp()
+                - 0.05 * (-((h - 13.0).powi(2)) / 7.0).exp()
+        })
+        .collect();
     m.apply(
         Event::Prices {
             date: "2026-09-07".into(),
+            avg_eur_per_kwh: eur.iter().sum::<f32>() / 96.0,
             eur_per_kwh: eur,
-            avg_eur_per_kwh: 0.18,
             currency: "EUR".into(),
         },
         0.0,
     );
-    m
-}
-
-#[test]
-fn power_mix_ring() {
-    let m = electricity_model();
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::PowerMix, 5.0, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("power_mix", &px);
-}
-
-#[test]
-fn price_carbon_and_renewable() {
-    let m = electricity_model();
-    let mut r = Renderer::new().unwrap();
-
-    // 1.2 s: the needle has eased onto its band.
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Price, 1.2, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("price", &px);
-
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Carbon, 5.0, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("carbon", &px);
-
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Renewable, 1.2, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("renewable", &px);
-}
-
-#[test]
-fn electricity_without_a_token_shows_a_key() {
-    let m = ready_model();
-    assert!(!m.token_present());
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Carbon, 2.0, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("no_token", &px);
-}
-
-fn new_roles_model() -> Model {
-    use rackscreen_core::event::{App, AppHealth, AppSync, IssPass, MoonPhase};
-    let mut m = ready_model();
-    m.set_location_present(true);
-    m.set_github_token_present(true);
-    m.set_unix_now(1_788_782_400); // 2026-09-07T12:00Z
-    m.set_utc_offset_secs(7200);
-    for target in [
-        LinkTarget::Weather,
-        LinkTarget::Rain,
-        LinkTarget::Github,
-        LinkTarget::ArgoCd,
-    ] {
-        m.apply(Event::Link { target, up: true }, 0.0);
-    }
     m.apply(
         Event::Weather {
-            temp_c: 18.0,
+            temp_c: 17.0,
             code: 2,
             is_day: true,
-            wind_kmh: 23.0,
-            gust_kmh: 39.0,
-            wind_from_deg: 40.0,
+            wind_kmh: 8.0,
+            gust_kmh: 15.0,
+            wind_from_deg: 225.0,
             at: String::new(),
         },
         0.0,
     );
-    m.apply(Event::AirQuality { eaqi: 32.0 }, 0.0);
+    m.apply(
+        Event::Forecast {
+            hourly_temp_c: (0..12)
+                .map(|i| 13.0 + 7.0 * (((i as f32) + 4.0) / 24.0 * std::f32::consts::TAU).sin())
+                .collect(),
+            hourly_precip_mm: vec![0.0, 0.0, 0.0, 0.0, 1.1, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            day_min_c: 11.0,
+            day_max_c: 21.0,
+        },
+        0.0,
+    );
+    m.apply(Event::AirQuality { eaqi: 27.0 }, 0.0);
+    m.apply(
+        Event::AirQualityHistory {
+            hourly: (0..24)
+                .map(|i| 22.0 + 10.0 * ((i as f32) / 24.0 * std::f32::consts::TAU * 1.5).sin())
+                .collect(),
+        },
+        0.0,
+    );
     let mut rain = vec![0.0f32; 24];
     for (i, v) in [
-        (5, 0.3),
-        (6, 1.0),
-        (7, 2.5),
-        (8, 5.5),
-        (9, 6.5),
-        (10, 4.0),
-        (11, 2.0),
+        (1, 0.4),
+        (2, 1.0),
+        (3, 1.4),
+        (4, 1.8),
+        (5, 1.6),
+        (6, 1.2),
+        (7, 0.8),
+        (8, 0.3),
     ] {
         rain[i] = v;
     }
     m.apply(
         Event::Rain {
-            from: 1_788_782_400,
+            from: UNIX,
             mm_per_h: rain,
         },
         0.0,
     );
     m.apply(
         Event::Sky {
-            sunrise: Some(1_788_782_400 - 7 * 3600),
-            sunset: Some(1_788_782_400 + 6 * 3600),
+            sunrise: Some(UNIX - 7 * 3600),
+            sunset: Some(UNIX + 6 * 3600),
             sun_elevation_deg: 45.0,
-            moon_illumination: 0.63,
+            moon_illumination: 0.64,
             moon_waxing: true,
             moon_phase: MoonPhase::WaxingGibbous,
         },
@@ -438,8 +273,8 @@ fn new_roles_model() -> Model {
     );
     m.apply(
         Event::IssPass(Some(IssPass {
-            start: 1_788_782_400 + 42 * 60,
-            end: 1_788_782_400 + 48 * 60,
+            start: UNIX + 14 * 60 + 32,
+            end: UNIX + 20 * 60 + 32,
             max_elevation_deg: 62.0,
             visible: true,
         })),
@@ -454,122 +289,323 @@ fn new_roles_model() -> Model {
             on_battery: false,
             low_battery: false,
             charge_pct: 100.0,
-            load_pct: 18.0,
-            runtime_secs: 42 * 60,
+            load_pct: 7.0,
+            runtime_secs: 49 * 60,
         },
         0.0,
     );
     m.apply(
         Event::Network {
-            rx_bps: 40e6,
-            tx_bps: 1.3e6,
+            rx_bps: 68e6,
+            tx_bps: 6e6,
         },
         0.0,
     );
-    let apps: Vec<App> = (0..16)
-        .map(|i| App {
-            name: format!("app-{i:02}"),
-            sync: if i == 5 {
-                AppSync::OutOfSync
-            } else {
-                AppSync::Synced
-            },
-            health: AppHealth::Healthy,
-            operating: false,
-        })
-        .collect();
+    let apps: Vec<App> = [
+        "arr-stack",
+        "cloudflared",
+        "grafana",
+        "homeassistant",
+        "longhorn",
+        "monitoring",
+        "n8n",
+        "pihole",
+        "tailscale",
+    ]
+    .iter()
+    .map(|n| App {
+        name: n.to_string(),
+        sync: AppSync::Synced,
+        health: AppHealth::Healthy,
+        operating: false,
+    })
+    .collect();
     m.apply(Event::Apps(apps), 0.0);
-    // let the smooths settle
-    let mut t = 0.0;
-    while t < 2.0 {
-        m.tick(t);
-        t += 1.0 / 30.0;
-    }
+    m.apply(
+        Event::AppSyncHistory {
+            finished_at: vec![
+                UNIX - 6 * 3600,
+                UNIX - 5 * 3600,
+                UNIX - 5 * 3600 + 900,
+                UNIX - 3 * 3600,
+                UNIX - 1800,
+            ],
+        },
+        0.0,
+    );
+    m.apply(
+        Event::AppSynced {
+            name: "grafana".into(),
+        },
+        0.0,
+    );
+    m.tick(0.0);
     m
 }
 
 #[test]
-fn new_roles_idle() {
-    let m = new_roles_model();
-    let mut r = Renderer::new().unwrap();
-    for (role, name) in [
-        (Role::GhActivity, "gh_activity"),
-        (Role::Weather, "weather"),
-        (Role::Wind, "wind"),
-        (Role::Aqi, "aqi"),
-        (Role::Rain, "rain"),
-        (Role::Sun, "sun"),
-        (Role::Moon, "moon"),
-        (Role::Iss, "iss"),
-        (Role::Ups, "ups"),
-        (Role::Net, "net"),
-        (Role::Deploys, "deploys"),
-    ] {
-        let mut px = new_pixmap();
-        // 2.5 s: the alternating badges are in their first window and faded in
-        r.render(&m.scene_for_role(role, 2.5, &mut ScreenUi::new()), &mut px);
-        check(name, &px);
+fn every_role_normal() {
+    let m = full_model();
+    for role in Role::ALL {
+        let px = render(&m, role, 120.0);
+        check(&format!("p2_{}", role.name()), &px);
     }
 }
 
 #[test]
-fn ups_on_battery_and_iss_during_pass() {
-    let mut m = new_roles_model();
+fn warning_and_alternate_states() {
+    let mut m = full_model();
+    m.apply(
+        Event::Metrics {
+            cpu_pct: 93.0,
+            mem_pct: 67.0,
+            mem_used_gb: 10.7,
+            mem_total_gb: 16.0,
+            hot_cpu: None,
+            hot_mem: None,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::PodSnapshot {
+            running: 38,
+            pending: 1,
+            failed: 2,
+            total: 41,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::NodeSnapshot {
+            ready: 6,
+            total: 7,
+            not_ready: vec!["raspberrypi-5-8gb-3".into()],
+        },
+        0.0,
+    );
+    m.apply(
+        Event::AlertSnapshot {
+            firing: vec!["KubeNodeNotReady".into()],
+        },
+        0.0,
+    );
+    let tb = 1u64 << 40;
+    m.apply(
+        Event::Storage {
+            volumes: vec![
+                ("prom".into(), Robustness::Healthy),
+                ("qbit".into(), Robustness::Degraded),
+                ("graf".into(), Robustness::Healthy),
+            ],
+            used_bytes: tb + tb / 5,
+            capacity_bytes: 3 * tb + tb / 10,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::NodeTemps(vec![
+            ("hp-elitedesk-800-g5-i7".into(), 46.0),
+            ("raspberrypi-5-8gb-1".into(), 72.0),
+            ("raspberrypi-5-8gb-2".into(), 66.0),
+        ]),
+        0.0,
+    );
     m.apply(
         Event::Ups {
             on_battery: true,
             low_battery: false,
             charge_pct: 80.0,
-            load_pct: 18.0,
+            load_pct: 7.0,
             runtime_secs: 38 * 60,
         },
-        2.0,
+        0.0,
     );
-    m.set_unix_now(1_788_782_400 + 44 * 60);
-    let mut t = 2.0;
-    while t < 4.0 {
-        m.tick(t);
-        t += 1.0 / 30.0;
+    let mut apps = m.apps().apps.clone();
+    apps[2].health = AppHealth::Degraded;
+    apps[5].sync = AppSync::OutOfSync;
+    apps[5].operating = true;
+    m.apply(Event::Apps(apps), 0.0);
+    m.apply(
+        Event::Rain {
+            from: UNIX,
+            mm_per_h: vec![2.3; 24],
+        },
+        0.0,
+    );
+    m.apply(Event::AirQuality { eaqi: 72.0 }, 0.0);
+    m.tick(0.0);
+    for role in [
+        Role::Cpu,
+        Role::Pods,
+        Role::Health,
+        Role::Storage,
+        Role::Thermal,
+        Role::Ups,
+        Role::Deploys,
+        Role::Rain,
+        Role::Aqi,
+    ] {
+        check(
+            &format!("p2_{}_warn", role.name()),
+            &render(&m, role, 120.0),
+        );
     }
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Ups, 4.0, &mut ScreenUi::new()),
-        &mut px,
+    // health in torrent mode
+    let mut t = full_model();
+    link(&mut t, LinkTarget::QBittorrent);
+    t.apply(
+        Event::Torrents(vec![
+            Torrent {
+                name: "ubuntu-24.04.2-live-server-amd64.iso".into(),
+                progress: 78.0,
+                eta_secs: 900,
+                speed_bps: 9_000_000,
+            },
+            Torrent {
+                name: "debian-13.iso".into(),
+                progress: 41.0,
+                eta_secs: 3000,
+                speed_bps: 3_000_000,
+            },
+        ]),
+        0.0,
     );
-    check("ups_on_battery", &px);
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Iss, 4.0, &mut ScreenUi::new()),
-        &mut px,
+    t.tick(0.0);
+    check("p2_health_torrent", &render(&t, Role::Health, 120.0));
+    // the ISS overhead and a dry nowcast
+    let mut i = full_model();
+    i.set_unix_now(UNIX + 16 * 60);
+    check("p2_iss_pass", &render(&i, Role::Iss, 120.0));
+    let mut d = full_model();
+    d.apply(
+        Event::Rain {
+            from: UNIX,
+            mm_per_h: vec![0.0; 24],
+        },
+        0.0,
     );
-    check("iss_pass", &px);
+    check("p2_rain_dry", &render(&d, Role::Rain, 120.0));
+    // sunrise side of the sun role
+    let mut n = full_model();
+    n.set_unix_now(UNIX + 9 * 3600);
+    check("p2_sun_night", &render(&n, Role::Sun, 120.0));
 }
 
 #[test]
-fn sky_without_location_shows_a_pin() {
-    let m = ready_model();
+fn no_data_token_location_and_connecting() {
+    let mut m = Model::new(Thresholds::default());
+    link(&mut m, LinkTarget::K8sApi);
+    for role in Role::ALL {
+        if role == Role::Face {
+            continue;
+        }
+        check(
+            &format!("p2_{}_nodata", role.name()),
+            &render(&m, role, 0.0),
+        );
+    }
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Sun, 2.0, &mut ScreenUi::new()),
-        &mut px,
+    let bare = Model::new(Thresholds::default());
+    r.render(&bare.scene(0, 0.4, &mut ScreenUi::new()), &mut px);
+    check("connecting", &px);
+}
+
+#[test]
+fn face_moods() {
+    let mut m = full_model();
+    // walk the priority table from the bottom up by adding one condition at a time
+    let capture = |m: &mut Model, mood: Mood| {
+        let mut t = 0.0;
+        while t < 2.0 {
+            m.tick(t);
+            t += 1.0 / 30.0;
+        }
+        assert_eq!(m.face_mood(), mood);
+        let px = render(m, Role::Face, 2.0);
+        check(&format!("face_{}", mood.name()), &px);
+    };
+    // a flat price day: the afternoon dip in `full_model` would otherwise read as cheap and happy
+    m.apply(
+        Event::Prices {
+            date: "2026-09-07".into(),
+            eur_per_kwh: vec![0.15; 96],
+            avg_eur_per_kwh: 0.15,
+            currency: "EUR".into(),
+        },
+        0.0,
     );
-    check("no_location", &px);
+    capture(&mut m, Mood::Content);
+    m.apply(
+        Event::Weather {
+            temp_c: 21.0,
+            code: 0,
+            is_day: true,
+            wind_kmh: 1.0,
+            gust_kmh: 1.0,
+            wind_from_deg: 0.0,
+            at: String::new(),
+        },
+        0.0,
+    );
+    capture(&mut m, Mood::Happy);
+    m.set_bedtime_near(true);
+    capture(&mut m, Mood::Sleepy);
+    m.apply(
+        Event::PodSnapshot {
+            running: 38,
+            pending: 0,
+            failed: 1,
+            total: 39,
+        },
+        0.0,
+    );
+    capture(&mut m, Mood::Worried);
+    m.apply(
+        Event::NodeTemps(vec![("raspberrypi-5-8gb-1".into(), 80.0)]),
+        0.0,
+    );
+    capture(&mut m, Mood::Hot);
+    m.apply(
+        Event::AlertSnapshot {
+            firing: vec!["Down".into()],
+        },
+        0.0,
+    );
+    capture(&mut m, Mood::Angry);
+    m.apply(
+        Event::NodeSnapshot {
+            ready: 6,
+            total: 7,
+            not_ready: vec!["pi".into()],
+        },
+        0.0,
+    );
+    capture(&mut m, Mood::Sad);
+    m.apply(
+        Event::Ups {
+            on_battery: true,
+            low_battery: false,
+            charge_pct: 80.0,
+            load_pct: 7.0,
+            runtime_secs: 38 * 60,
+        },
+        0.0,
+    );
+    capture(&mut m, Mood::Scared);
 }
 
 #[test]
 fn iris_mid_transition() {
-    // one screen cycling cpu -> mem: tick past the dwell and catch the iris in
-    // its outgoing half, where the scene is both shrunk and partly unlit
-    let mut m = ready_model();
+    let mut m = full_model();
     m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
     let mut t = 0.0;
     while t < 3.05 {
         m.tick(t);
         t += 1.0 / 30.0;
     }
-    let s = m.scene(0, 3.25, &mut ScreenUi::new());
+    let mut ui = ScreenUi::new();
+    let s = m.scene(0, 3.25, &mut ui);
     assert!(s.zoom < 0.5 && s.zoom > 0.1, "zoom {}", s.zoom);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
@@ -577,62 +613,9 @@ fn iris_mid_transition() {
     check("iris_mid", &px);
 }
 
-fn tick_until(m: &mut Model, from: f64, to: f64) {
-    let mut t = from;
-    while t < to {
-        m.tick(t);
-        t += 1.0 / 30.0;
-    }
-    m.tick(to);
-}
-
-fn render_face(m: &Model, now: f64) -> Pixmap {
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Face, now, &mut ScreenUi::new()),
-        &mut px,
-    );
-    px
-}
-
-#[test]
-fn face_content_and_sad() {
-    let mut m = ready_model();
-    tick_until(&mut m, 0.0, 5.0);
-    let px = render_face(&m, 5.0);
-    let (red, g, b) = pixel(&px, 72, 118);
-    assert!(
-        red > 200 && g > 200 && b > 200,
-        "left eye off-white, got {red},{g},{b}"
-    );
-    let (r2, ..) = pixel(&px, 120, 118);
-    assert!(r2 < 60, "gap between the eyes is dark, got {r2}");
-    assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
-    check("face_content", &px);
-
-    m.apply(
-        Event::NodeSnapshot {
-            ready: 3,
-            total: 4,
-            not_ready: vec!["pi-4".into()],
-        },
-        5.0,
-    );
-    tick_until(&mut m, 5.0, 8.0);
-    check("face_sad", &render_face(&m, 8.0));
-
-    let mut m = ready_model();
-    m.set_bedtime_near(true);
-    tick_until(&mut m, 0.0, 5.0);
-    let px = render_face(&m, 5.0);
-    let (red, ..) = pixel(&px, 72, 95);
-    assert!(red < 60, "sleepy: the top of the eye is closed, got {red}");
-    check("face_sleepy", &px);
-}
-
 #[test]
 fn p2_sample_screen() {
+    // kept from Task 7: the composer on hand-written data
     use rackscreen_core::p2::chart::Card;
     use rackscreen_core::p2::ring::RingSpec;
     use rackscreen_core::p2::screen::{compose, P2Screen};
@@ -654,17 +637,8 @@ fn p2_sample_screen() {
         caption: "last 60 s".into(),
     });
     let mut ui = ScreenUi::new();
-    let scene = compose(&s, &mut ui, 5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&scene, &mut px);
-    assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
-    let (red, g, b) = pixel(&px, 226, 120);
-    assert!(
-        b > 200 && red < 140 && g > 140,
-        "blue fill at 3 o'clock, got {red},{g},{b}"
-    );
-    let (t, ..) = pixel(&px, 120, 226);
-    assert!((15..=35).contains(&t), "track at 6 o'clock, got {t}");
+    r.render(&compose(&s, &mut ui, 5.0), &mut px);
     check("p2_sample", &px);
 }

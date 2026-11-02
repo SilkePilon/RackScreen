@@ -201,13 +201,14 @@ impl RenderLoop {
         while !self.stop.load(Ordering::Relaxed) {
             let t0 = Instant::now();
             let now = start.elapsed().as_secs_f64();
-            while let Ok(ev) = self.rx.try_recv() {
-                model.apply(ev, now);
-            }
+            // the clock first: events bucketed by local day and hour read it
             let (minutes, unix, offset) = clock();
             model.set_local_slot(minutes / 15);
             model.set_unix_now(unix);
             model.set_utc_offset_secs(offset);
+            while let Ok(ev) = self.rx.try_recv() {
+                model.apply(ev, now);
+            }
             model.set_bedtime_near(face_bedtime(&self.night, minutes, model.night_override()));
             model.tick(now);
 

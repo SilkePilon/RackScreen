@@ -238,6 +238,7 @@ pub fn deploys(model: &Model, now: Secs) -> P2Screen {
     s.pill = Some(match &log.last {
         Some((name, at)) if now - at < 4.0 => (format!("{name} · just now"), INDIGO),
         Some((name, at)) => (format!("{name} · {}", fmt_ago(now - at)), TEXT2),
+        None if today > 0 => ("since midnight".into(), TEXT2),
         None => ("no syncs yet".into(), TEXT2),
     });
     s.card = Some(Card::Bars {
