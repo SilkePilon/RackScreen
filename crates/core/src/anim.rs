@@ -10,6 +10,7 @@ pub fn clamp01(t: f32) -> f32 {
 pub enum Easing {
     Linear,
     OutCubic,
+    OutQuart,
     InOutCubic,
     Spring,
 }
@@ -20,6 +21,7 @@ impl Easing {
         match self {
             Easing::Linear => t,
             Easing::OutCubic => 1.0 - (1.0 - t).powi(3),
+            Easing::OutQuart => 1.0 - (1.0 - t).powi(4),
             Easing::InOutCubic => {
                 if t < 0.5 {
                     4.0 * t * t * t
@@ -184,5 +186,10 @@ mod tests {
         }
         assert!((breathe(0.0, 2.4) - 0.35).abs() < 1e-6);
         assert!((breathe(1.2, 2.4) - 1.0).abs() < 1e-6);
+    }
+    #[test]
+    fn out_quart_known_value() {
+        assert!((Easing::OutQuart.apply(0.5) - 0.9375).abs() < 1e-6);
+        assert_eq!(Easing::OutQuart.apply(1.0), 1.0);
     }
 }
