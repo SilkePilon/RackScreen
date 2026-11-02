@@ -1,6 +1,6 @@
 //! Electricity Maps sources, colours, icons and the power-mix ring partition.
 
-use crate::theme::{Color, AMBER, GREEN, RED};
+use crate::theme::Color;
 
 /// The five bands of the price level gauge, cheapest first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,28 +42,6 @@ impl PriceLevel {
         PriceLevel::Pricey,
         PriceLevel::VeryPricey,
     ];
-
-    /// The badge word.
-    pub fn word(self) -> &'static str {
-        match self {
-            PriceLevel::VeryCheap => "V.CHEAP",
-            PriceLevel::Cheap => "CHEAP",
-            PriceLevel::Normal => "NORMAL",
-            PriceLevel::Pricey => "PRICEY",
-            PriceLevel::VeryPricey => "V.PRICEY",
-        }
-    }
-
-    /// The band colour, green through amber to red.
-    pub fn color(self) -> Color {
-        match self {
-            PriceLevel::VeryCheap => GREEN,
-            PriceLevel::Cheap => GREEN.mix(AMBER, 0.5),
-            PriceLevel::Normal => AMBER,
-            PriceLevel::Pricey => AMBER.mix(RED, 0.5),
-            PriceLevel::VeryPricey => RED,
-        }
-    }
 
     /// 0 for the cheapest band, 4 for the dearest.
     pub fn index(self) -> usize {
@@ -177,23 +155,6 @@ impl Source {
         })
     }
 
-    pub fn color(self) -> Color {
-        Color::hex(match self {
-            Source::Biomass => 0x008043,
-            Source::Geothermal => 0xA73C15,
-            Source::Hydro => 0x1878EA,
-            Source::Solar => 0xFFC700,
-            Source::Wind => 0x69D6F8,
-            Source::Nuclear => 0x9D71F7,
-            Source::BatteryStorage => 0x1DA484,
-            Source::HydroStorage => 0x2B3CD8,
-            Source::Coal => 0xac8c35,
-            Source::Gas => 0xAAA189,
-            Source::Oil => 0x584745,
-            Source::Unknown => 0xACACAC,
-        })
-    }
-
     pub fn icon(self) -> &'static str {
         match self {
             Source::Biomass => "em-biomass",
@@ -232,7 +193,6 @@ mod tests {
             Some(Source::BatteryStorage)
         );
         assert_eq!(Source::from_api_key("fusion"), None);
-        assert_eq!(Source::Solar.color(), Color::hex(0xFFC700));
         assert_eq!(Source::Coal.icon(), "em-coal");
         for s in Source::ALL {
             assert_eq!(Source::ALL[s.index()], s);
@@ -272,17 +232,10 @@ mod tests {
     }
 
     #[test]
-    fn price_level_words_colours_and_order() {
-        let words: Vec<&str> = PriceLevel::ALL.iter().map(|l| l.word()).collect();
-        assert_eq!(words, ["V.CHEAP", "CHEAP", "NORMAL", "PRICEY", "V.PRICEY"]);
+    fn price_level_order() {
         for (i, l) in PriceLevel::ALL.iter().enumerate() {
             assert_eq!(l.index(), i);
         }
-        assert_eq!(PriceLevel::VeryCheap.color(), GREEN);
-        assert_eq!(PriceLevel::Normal.color(), AMBER);
-        assert_eq!(PriceLevel::VeryPricey.color(), RED);
-        assert_eq!(PriceLevel::Cheap.color(), GREEN.mix(AMBER, 0.5));
-        assert_eq!(PriceLevel::Pricey.color(), AMBER.mix(RED, 0.5));
     }
 
     #[test]

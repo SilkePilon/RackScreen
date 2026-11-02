@@ -126,8 +126,8 @@ fn clips() -> Vec<Clip> {
                     (6.0, Step::Cmd(FakeCmd::AppToggle)),
                 ],
                 Role::Face => vec![
-                    (1.0, Step::Cmd(FakeCmd::PodCrashed)),
-                    (4.5, Step::Cmd(FakeCmd::GithubStar)),
+                    (1.5, Step::Cmd(FakeCmd::NodeDown)),
+                    (5.0, Step::Cmd(FakeCmd::NodeUp)),
                 ],
                 _ => Vec::new(),
             };

@@ -127,7 +127,7 @@ fn all_roles_idle() {
     for role in CLASSIC {
         let mut px = new_pixmap();
         r.render(&m.scene_for_role(role, 5.0, &mut ScreenUi::new()), &mut px);
-        check(&format!("idle_{}", role.icon()), &px);
+        check(&format!("idle_{}", role.name()), &px);
     }
 }
 
@@ -153,26 +153,6 @@ fn connecting_and_no_data() {
         &mut px2,
     );
     check("no_data", &px2);
-}
-
-#[test]
-fn pod_crash_splash_mid_swap() {
-    let mut m = ready_model();
-    m.apply(
-        Event::PodCrashed {
-            ns: "a".into(),
-            name: "b".into(),
-        },
-        5.0,
-    );
-    m.tick(5.0);
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene(Role::Pods.index(), 5.35, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("pods_splash", &px);
 }
 
 #[test]
@@ -219,50 +199,6 @@ fn torrent_mode() {
 
 /// The outer ring unwinding after its torrent finished, with the other two
 /// holding their slots until it is gone.
-#[test]
-fn torrent_unwind() {
-    let mut m = ready_model();
-    m.apply(
-        Event::Link {
-            target: LinkTarget::QBittorrent,
-            up: true,
-        },
-        0.0,
-    );
-    let rest = vec![
-        Torrent {
-            name: "b".into(),
-            progress: 41.0,
-            eta_secs: 3000,
-            speed_bps: 3_000_000,
-        },
-        Torrent {
-            name: "c".into(),
-            progress: 12.0,
-            eta_secs: 9000,
-            speed_bps: 1_000_000,
-        },
-    ];
-    let mut all = vec![Torrent {
-        name: "a".into(),
-        progress: 78.0,
-        eta_secs: 900,
-        speed_bps: 9_000_000,
-    }];
-    all.extend(rest.iter().cloned());
-    m.apply(Event::Torrents(all), 0.0);
-    m.tick(1.0);
-    m.apply(Event::Torrents(rest), 1.0);
-    m.tick(1.3);
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(
-        &m.scene_for_role(Role::Health, 1.3, &mut ScreenUi::new()),
-        &mut px,
-    );
-    check("torrent_unwind", &px);
-}
-
 fn temps_model() -> Model {
     let mut m = ready_model();
     m.apply(
@@ -635,33 +571,10 @@ fn iris_mid_transition() {
     }
     let s = m.scene(0, 3.25, &mut ScreenUi::new());
     assert!(s.zoom < 0.5 && s.zoom > 0.1, "zoom {}", s.zoom);
-    assert!(s.ring_reveal < 1.0, "reveal {}", s.ring_reveal);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
     r.render(&s, &mut px);
     check("iris_mid", &px);
-}
-
-#[test]
-fn sweep_hold() {
-    let mut m = ready_model();
-    m.apply(
-        Event::NodeReady {
-            name: "n".into(),
-            ready: false,
-        },
-        5.0,
-    );
-    m.tick(5.0);
-    let mut r = Renderer::new().unwrap();
-    let mut px = new_pixmap();
-    r.render(&m.scene(3, 6.0, &mut ScreenUi::new()), &mut px);
-    let (red, g, b) = pixel(&px, 120, 18);
-    assert!(
-        red > 140 && g < 120 && b < 120,
-        "red ring at 60% pulse alpha, got {red},{g},{b}"
-    );
-    check("sweep_hold", &px);
 }
 
 fn tick_until(m: &mut Model, from: f64, to: f64) {

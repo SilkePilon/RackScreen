@@ -317,8 +317,6 @@ pub enum Event {
         target: LinkTarget,
         up: bool,
     },
-    /// Replay the boot animation (simulator key `b`, and on startup).
-    Boot,
     /// Simulator override: Some(true) forces night, Some(false) forces day, None back to clock.
     ForceNight(Option<bool>),
 }

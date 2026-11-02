@@ -7,5 +7,6 @@ pub mod ring;
 pub mod roles;
 pub mod roll;
 pub mod screen;
+pub mod status;
 pub mod text;
 pub mod ui;

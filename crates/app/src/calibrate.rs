@@ -1,50 +1,52 @@
 //! The calibration test pattern: unmistakable up, number, and a corner dot for mirroring.
 
-use rackscreen_core::scene::{Drawable, Scene, SegState};
-use rackscreen_core::theme::layout::{BADGE_CY, CX, CY, RING_R, SEG_N};
-use rackscreen_core::theme::{Role, AMBER, BADGE_FILL, WHITE};
+use rackscreen_core::p2::font::FontId;
+use rackscreen_core::p2::text::{middle_baseline, run_centred};
+use rackscreen_core::scene::{Drawable, Scene};
+use rackscreen_core::theme::layout::{CX, CY};
+use rackscreen_core::theme::p2::{AMBER, TEXT};
+use rackscreen_core::theme::Role;
 
-pub fn test_pattern(index: usize, role: Role) -> Scene {
+pub fn test_pattern(index: usize, _role: Role) -> Scene {
     let mut s = Scene::new();
-    s.push(Drawable::Ring {
+    s.push(Drawable::Arc {
         cx: CX,
         cy: CY,
-        radius: RING_R,
-        n: SEG_N,
-        states: vec![SegState::On(role.accent(), 1.0); SEG_N],
-        pitch_deg: 6.0,
+        r: 106.0,
+        width: 9.0,
         start_deg: 0.0,
+        sweep_deg: 360.0,
+        color: AMBER,
+        alpha: 1.0,
     });
     s.push(Drawable::Icon {
         name: "arrow-up",
         cx: CX,
         cy: CY - 14.0,
         size: 120.0,
-        color: WHITE,
+        color: TEXT,
         alpha: 1.0,
         scale: 1.0,
         dy: 0.0,
     });
-    s.push(Drawable::Badge {
-        cx: CX,
-        cy: BADGE_CY + 12.0,
-        w: 40.0,
-        h: 26.0,
-        radius: 7.0,
-        stroke: role.accent(),
-        fill: BADGE_FILL,
-        text: format!("{}", index + 1),
-        text_px: 15.0,
-        text_color: WHITE,
-        alpha: 1.0,
-    });
+    s.push(run_centred(
+        CX,
+        middle_baseline(FontId::Bold, 24.0, 182.0),
+        &format!("{}", index + 1),
+        FontId::Bold,
+        24.0,
+        0.0,
+        TEXT,
+        1.0,
+    ));
     // top-right marker: visible mirror indicator
-    s.push(Drawable::Dots {
+    s.push(Drawable::Ellipse {
         cx: 186.0,
         cy: 54.0,
-        spacing: 0.0,
-        r: 7.0,
-        colors: vec![AMBER],
+        rx: 7.0,
+        ry: 7.0,
+        color: AMBER,
+        alpha: 1.0,
     });
     s
 }
@@ -66,11 +68,10 @@ mod tests {
         assert!(s
             .items
             .iter()
-            .any(|d| matches!(d, Drawable::Badge { text, .. } if text == "3")));
+            .any(|d| matches!(d, Drawable::Run { text, .. } if text == "3")));
         assert!(s
             .items
             .iter()
-            .any(|d| matches!(d, Drawable::Dots { cx, cy, .. } if *cx > 120.0 && *cy < 120.0)));
-        assert_eq!(s.lit_count(), 60);
+            .any(|d| matches!(d, Drawable::Ellipse { cx, cy, .. } if *cx > 120.0 && *cy < 120.0)));
     }
 }

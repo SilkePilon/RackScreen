@@ -1,6 +1,18 @@
 //! Colours and glyphs. Same palette as the panels; ASCII fallback for non-UTF-8 locales.
 
-use rackscreen_core::theme as pal;
+use rackscreen_core::theme as core_theme;
+
+/// The TUI keeps its own palette: the displays moved to the P2 tokens, the
+/// terminal look stays as it was.
+mod pal {
+    pub use super::core_theme::Color;
+    pub const AMBER: Color = Color::hex(0xffb020);
+    pub const VIOLET: Color = Color::hex(0xa78bfa);
+    pub const BLUE: Color = Color::hex(0x4f8dff);
+    pub const GREEN: Color = Color::hex(0x3ddc97);
+    pub const RED: Color = Color::hex(0xff4d4d);
+    pub const GREY: Color = Color::hex(0x888888);
+}
 use ratatui::style::{Color, Modifier, Style};
 
 pub struct Glyphs {

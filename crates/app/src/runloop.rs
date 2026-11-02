@@ -194,7 +194,6 @@ impl RenderLoop {
         model.set_token_present(self.token_present);
         model.set_location_present(self.location_present);
         model.set_github_token_present(self.github_token_present);
-        model.apply(Event::Boot, 0.0);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
         let mut fade_started: Option<Secs> = None;
@@ -233,7 +232,6 @@ impl RenderLoop {
                 for s in &mut self.screens {
                     s.first = true;
                 }
-                model.apply(Event::Boot, now);
                 model.tick(now);
             }
             let fade = if night {

@@ -702,7 +702,7 @@ mod tests {
                     continue;
                 }
                 let i = (y * 240 + x) * 4;
-                if close(d[i], 0xff) && close(d[i + 1], 0xb0) && close(d[i + 2], 0x20) {
+                if close(d[i], 0xf2) && close(d[i + 1], 0xb8) && close(d[i + 2], 0x4b) {
                     sx += x as f64;
                     sy += y as f64;
                     n += 1;

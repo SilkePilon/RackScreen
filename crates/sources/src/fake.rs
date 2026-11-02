@@ -120,7 +120,6 @@ pub enum FakeCmd {
     LinkUp,
     ToggleTorrent,
     ToggleNight,
-    Boot,
     DegradeVolume,
     HealVolume,
     HotTemp,
@@ -148,7 +147,6 @@ impl FakeCmd {
             '8' => FakeCmd::LinkUp,
             't' => FakeCmd::ToggleTorrent,
             'n' => FakeCmd::ToggleNight,
-            'b' => FakeCmd::Boot,
             '9' => FakeCmd::DegradeVolume,
             '0' => FakeCmd::HealVolume,
             'h' => FakeCmd::HotTemp,
@@ -812,7 +810,6 @@ impl FakeState {
                 };
                 vec![Event::ForceNight(self.night)]
             }
-            FakeCmd::Boot => vec![Event::Boot],
             FakeCmd::DegradeVolume => {
                 let Some(v) = self
                     .volumes

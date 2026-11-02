@@ -143,18 +143,18 @@ mod tests {
     }
 
     #[test]
-    fn cpu_icon_is_centred_and_sized() {
+    fn icon_is_centred_and_sized() {
         let c = IconCache::new().unwrap();
         let mut p = Pixmap::new(240, 240).unwrap();
         p.fill(tiny_skia::Color::BLACK);
-        c.draw(&mut p, "cpu", 120.0, 98.0, 72.0, WHITE, 1.0, 1.0, 0.0);
+        c.draw(&mut p, "arrow-up", 120.0, 98.0, 72.0, WHITE, 1.0, 1.0, 0.0);
         let (x0, y0, x1, y1) = lit_bbox(&p).unwrap();
         let cx = (x0 + x1) as f32 / 2.0;
         let cy = (y0 + y1) as f32 / 2.0;
         assert!((cx - 120.0).abs() <= 1.5, "cx {cx}");
         assert!((cy - 98.0).abs() <= 1.5, "cy {cy}");
-        let w = (x1 - x0) as f32;
-        assert!(w > 56.0 && w <= 74.0, "width {w}");
+        let w = (x1 - x0).max(y1 - y0) as f32;
+        assert!(w > 40.0 && w <= 74.0, "size {w}");
     }
 
     #[test]
@@ -182,10 +182,12 @@ mod tests {
         let c = IconCache::new().unwrap();
         let mut a = Pixmap::new(240, 240).unwrap();
         a.fill(tiny_skia::Color::BLACK);
-        c.draw(&mut a, "box", 120.0, 120.0, 72.0, WHITE, 1.0, 1.0, 0.0);
+        c.draw(&mut a, "arrow-up", 120.0, 120.0, 72.0, WHITE, 1.0, 1.0, 0.0);
         let mut b = Pixmap::new(240, 240).unwrap();
         b.fill(tiny_skia::Color::BLACK);
-        c.draw(&mut b, "box", 120.0, 120.0, 72.0, WHITE, 1.0, 1.2, 10.0);
+        c.draw(
+            &mut b, "arrow-up", 120.0, 120.0, 72.0, WHITE, 1.0, 1.2, 10.0,
+        );
         let (ax0, ay0, ax1, _) = lit_bbox(&a).unwrap();
         let (bx0, by0, bx1, _) = lit_bbox(&b).unwrap();
         assert!(bx1 - bx0 > ax1 - ax0, "scaled wider");

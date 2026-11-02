@@ -67,11 +67,10 @@ impl ScreenState {
         self.roles[(self.current + 1) % self.roles.len()]
     }
 
-    /// Advance timers. `busy` = a splash or sweep is active on this screen; the
-    /// transition is postponed while busy.
-    pub fn tick(&mut self, now: Secs, busy: bool) {
+    /// Advance timers and start the next transition once the dwell is over.
+    pub fn tick(&mut self, now: Secs) {
         self.advance(now);
-        if self.ready_to_transition(now, busy) {
+        if self.ready_to_transition(now) {
             self.start_transition(now);
         }
     }
@@ -94,10 +93,9 @@ impl ScreenState {
 
     /// The dwell has elapsed and nothing is in the way, so this screen would
     /// iris now if it were allowed to.
-    pub fn ready_to_transition(&self, now: Secs, busy: bool) -> bool {
+    pub fn ready_to_transition(&self, now: Secs) -> bool {
         self.roles.len() >= 2
             && self.transition_started.is_none()
-            && !busy
             && now - self.since >= self.cycle_secs
     }
 
@@ -128,18 +126,13 @@ impl ScreenState {
     }
 }
 
-/// Zoom (scale about the centre) and ring reveal fraction for a transition instant.
-/// First half: outgoing scene shrinks with ease-in and its ring unlights backwards.
-/// Second half: incoming scene grows with ease-out and its ring lights clockwise.
-pub fn transition_transform(t: f32) -> (f32, f32) {
+/// Scale about the centre for a transition instant: the outgoing scene
+/// shrinks with ease-in over the first half, the incoming grows with ease-out.
+pub fn transition_zoom(t: f32) -> f32 {
     if t < 0.5 {
-        let p = t / 0.5;
-        let e = 1.0 - Easing::OutCubic.apply(1.0 - p); // ease-in
-        (1.0 - e, 1.0 - e)
+        1.0 - (1.0 - Easing::OutCubic.apply(1.0 - t / 0.5))
     } else {
-        let p = (t - 0.5) / 0.5;
-        let e = Easing::OutCubic.apply(p);
-        (e, e)
+        Easing::OutCubic.apply((t - 0.5) / 0.5)
     }
 }
 
@@ -150,7 +143,7 @@ mod tests {
     #[test]
     fn static_screen_never_transitions() {
         let mut s = ScreenState::new(vec![Role::Cpu], 3.0);
-        s.tick(100.0, false);
+        s.tick(100.0);
         assert!(s.transition(100.0).is_none());
         assert_eq!(s.current(), Role::Cpu);
     }
@@ -162,20 +155,18 @@ mod tests {
     }
 
     #[test]
-    fn cycles_after_dwell_and_waits_while_busy() {
+    fn cycles_after_dwell() {
         let mut s = ScreenState::new(vec![Role::Cpu, Role::Thermal], 5.0);
-        s.tick(4.9, false);
+        s.tick(4.9);
         assert!(s.transition(4.9).is_none());
-        s.tick(5.0, true);
-        assert!(s.transition(5.0).is_none(), "busy postpones");
-        s.tick(5.1, false);
+        s.tick(5.1);
         let tr = s.transition(5.2).unwrap();
         assert_eq!((tr.from, tr.to), (Role::Cpu, Role::Thermal));
         assert!(tr.t > 0.0 && tr.t < 0.5);
-        s.tick(5.7, false);
+        s.tick(5.7);
         assert!(s.transition(5.7).is_none());
         assert_eq!(s.current(), Role::Thermal);
-        s.tick(10.8, false);
+        s.tick(10.8);
         assert_eq!(s.transition(10.8).unwrap().to, Role::Cpu, "wraps around");
     }
 
@@ -185,8 +176,8 @@ mod tests {
         let (mut ta, mut tb) = (None, None);
         for i in 0..600 {
             let now = i as f64 / 30.0;
-            a.tick(now, false);
-            b.tick(now, false);
+            a.tick(now);
+            b.tick(now);
             if ta.is_none() && a.transition(now).is_some() {
                 ta = Some(i);
             }
@@ -223,13 +214,12 @@ mod tests {
     }
 
     #[test]
-    fn cycle_floor_and_transform_shape() {
+    fn cycle_floor_and_zoom_shape() {
         let s = ScreenState::new(vec![Role::Cpu, Role::Mem], 1.0);
         assert_eq!(s.cycle_secs, MIN_CYCLE_SECS);
-        assert_eq!(transition_transform(0.0), (1.0, 1.0));
-        let (z, r) = transition_transform(0.49);
-        assert!(z < 0.1 && r < 0.1);
-        assert_eq!(transition_transform(0.5), (0.0, 0.0));
-        assert_eq!(transition_transform(1.0), (1.0, 1.0));
+        assert_eq!(transition_zoom(0.0), 1.0);
+        assert!(transition_zoom(0.49) < 0.1);
+        assert_eq!(transition_zoom(0.5), 0.0);
+        assert_eq!(transition_zoom(1.0), 1.0);
     }
 }

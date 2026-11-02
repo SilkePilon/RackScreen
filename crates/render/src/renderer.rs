@@ -1,21 +1,19 @@
 //! Turns a `Scene` into pixels.
 
 use anyhow::Result;
-use rackscreen_core::scene::{Drawable, Scene, SegState};
+use rackscreen_core::scene::{Drawable, Scene};
 use rackscreen_core::theme::layout::{CX, CY};
-use rackscreen_core::theme::OFF;
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 
 use crate::frame::new_pixmap;
 use crate::icons::IconCache;
 use crate::prims::{
-    arc_points, circle, circle_stroke, ellipse_path, fill, outline, polygon_path, polyline_path,
-    rounded_rect, segment_outline, skia_color, stroke, SegmentCache,
+    arc_points, ellipse_path, fill, polygon_path, polyline_path, rounded_rect, skia_color, stroke,
 };
 use crate::text::TextRenderer;
 
-/// Below this the scene is drawn through the scratch pixmap (zoom) or with
-/// truncated rings (reveal); at 1.0 both are no-ops and skipped.
+/// Below this the scene is drawn through the scratch pixmap and scaled; at 1.0
+/// the zoom is a no-op and skipped.
 const FULL: f32 = 0.999;
 
 pub struct Renderer {
@@ -28,7 +26,6 @@ impl Renderer {
     pub fn new() -> Result<Self> {
         Ok(Self {
             painter: Painter {
-                segs: SegmentCache::new(),
                 icons: IconCache::new()?,
                 text: TextRenderer::new()?,
             },
@@ -38,10 +35,9 @@ impl Renderer {
 
     pub fn render(&mut self, scene: &Scene, px: &mut Pixmap) {
         let zoom = scene.zoom.clamp(0.0, 1.0);
-        let reveal = scene.ring_reveal.clamp(0.0, 1.0);
         if zoom >= FULL {
             for d in &scene.items {
-                self.painter.draw_item(px, d, reveal);
+                self.painter.draw_item(px, d);
             }
             return;
         }
@@ -50,7 +46,7 @@ impl Renderer {
             return;
         }
         for d in &scene.items {
-            self.painter.draw_item(&mut self.scratch, d, reveal);
+            self.painter.draw_item(&mut self.scratch, d);
         }
         let ts = Transform::from_translate(CX, CY)
             .pre_scale(zoom, zoom)
@@ -69,47 +65,15 @@ impl Renderer {
 /// The caches a single drawable needs; separate from `Renderer` so the scratch
 /// pixmap can be borrowed alongside them.
 struct Painter {
-    segs: SegmentCache,
     icons: IconCache,
     text: TextRenderer,
 }
 
 impl Painter {
-    /// Draw one item. Rings show only the first `reveal` fraction of their
-    /// segments lit; the rest are drawn OFF.
-    fn draw_item(&mut self, px: &mut Pixmap, d: &Drawable, reveal: f32) {
+    /// Draw one item.
+    fn draw_item(&mut self, px: &mut Pixmap, d: &Drawable) {
         match d {
             Drawable::Clear(c) => px.fill(skia_color(*c, 1.0)),
-            Drawable::Ring {
-                cx,
-                cy,
-                radius,
-                n,
-                states,
-                pitch_deg,
-                start_deg,
-            } => {
-                let keep = if reveal >= FULL {
-                    states.len()
-                } else {
-                    (states.len() as f32 * reveal).round() as usize
-                };
-                let segs = self
-                    .segs
-                    .segments_pitched(*cx, *cy, *radius, *n, *pitch_deg, *start_deg);
-                for (i, (path, st)) in segs.iter().zip(states).enumerate() {
-                    let st = if i >= keep { &SegState::Off } else { st };
-                    match st {
-                        SegState::Off => fill(px, path, OFF, 1.0),
-                        SegState::On(c, a) => {
-                            if *a < 1.0 {
-                                fill(px, path, OFF, 1.0);
-                            }
-                            fill(px, path, *c, *a);
-                        }
-                    }
-                }
-            }
             Drawable::Icon {
                 name,
                 cx,
@@ -122,84 +86,6 @@ impl Painter {
             } => {
                 self.icons
                     .draw(px, name, *cx, *cy, *size, *color, *alpha, *scale, *dy);
-            }
-            Drawable::Badge {
-                cx,
-                cy,
-                w,
-                h,
-                radius,
-                stroke,
-                fill: fill_c,
-                text,
-                text_px,
-                text_color,
-                alpha,
-            } => {
-                let rr = rounded_rect(cx - w / 2.0, cy - h / 2.0, *w, *h, *radius);
-                fill(px, &rr, *fill_c, *alpha);
-                if let Some(border) = outline(&rr, 2.0) {
-                    fill(px, &border, *stroke, *alpha);
-                }
-                self.text
-                    .draw_centered(px, text, *text_px, *cx, *cy, *text_color, *alpha);
-            }
-            Drawable::Ripple {
-                cx,
-                cy,
-                r,
-                thickness,
-                color,
-                alpha,
-            } => {
-                if let Some(ring) = circle_stroke(*cx, *cy, *r, *thickness) {
-                    fill(px, &ring, *color, *alpha);
-                }
-            }
-            Drawable::Dots {
-                cx,
-                cy,
-                spacing,
-                r,
-                colors,
-            } => {
-                let n = colors.len();
-                if n == 0 {
-                    return;
-                }
-                let x0 = cx - (n as f32 - 1.0) * spacing / 2.0;
-                for (i, c) in colors.iter().enumerate() {
-                    let a = c.a as f32 / 255.0;
-                    let solid = rackscreen_core::theme::Color { a: 255, ..*c };
-                    fill(px, &circle(x0 + i as f32 * spacing, *cy, *r), solid, a);
-                }
-            }
-            // A radial tick: `segment_outline` centres a line of length
-            // `r1 - r0` on the midpoint radius, so it covers r0..r1 plus the
-            // round cap's `width / 2` at each end, exactly like a ring segment.
-            Drawable::Tick {
-                cx,
-                cy,
-                angle_deg,
-                r0,
-                r1,
-                width,
-                color,
-                alpha,
-            } => {
-                let path = segment_outline(*cx, *cy, (r0 + r1) / 2.0, *angle_deg, r1 - r0, *width);
-                fill(px, &path, *color, *alpha);
-            }
-            Drawable::Text {
-                cx,
-                cy,
-                text,
-                px: text_px,
-                color,
-                alpha,
-            } => {
-                self.text
-                    .draw_centered(px, text, *text_px, *cx, *cy, *color, *alpha);
             }
             Drawable::Arc {
                 cx,
@@ -377,52 +263,6 @@ mod tests {
         assert_eq!(lit, 0, "zoom 0 draws nothing but black");
     }
 
-    #[test]
-    fn tick_spans_r0_to_r1() {
-        let mut r = Renderer::new().unwrap();
-        let mut px = new_pixmap();
-        let mut s = Scene::new();
-        s.push(Drawable::Tick {
-            cx: CX,
-            cy: CY,
-            angle_deg: 0.0,
-            r0: 80.0,
-            r1: 88.0,
-            width: 4.0,
-            color: rackscreen_core::theme::WHITE,
-            alpha: 1.0,
-        });
-        r.render(&s, &mut px);
-        assert!(pixel(&px, 120, 36).0 > 200, "r = 84, inside r0..r1");
-        assert_eq!(pixel(&px, 120, 26), (0, 0, 0), "r = 94, past r1 + cap");
-        assert_eq!(pixel(&px, 120, 48), (0, 0, 0), "r = 72, short of r0 - cap");
-    }
-
-    #[test]
-    fn text_draws_centred_glyphs() {
-        use rackscreen_core::scene::{Drawable, Scene};
-        use rackscreen_core::theme::layout::{CX, CY};
-        use rackscreen_core::theme::WHITE;
-        let mut r = Renderer::new().unwrap();
-        let mut px = Pixmap::new(240, 240).unwrap();
-        let mut s = Scene::new();
-        s.push(Drawable::Text {
-            cx: CX,
-            cy: CY,
-            text: "0.171".into(),
-            px: 40.0,
-            color: WHITE,
-            alpha: 1.0,
-        });
-        r.render(&s, &mut px);
-        let lit = (100..140)
-            .flat_map(|y| (60..180).map(move |x| (x, y)))
-            .filter(|&(x, y)| pixel(&px, x, y) != (0, 0, 0))
-            .count();
-        assert!(lit > 200, "glyph pixels in the centre band: {lit}");
-        assert_eq!(pixel(&px, 120, 20), (0, 0, 0), "nothing above the text");
-        assert_eq!(pixel(&px, 120, 220), (0, 0, 0), "nothing below the text");
-    }
     use rackscreen_core::p2::font::FontId;
     use rackscreen_core::theme::WHITE;
 
