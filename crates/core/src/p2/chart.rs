@@ -280,13 +280,22 @@ pub fn card_drawables(
                 .map(|(v, _, _)| v.chars().count())
                 .max()
                 .unwrap_or(0);
-            let vpx = if n >= 3 {
+            let mut vpx = if n >= 3 {
                 11.5
             } else if longest > 5 {
                 12.5
             } else {
                 15.0
             };
+            // every value must fit its column with a little air either side
+            let col_w = w / n as f32 - 2.0;
+            while vpx > 9.0
+                && items.iter().any(|(v, _, _)| {
+                    crate::p2::font::measure(FontId::SemiBold, vpx, v, 0.0) > col_w
+                })
+            {
+                vpx -= 0.5;
+            }
             for (i, (v, l, c)) in items.iter().enumerate() {
                 let cx = x + w * (i as f32 + 0.5) / n as f32;
                 let vy = y + h * 0.32;

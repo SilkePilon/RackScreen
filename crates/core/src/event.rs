@@ -45,6 +45,20 @@ pub enum MoonPhase {
 }
 
 impl MoonPhase {
+    /// The P2 pill text.
+    pub fn name(self) -> &'static str {
+        match self {
+            MoonPhase::New => "New moon",
+            MoonPhase::WaxingCrescent => "Waxing crescent",
+            MoonPhase::FirstQuarter => "First quarter",
+            MoonPhase::WaxingGibbous => "Waxing gibbous",
+            MoonPhase::Full => "Full moon",
+            MoonPhase::WaningGibbous => "Waning gibbous",
+            MoonPhase::LastQuarter => "Last quarter",
+            MoonPhase::WaningCrescent => "Waning crescent",
+        }
+    }
+
     /// Short badge text.
     pub fn label(self) -> &'static str {
         match self {

@@ -27,7 +27,15 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Carbon => energy::carbon(model, now),
         Role::GhActivity => github::github(model, now),
         Role::Thermal => system::thermal(model, now),
-        _ => return None,
+        Role::Net => system::net(model, now),
+        Role::Ups => system::ups(model, now),
+        Role::Wind => system::wind(model, now),
+        Role::Rain => system::rain(model, now),
+        Role::Aqi => system::aqi(model, now),
+        Role::Sun => system::sun(model, now),
+        Role::Moon => system::moon(model, now),
+        Role::Renewable => system::renewable(model, now),
+        Role::PowerMix | Role::Face => return None,
     })
 }
 
