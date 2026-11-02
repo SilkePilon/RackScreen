@@ -4,6 +4,7 @@ pub mod cluster;
 pub mod energy;
 pub mod github;
 pub mod power_mix;
+pub mod rack;
 pub mod sky;
 pub mod system;
 
@@ -36,15 +37,13 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Sun => system::sun(model, now),
         Role::Moon => system::moon(model, now),
         Role::Renewable => system::renewable(model, now),
-        Role::Media
-        | Role::Traffic
-        | Role::Restarts
-        | Role::Uptime
-        | Role::Fans
-        | Role::Mains
-        | Role::Load
-        | Role::Ci
-        | Role::Jellyfin => return None, // builders arrive with their data (Tasks 4–7)
+        Role::Traffic => rack::traffic(model, now),
+        Role::Restarts => rack::restarts(model, now),
+        Role::Uptime => rack::uptime(model, now),
+        Role::Fans => rack::fans(model, now),
+        Role::Mains => rack::mains(model, now),
+        Role::Load => rack::load(model, now),
+        Role::Media | Role::Ci | Role::Jellyfin => return None, // Tasks 5–7
         Role::PowerMix | Role::Face => return None,
     })
 }

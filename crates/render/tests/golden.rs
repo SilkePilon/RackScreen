@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent,
+    App, AppHealth, AppSync, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
 };
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::mood::Mood;
@@ -336,6 +336,127 @@ fn full_model() -> Model {
     m.apply(
         Event::AppSynced {
             name: "grafana".into(),
+        },
+        0.0,
+    );
+    let nodes = [
+        "hp-elitedesk-800-g5-i7",
+        "hp-elitedesk-800-g6-i5",
+        "hp-elitedesk-800-g6-i7",
+        "raspberrypi-5-16gb-1",
+        "raspberrypi-5-8gb-1",
+        "raspberrypi-5-8gb-2",
+        "raspberrypi-5-8gb-3",
+    ];
+    m.apply(
+        Event::TrafficHistory {
+            req_per_sec: (0..31)
+                .map(|i| (3.2 + 1.6 * ((i as f32) * 0.4).sin()).max(0.0))
+                .collect(),
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Traffic {
+            req_per_sec: 4.1,
+            top: vec![
+                ("n8n".into(), 1.9),
+                ("portfolio".into(), 1.1),
+                ("grafana".into(), 0.6),
+            ],
+            service_rps: 4.0,
+            error_share: 0.0,
+        },
+        0.0,
+    );
+    let hour = UNIX.div_euclid(3600);
+    m.apply(
+        Event::RestartsHistory {
+            hourly: (0..24)
+                .map(|i| {
+                    (
+                        hour - 23 + i,
+                        [
+                            0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 7.0, 9.0, 11.0, 6.0, 3.0,
+                            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                        ][i as usize],
+                    )
+                })
+                .collect(),
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Restarts {
+            total_24h: 41,
+            worst: Some(("n8n-worker".into(), 33)),
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Uptime(
+            [79.6, 79.6, 79.6, 82.1, 41.0, 3.4, 4.4]
+                .iter()
+                .zip(nodes)
+                .map(|(d, n)| (n.to_string(), d * 86_400.0))
+                .collect(),
+        ),
+        0.0,
+    );
+    m.apply(
+        Event::Fans(
+            [4885.0, 4538.0, 6059.0, 5104.0]
+                .iter()
+                .zip(&nodes[3..])
+                .map(|(r, n)| (n.to_string(), *r))
+                .collect(),
+        ),
+        0.0,
+    );
+    m.apply(
+        Event::MainsHistory {
+            hourly: (0..24)
+                .map(|i| (hour - 23 + i, 233.0 + 2.0 * ((i as f32) / 3.0).sin()))
+                .collect(),
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Mains {
+            volts: 234.0,
+            ups_load_pct: 7.0,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Load(
+            [
+                (0.81, 8),
+                (0.02, 12),
+                (0.12, 16),
+                (0.22, 4),
+                (0.13, 4),
+                (3.1, 4),
+                (1.02, 4),
+            ]
+            .iter()
+            .zip(nodes)
+            .map(|((l1, cores), n)| NodeLoad {
+                node: n.to_string(),
+                load1: *l1,
+                load5: l1 * 0.85,
+                load15: l1 * 0.7,
+                cores: *cores,
+            })
+            .collect(),
+        ),
+        0.0,
+    );
+    m.apply(
+        Event::MediaLibrary {
+            movies: 37,
+            series: 30,
+            artists: 54,
         },
         0.0,
     );
@@ -700,4 +821,85 @@ fn p2_sample_download_and_lines() {
     let mut ui = ScreenUi::new();
     r.render(&compose(&j, &mut ui, 3.0), &mut px);
     check("p2_sample_lines", &px);
+}
+
+#[test]
+fn rack_roles_warning_states() {
+    let mut m = full_model();
+    let hour = UNIX.div_euclid(3600);
+    m.apply(
+        Event::Traffic {
+            req_per_sec: 12.4,
+            top: vec![
+                ("n8n".into(), 9.0),
+                ("portfolio".into(), 2.0),
+                ("grafana".into(), 1.0),
+            ],
+            service_rps: 12.0,
+            error_share: 0.06,
+        },
+        0.0,
+    );
+    m.apply(
+        Event::RestartsHistory {
+            hourly: (0..24)
+                .map(|i| (hour - 23 + i, if i >= 20 { 8.0 } else { 0.0 }))
+                .collect(),
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Restarts {
+            total_24h: 32,
+            worst: Some(("signal-cli".into(), 32)),
+        },
+        0.0,
+    );
+    m.apply(
+        Event::Uptime(vec![
+            ("hp-elitedesk-800-g5-i7".into(), 79.6 * 86_400.0),
+            ("raspberrypi-5-8gb-2".into(), 9.0 * 3600.0),
+            ("raspberrypi-5-8gb-3".into(), 4.4 * 86_400.0),
+        ]),
+        0.0,
+    );
+    m.apply(
+        Event::Fans(vec![
+            ("raspberrypi-5-8gb-3".into(), 7420.0),
+            ("raspberrypi-5-8gb-1".into(), 5100.0),
+        ]),
+        0.0,
+    );
+    m.apply(
+        Event::Mains {
+            volts: 212.0,
+            ups_load_pct: 7.0,
+        },
+        0.0,
+    );
+    let mut load = m.load().nodes.clone();
+    load[5].load1 = 3.9;
+    m.apply(Event::Load(load), 0.0);
+    m.tick(0.0);
+    for role in [
+        Role::Traffic,
+        Role::Restarts,
+        Role::Uptime,
+        Role::Fans,
+        Role::Mains,
+        Role::Load,
+    ] {
+        check(
+            &format!("p2_{}_warn", role.name()),
+            &render(&m, role, 120.0),
+        );
+    }
+    let mut e = full_model();
+    e.apply(
+        Event::NoExporter {
+            role: Role::Traffic,
+        },
+        0.0,
+    );
+    check("p2_traffic_noexporter", &render(&e, Role::Traffic, 120.0));
 }

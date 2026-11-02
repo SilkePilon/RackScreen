@@ -33,15 +33,13 @@ impl crate::model::Model {
             Role::Rain => !(link.rain && self.rain().have),
             Role::Sun | Role::Moon => !self.sky().have,
             Role::Iss => !self.iss().have,
-            Role::Media
-            | Role::Traffic
-            | Role::Restarts
-            | Role::Uptime
-            | Role::Fans
-            | Role::Mains
-            | Role::Load
-            | Role::Ci
-            | Role::Jellyfin => true,
+            Role::Traffic => !(link.prom && self.traffic().have),
+            Role::Restarts => !(link.prom && self.restarts().have),
+            Role::Uptime => !(link.prom && self.uptime().have),
+            Role::Fans => !(link.prom && self.fans().have),
+            Role::Mains => !(link.prom && self.mains().have),
+            Role::Load => !(link.prom && self.load().have),
+            Role::Media | Role::Ci | Role::Jellyfin => true,
         }
     }
 
