@@ -24,7 +24,7 @@
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a curved title in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles with a zoom transition. Sixteen roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and today's electricity price on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a curved title in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, sliding the next one up from below. Sixteen roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and today's electricity price on the next.
 
 ## Screens
 
@@ -148,7 +148,7 @@ Every screen shows one or more **roles** and cycles through them. Thirty-one rol
 
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`), `m` mixed (each screen alternates a cluster role with an electricity one) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
-Only one screen irises at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
+Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
 
 In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade down and back up on their own.
 
@@ -290,7 +290,7 @@ display:
   brightness: 1.0
   fps: 30
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
-  one_at_a_time: true      # one screen irises at a time, in random order (kinder to the SPI bus)
+  one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
@@ -316,7 +316,7 @@ screens:
 - **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
 - **`media`** — see [Media role](#media-role).
 - **`jellyfin`** — see [Jellyfin role](#jellyfin-role).
-- **`display`** — global brightness, frame rate, the SPI write chunk and whether screens iris one at a time.
+- **`display`** — global brightness, frame rate, the SPI write chunk and whether screens change one at a time.
 - **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
 
 ## Wiring

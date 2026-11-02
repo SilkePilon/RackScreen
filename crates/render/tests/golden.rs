@@ -796,7 +796,7 @@ fn face_moods() {
 }
 
 #[test]
-fn iris_mid_transition() {
+fn slide_mid_transition() {
     let mut m = full_model();
     m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
     let mut t = 0.0;
@@ -805,12 +805,12 @@ fn iris_mid_transition() {
         t += 1.0 / 30.0;
     }
     let mut ui = ScreenUi::new();
-    let s = m.scene(0, 3.25, &mut ui);
-    assert!(s.zoom < 0.5 && s.zoom > 0.1, "zoom {}", s.zoom);
+    let s = m.scene(0, 3.4, &mut ui);
+    assert!(s.slide.is_some(), "mid slide");
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
     r.render(&s, &mut px);
-    check("iris_mid", &px);
+    check("slide_mid", &px);
 }
 
 #[test]

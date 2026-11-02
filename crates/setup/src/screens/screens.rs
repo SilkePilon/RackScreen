@@ -49,7 +49,7 @@ pub struct Editor {
     rows: Vec<(Vec<Role>, u64)>,
     pub selected: usize,
     picker: Option<Picker>,
-    /// `display.one_at_a_time`: only one screen irises at a time.
+    /// `display.one_at_a_time`: only one screen changes at a time.
     one_at_a_time: bool,
 }
 

@@ -585,7 +585,7 @@ pub const FIELDS: [FieldSpec; 59] = [
         "Panels",
         "one at a time",
         Bool,
-        "Only one screen irises at a time.",
+        "Only one screen changes at a time.",
     ),
     spec(
         Field::NightEnabled,

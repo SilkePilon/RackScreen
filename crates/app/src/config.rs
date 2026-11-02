@@ -94,7 +94,7 @@ pub struct DisplayCfg {
     pub brightness: f32,
     pub fps: u32,
     pub spi_chunk: usize,
-    /// Let only one screen run its iris transition at a time, in random order.
+    /// Let only one screen slide to its next role at a time, in random order.
     pub one_at_a_time: bool,
 }
 
