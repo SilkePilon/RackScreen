@@ -182,6 +182,35 @@ impl Role {
         Role::ALL.get(i).copied()
     }
     /// Config identifier.
+    /// The curved title in the P2 look (upper case); `weather` and `sun` show
+    /// a live title instead and use this one only while waiting for data.
+    pub fn title(self) -> &'static str {
+        match self {
+            Role::Cpu => "CPU",
+            Role::Mem => "MEMORY",
+            Role::Pods => "PODS",
+            Role::Health => "CLUSTER",
+            Role::Thermal => "THERMAL",
+            Role::Storage => "STORAGE",
+            Role::PowerMix => "POWER MIX",
+            Role::Price => "ELECTRICITY",
+            Role::Carbon => "CARBON",
+            Role::Renewable => "RENEWABLE",
+            Role::GhActivity => "CONTRIBUTIONS",
+            Role::Weather => "WEATHER",
+            Role::Wind => "WIND",
+            Role::Aqi => "AIR QUALITY",
+            Role::Rain => "RAIN",
+            Role::Sun => "SUN",
+            Role::Moon => "MOON",
+            Role::Iss => "ISS PASS IN",
+            Role::Ups => "UPS",
+            Role::Net => "NETWORK",
+            Role::Deploys => "DEPLOYS TODAY",
+            Role::Face => "FACE",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Role::Cpu => "cpu",
@@ -293,6 +322,32 @@ impl Role {
             Role::Face => "smile",
         }
     }
+}
+
+/// The P2 "Tiles" palette.
+pub mod p2 {
+    use super::Color;
+    pub const BG: Color = Color::hex(0x000000);
+    pub const TEXT: Color = Color::hex(0xEDEDEF);
+    pub const TEXT2: Color = Color::hex(0x8E8E93);
+    pub const TEXT3: Color = Color::hex(0x4A4A4F);
+    pub const TRACK: Color = Color::hex(0x17171A);
+    pub const CARD: Color = Color::hex(0x121214);
+    pub const OK: Color = Color::hex(0x5BD18B);
+    pub const WARN: Color = Color::hex(0xF2B84B);
+    pub const CRIT: Color = Color::hex(0xF0605D);
+    pub const BLUE: Color = Color::hex(0x6EA8FE);
+    pub const VIOLET: Color = Color::hex(0xA48BFA);
+    pub const TEAL: Color = Color::hex(0x5CC8C3);
+    pub const INDIGO: Color = Color::hex(0x8C9CFF);
+    pub const CYAN: Color = Color::hex(0x67D1EE);
+    pub const AMBER: Color = Color::hex(0xF2B84B);
+    pub const GREEN: Color = Color::hex(0x4CC38A);
+    /// The dark half of the sun ring.
+    pub const NIGHT: Color = Color::hex(0x2A2A33);
+    pub const MOON: Color = Color::hex(0xD6D6E0);
+    /// Capsule icon and text on the power-mix ring.
+    pub const INK: Color = Color::hex(0x0B0B0C);
 }
 
 pub mod layout {
@@ -450,6 +505,19 @@ mod tests {
         assert_eq!(Role::parse("nope"), None);
         for r in Role::ALL {
             assert_eq!(Role::parse(r.name()), Some(r));
+        }
+    }
+    #[test]
+    fn p2_tokens_and_titles() {
+        assert_eq!(p2::TEXT, Color::hex(0xEDEDEF));
+        assert_eq!(p2::TRACK, Color::hex(0x17171A));
+        assert_eq!(p2::WARN, p2::AMBER);
+        assert_eq!(Role::Health.title(), "CLUSTER");
+        assert_eq!(Role::Deploys.title(), "DEPLOYS TODAY");
+        assert_eq!(Role::GhActivity.title(), "CONTRIBUTIONS");
+        for r in Role::ALL {
+            assert!(!r.title().is_empty());
+            assert_eq!(r.title(), r.title().to_uppercase());
         }
     }
 }
