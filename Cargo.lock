@@ -2566,6 +2566,9 @@ dependencies = [
 [[package]]
 name = "rackscreen-core"
 version = "0.6.0"
+dependencies = [
+ "fontdue",
+]
 
 [[package]]
 name = "rackscreen-display"

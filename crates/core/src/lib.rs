@@ -11,6 +11,7 @@ pub mod fx;
 pub mod model;
 pub mod mood;
 pub mod night;
+pub mod p2;
 pub mod scene;
 pub mod scene_deploys;
 pub mod scene_electricity;

@@ -14,6 +14,15 @@ pub enum SegState {
     On(Color, f32),
 }
 
+/// An axis-aligned clip in screen pixels for text runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Drawable {
     Clear(Color),
