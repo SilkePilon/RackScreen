@@ -13,6 +13,28 @@ pub enum PriceLevel {
 }
 
 impl PriceLevel {
+    /// The P2 pill text.
+    pub fn name(self) -> &'static str {
+        match self {
+            PriceLevel::VeryCheap => "Very cheap",
+            PriceLevel::Cheap => "Cheap",
+            PriceLevel::Normal => "Normal",
+            PriceLevel::Pricey => "Pricey",
+            PriceLevel::VeryPricey => "Very pricey",
+        }
+    }
+
+    /// The P2 band colour, green through yellow to red.
+    pub fn p2_color(self) -> Color {
+        Color::hex(match self {
+            PriceLevel::VeryCheap => 0x45D6A4,
+            PriceLevel::Cheap => 0x7CCF8E,
+            PriceLevel::Normal => 0xD9CB6C,
+            PriceLevel::Pricey => 0xF2A65A,
+            PriceLevel::VeryPricey => 0xF0605D,
+        })
+    }
+
     pub const ALL: [PriceLevel; 5] = [
         PriceLevel::VeryCheap,
         PriceLevel::Cheap,
@@ -403,5 +425,19 @@ mod tests {
         }
         assert_eq!(energy_charts_zone_for("XX"), None);
         assert_eq!(energy_charts_zone_for(""), None);
+    }
+    #[test]
+    fn p2_level_names_and_colours() {
+        assert_eq!(PriceLevel::VeryCheap.name(), "Very cheap");
+        assert_eq!(PriceLevel::VeryPricey.name(), "Very pricey");
+        assert_eq!(PriceLevel::Normal.p2_color(), Color::hex(0xD9CB6C));
+        let colours: std::collections::HashSet<u32> = PriceLevel::ALL
+            .iter()
+            .map(|l| {
+                let c = l.p2_color();
+                ((c.r as u32) << 16) | ((c.g as u32) << 8) | c.b as u32
+            })
+            .collect();
+        assert_eq!(colours.len(), 5);
     }
 }

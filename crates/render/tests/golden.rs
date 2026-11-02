@@ -322,12 +322,6 @@ fn thermal_idle() {
         &m.scene_for_role(Role::Thermal, 2.5, &mut ScreenUi::new()),
         &mut px,
     );
-    // 68 °C is deep in the amber-to-red half of the ramp
-    let (red, g, b) = pixel(&px, 120, 18);
-    assert!(
-        red > 200 && g < 160 && b < 100,
-        "segment 0 hot, got {red},{g},{b}"
-    );
     check("thermal", &px);
 }
 
@@ -620,11 +614,6 @@ fn ups_on_battery_and_iss_during_pass() {
         &mut px,
     );
     check("iss_pass", &px);
-    let (red, g, b) = pixel(&px, 120, 18);
-    assert!(
-        red > 120 && b > 200 && g < 200,
-        "violet ring during the pass, got {red},{g},{b}"
-    );
 }
 
 #[test]

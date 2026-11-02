@@ -1,6 +1,10 @@
 //! Role builders: `Model` → `P2Screen`, plain data the composer draws.
 
 pub mod cluster;
+pub mod energy;
+pub mod github;
+pub mod sky;
+pub mod system;
 
 use crate::anim::Secs;
 use crate::model::Model;
@@ -17,6 +21,12 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Pods => cluster::pods(model, now),
         Role::Health => cluster::health(model, now),
         Role::Deploys => cluster::deploys(model, now),
+        Role::Weather => sky::weather(model, now),
+        Role::Iss => sky::iss(model, now),
+        Role::Price => energy::price(model, now),
+        Role::Carbon => energy::carbon(model, now),
+        Role::GhActivity => github::github(model, now),
+        Role::Thermal => system::thermal(model, now),
         _ => return None,
     })
 }

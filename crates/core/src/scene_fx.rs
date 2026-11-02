@@ -517,7 +517,7 @@ mod tests {
         assert!(
             live.items
                 .iter()
-                .any(|d| matches!(d, Drawable::Text { text, .. } if text == "€/kWh")),
+                .any(|d| matches!(d, Drawable::Run { text, .. } if text == "€/kWh")),
             "the gauge is up"
         );
         m.apply(link(LinkTarget::Prices, false), 2.0);
@@ -542,10 +542,10 @@ mod tests {
             },
             0.0,
         );
-        assert!(has_icon(
-            &m.scene_for_role(Role::Thermal, 1.0, &mut ScreenUi::new()),
-            "thermometer"
-        ));
+        assert_eq!(
+            title_of(&m.scene_for_role(Role::Thermal, 1.0, &mut ScreenUi::new())).as_deref(),
+            Some("THERMAL")
+        );
         assert_eq!(
             title_of(&m.scene_for_role(Role::Storage, 1.0, &mut ScreenUi::new())).as_deref(),
             Some("STORAGE")
@@ -645,44 +645,6 @@ mod tests {
             &m.scene(1, 1.4, &mut ScreenUi::new()),
             "package-plus"
         ));
-    }
-
-    #[test]
-    fn splash_counter_leaves_textless_badges_alone() {
-        let mut m = ready_model();
-        m.apply(
-            Event::NodeTemps(vec![("n1".into(), 44.0), ("n2".into(), 51.0)]),
-            0.0,
-        );
-        m.set_screens(vec![vec![Role::Thermal]], vec![15.0]);
-        for _ in 0..3 {
-            m.apply(
-                Event::HotTemp {
-                    node: "n2".into(),
-                    celsius: 80.0,
-                },
-                1.0,
-            );
-        }
-        m.tick(1.0);
-        let s = m.scene(0, 1.5, &mut ScreenUi::new());
-        let texts: Vec<String> = s
-            .items
-            .iter()
-            .filter_map(|d| match d {
-                Drawable::Badge { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .collect();
-        assert!(!texts.is_empty());
-        assert!(
-            texts.iter().all(|t| t.is_empty() || t == "+3"),
-            "the dots badge keeps its empty text, got {texts:?}"
-        );
-        assert!(
-            texts.iter().any(|t| t.is_empty()),
-            "thermal dots badge is textless"
-        );
     }
 
     #[test]
