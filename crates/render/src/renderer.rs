@@ -316,6 +316,7 @@ mod tests {
     use super::*;
     use rackscreen_core::event::{Event, LinkTarget};
     use rackscreen_core::model::{Model, Thresholds};
+    use rackscreen_core::p2::ui::ScreenUi;
     use rackscreen_core::theme::Role;
 
     fn pixel(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
@@ -355,7 +356,7 @@ mod tests {
         let m = cpu_model(42.0);
         let mut r = Renderer::new().unwrap();
         let mut px = new_pixmap();
-        let mut s = m.scene_for_role(Role::Cpu, 5.0);
+        let mut s = m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new());
         r.render(&s, &mut px);
         assert!(amberish(pixel(&px, 120, 18)), "segment 0 lit at full scale");
         s.zoom = 0.5;
@@ -385,7 +386,7 @@ mod tests {
         let m = cpu_model(100.0);
         let mut r = Renderer::new().unwrap();
         let mut px = new_pixmap();
-        let mut s = m.scene_for_role(Role::Cpu, 5.0);
+        let mut s = m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new());
         r.render(&s, &mut px);
         assert!(
             amberish(pixel(&px, 120, 222)),

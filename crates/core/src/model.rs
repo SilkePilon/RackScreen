@@ -1337,6 +1337,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::p2::ui::ScreenUi;
 
     fn metrics(cpu: f32, hot: Option<(&str, f32)>) -> Event {
         Event::Metrics {
@@ -2400,11 +2401,11 @@ mod tests {
         );
         // the link-down act plays first; the connecting scene only takes over
         // once it is over
-        let hello = m.scene(0, 1.0);
+        let hello = m.scene(0, 1.0, &mut ScreenUi::new());
         assert_ne!(hello, crate::scene::connecting_scene(1.0));
         assert_eq!(hello.items.len(), 49, "the face dot matrix");
         assert_ne!(
-            m.scene_for_role(Role::Face, 1.0),
+            m.scene_for_role(Role::Face, 1.0, &mut ScreenUi::new()),
             crate::scene::connecting_scene(1.0)
         );
         let mut t = 1.0;
@@ -2413,7 +2414,7 @@ mod tests {
             t += 0.1;
         }
         assert_eq!(
-            m.scene(0, 4.9),
+            m.scene(0, 4.9, &mut ScreenUi::new()),
             crate::scene::connecting_scene(4.9),
             "the act is over: connecting takes the screen"
         );
@@ -2490,8 +2491,12 @@ mod tests {
             0.0,
         );
         m.tick(1.0);
-        let s = m.scene_for_role(Role::Face, 1.0);
+        let s = m.scene_for_role(Role::Face, 1.0, &mut ScreenUi::new());
         assert_eq!(s.items.len(), 49);
-        assert_eq!(m.scene_for_role(Role::Face, 1.0), s, "pure in `now`");
+        assert_eq!(
+            m.scene_for_role(Role::Face, 1.0, &mut ScreenUi::new()),
+            s,
+            "pure in `now`"
+        );
     }
 }

@@ -3,6 +3,7 @@
 use crate::anim::{pulse, Easing, Secs};
 use crate::face_acts::ActKind;
 use crate::fx::{Splash, Sweep, SweepPhase, SPLASH_SECS};
+use crate::p2::ui::ScreenUi;
 use crate::scene::{connecting_scene, no_data_scene_with, role_scene, Drawable, Scene, SegState};
 use crate::theme::layout::*;
 use crate::theme::{Role, WHITE};
@@ -189,7 +190,8 @@ impl crate::model::Model {
     }
 
     /// Scene for one screen at one instant; the only call the render loop makes.
-    pub fn scene(&self, screen: usize, now: Secs) -> Scene {
+    /// `ui` is that screen's widget state; it resets itself on a role change.
+    pub fn scene(&self, screen: usize, now: Secs, ui: &mut ScreenUi) -> Scene {
         let screens = self.screen_count();
         let state = match self.screen(screen) {
             Some(s) => s,
@@ -211,13 +213,13 @@ impl crate::model::Model {
             let mut s = if self.wants_connecting(shown) {
                 connecting_scene(now)
             } else {
-                self.scene_for_role(shown, now)
+                self.scene_for_role(shown, now, ui)
             };
             s.zoom = zoom;
             s.ring_reveal = reveal;
             return s;
         }
-        let base = self.scene_for_role(role, now);
+        let base = self.scene_for_role(role, now, ui);
         if self.fx().sweeps.active().is_some() {
             return base;
         }
@@ -228,9 +230,9 @@ impl crate::model::Model {
     }
 
     /// Role scene without transition or splash (tests, goldens, calibrate).
-    pub fn scene_for_role(&self, role: Role, now: Secs) -> Scene {
+    pub fn scene_for_role(&self, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
         if !self.needs_data(role) {
-            return role_scene(self, role, now);
+            return role_scene(self, role, now, ui);
         }
         let electricity = matches!(
             role,
@@ -328,7 +330,7 @@ mod tests {
     #[test]
     fn connecting_when_api_down() {
         let m = Model::new(Thresholds::default());
-        let s = m.scene(Role::Cpu.index(), 0.0);
+        let s = m.scene(Role::Cpu.index(), 0.0, &mut ScreenUi::new());
         assert!(icons(&s).iter().any(|(n, ..)| *n == "plug-zap"));
     }
 
@@ -342,9 +344,9 @@ mod tests {
             },
             0.0,
         );
-        let s = m.scene(Role::Cpu.index(), 0.0);
+        let s = m.scene(Role::Cpu.index(), 0.0, &mut ScreenUi::new());
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
-        let s = m.scene(Role::Pods.index(), 0.0);
+        let s = m.scene(Role::Pods.index(), 0.0, &mut ScreenUi::new());
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
     }
 
@@ -359,16 +361,16 @@ mod tests {
             1.0,
         );
         m.tick(1.0);
-        let s = m.scene(Role::Pods.index(), 1.15);
+        let s = m.scene(Role::Pods.index(), 1.15, &mut ScreenUi::new());
         assert!(s.items.iter().any(|d| matches!(d, Drawable::Ripple { .. })));
-        let s = m.scene(Role::Pods.index(), 1.35);
+        let s = m.scene(Role::Pods.index(), 1.35, &mut ScreenUi::new());
         let ic = icons(&s);
         let (_, role_alpha, _) = ic.iter().find(|(n, ..)| *n == "box").unwrap();
         let (_, ev_alpha, ev_scale) = ic.iter().find(|(n, ..)| *n == "package-x").unwrap();
         assert!(*role_alpha < 0.6);
         assert!(*ev_alpha > 0.5);
         assert!(*ev_scale > 1.0, "spring overshoot around 60% of swap");
-        let s = m.scene(Role::Pods.index(), 3.6);
+        let s = m.scene(Role::Pods.index(), 3.6, &mut ScreenUi::new());
         assert!(icons(&s).iter().all(|(n, ..)| *n != "package-x"));
     }
 
@@ -385,7 +387,7 @@ mod tests {
             );
         }
         m.tick(1.0);
-        let s = m.scene(Role::Pods.index(), 1.5);
+        let s = m.scene(Role::Pods.index(), 1.5, &mut ScreenUi::new());
         let text = s.items.iter().find_map(|d| match d {
             Drawable::Badge { text, .. } => Some(text.clone()),
             _ => None,
@@ -411,24 +413,24 @@ mod tests {
             1.0,
         );
         m.tick(1.0);
-        let s = m.scene(Role::Health.index(), 1.1);
+        let s = m.scene(Role::Health.index(), 1.1, &mut ScreenUi::new());
         assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
         assert!(s.lit_count() > 0 && s.lit_count() < 60);
-        let s = m.scene(Role::Cpu.index(), 1.1);
+        let s = m.scene(Role::Cpu.index(), 1.1, &mut ScreenUi::new());
         assert!(
             icons(&s).iter().all(|(n, ..)| *n == "cpu"),
             "cpu not yet reached, shows role, no splash"
         );
-        let s = m.scene(Role::Cpu.index(), 2.0);
+        let s = m.scene(Role::Cpu.index(), 2.0, &mut ScreenUi::new());
         assert_eq!(s.lit_count(), 60);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "server-off"));
-        let s = m.scene(Role::Pods.index(), 2.0);
+        let s = m.scene(Role::Pods.index(), 2.0, &mut ScreenUi::new());
         assert!(icons(&s).iter().all(|(n, ..)| *n != "package-plus"));
         // tick at ~30 Hz like the real loop so the frozen splash is shifted correctly
         for i in 33..=200 {
             m.tick(i as f64 / 33.0);
         }
-        let s = m.scene(Role::Pods.index(), 200.0 / 33.0);
+        let s = m.scene(Role::Pods.index(), 200.0 / 33.0, &mut ScreenUi::new());
         assert!(
             icons(&s).iter().any(|(n, ..)| *n == "package-plus"),
             "splash resumes after sweep"
@@ -443,10 +445,10 @@ mod tests {
             m.tick(i as f64 * 0.033);
         }
         // at 3.3 s: transition started at ~3.0, first half shows cpu shrinking
-        let s = m.scene(0, 3.15);
+        let s = m.scene(0, 3.15, &mut ScreenUi::new());
         assert!(s.zoom < 1.0 && s.zoom > 0.0);
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cpu"));
-        let s = m.scene(0, 3.4);
+        let s = m.scene(0, 3.4, &mut ScreenUi::new());
         assert!(
             icons(&s).iter().any(|(n, ..)| *n == "memory-stick"),
             "second half shows the incoming role"
@@ -457,7 +459,7 @@ mod tests {
         }
         assert_eq!(m.current_role(0), Role::Mem);
         assert!(m.screen(0).unwrap().transition(5.94).is_none());
-        assert_eq!(m.scene(0, 5.94).zoom, 1.0);
+        assert_eq!(m.scene(0, 5.94, &mut ScreenUi::new()).zoom, 1.0);
         // the next cycle (3 s after ~3.53 s) wraps back to cpu
         for i in 181..=200 {
             m.tick(i as f64 * 0.033);
@@ -468,17 +470,17 @@ mod tests {
             .transition(6.6)
             .expect("second cycle started");
         assert_eq!((tr.from, tr.to), (Role::Mem, Role::Cpu));
-        assert!(m.scene(0, 6.6).zoom < 1.0);
+        assert!(m.scene(0, 6.6, &mut ScreenUi::new()).zoom < 1.0);
     }
 
     #[test]
     fn new_roles_show_no_data_and_out_of_range_screen_connects() {
         let mut m = ready_model();
         m.set_screens(vec![vec![Role::Thermal]], vec![15.0]);
-        let s = m.scene(0, 1.0);
+        let s = m.scene(0, 1.0, &mut ScreenUi::new());
         assert!(icons(&s).iter().any(|(n, ..)| *n == "cloud-off"));
         assert_eq!(s.zoom, 1.0);
-        let s = m.scene(7, 1.0);
+        let s = m.scene(7, 1.0, &mut ScreenUi::new());
         assert!(icons(&s).iter().any(|(n, ..)| *n == "plug-zap"));
     }
 
@@ -510,21 +512,24 @@ mod tests {
         m.set_token_present(true);
         m.apply(electricity_event(), 0.0);
         m.apply(link(LinkTarget::Electricity, true), 0.0);
-        let s = m.scene_for_role(Role::PowerMix, 5.0);
+        let s = m.scene_for_role(Role::PowerMix, 5.0, &mut ScreenUi::new());
         assert!(s.lit_count() > 0, "power mix ring lit with the link up");
         assert!(!has_icon(&s, "cloud-off"));
         m.apply(link(LinkTarget::Electricity, false), 6.0);
-        let s = m.scene_for_role(Role::PowerMix, 6.0);
+        let s = m.scene_for_role(Role::PowerMix, 6.0, &mut ScreenUi::new());
         assert!(has_icon(&s, "cloud-off"), "stale mix is not shown as live");
-        assert!(has_icon(&m.scene_for_role(Role::Carbon, 6.0), "cloud-off"));
         assert!(has_icon(
-            &m.scene_for_role(Role::Renewable, 6.0),
+            &m.scene_for_role(Role::Carbon, 6.0, &mut ScreenUi::new()),
+            "cloud-off"
+        ));
+        assert!(has_icon(
+            &m.scene_for_role(Role::Renewable, 6.0, &mut ScreenUi::new()),
             "cloud-off"
         ));
         // without a token the same outage shows the key instead
         m.set_token_present(false);
         assert!(has_icon(
-            &m.scene_for_role(Role::PowerMix, 6.0),
+            &m.scene_for_role(Role::PowerMix, 6.0, &mut ScreenUi::new()),
             "key-round"
         ));
     }
@@ -543,7 +548,7 @@ mod tests {
             0.0,
         );
         m.apply(link(LinkTarget::Prices, true), 0.0);
-        let live = m.scene_for_role(Role::Price, 1.0);
+        let live = m.scene_for_role(Role::Price, 1.0, &mut ScreenUi::new());
         assert!(!has_icon(&live, "cloud-off"));
         assert!(
             live.items
@@ -552,7 +557,10 @@ mod tests {
             "the gauge is up"
         );
         m.apply(link(LinkTarget::Prices, false), 2.0);
-        assert!(has_icon(&m.scene_for_role(Role::Price, 2.0), "cloud-off"));
+        assert!(has_icon(
+            &m.scene_for_role(Role::Price, 2.0, &mut ScreenUi::new()),
+            "cloud-off"
+        ));
     }
 
     #[test]
@@ -571,27 +579,51 @@ mod tests {
             0.0,
         );
         assert!(has_icon(
-            &m.scene_for_role(Role::Thermal, 1.0),
+            &m.scene_for_role(Role::Thermal, 1.0, &mut ScreenUi::new()),
             "thermometer"
         ));
-        assert!(has_icon(&m.scene_for_role(Role::Storage, 1.0), "database"));
+        assert!(has_icon(
+            &m.scene_for_role(Role::Storage, 1.0, &mut ScreenUi::new()),
+            "database"
+        ));
         m.apply(link(LinkTarget::Prometheus, false), 2.0);
-        assert!(has_icon(&m.scene_for_role(Role::Thermal, 2.0), "cloud-off"));
-        assert!(has_icon(&m.scene_for_role(Role::Storage, 2.0), "cloud-off"));
+        assert!(has_icon(
+            &m.scene_for_role(Role::Thermal, 2.0, &mut ScreenUi::new()),
+            "cloud-off"
+        ));
+        assert!(has_icon(
+            &m.scene_for_role(Role::Storage, 2.0, &mut ScreenUi::new()),
+            "cloud-off"
+        ));
     }
 
     #[test]
     fn unconfigured_roles_show_pin_or_key() {
         let m = ready_model();
         let icon = |s: &Scene| icons(s)[0].0;
-        assert_eq!(icon(&m.scene_for_role(Role::Weather, 1.0)), "map-pin");
-        assert_eq!(icon(&m.scene_for_role(Role::GhActivity, 1.0)), "key-round");
-        assert_eq!(icon(&m.scene_for_role(Role::Ups, 1.0)), "cloud-off");
+        assert_eq!(
+            icon(&m.scene_for_role(Role::Weather, 1.0, &mut ScreenUi::new())),
+            "map-pin"
+        );
+        assert_eq!(
+            icon(&m.scene_for_role(Role::GhActivity, 1.0, &mut ScreenUi::new())),
+            "key-round"
+        );
+        assert_eq!(
+            icon(&m.scene_for_role(Role::Ups, 1.0, &mut ScreenUi::new())),
+            "cloud-off"
+        );
         let mut m = ready_model();
         m.set_location_present(true);
         m.set_github_token_present(true);
-        assert_eq!(icon(&m.scene_for_role(Role::Weather, 1.0)), "cloud-off");
-        assert_eq!(icon(&m.scene_for_role(Role::GhActivity, 1.0)), "cloud-off");
+        assert_eq!(
+            icon(&m.scene_for_role(Role::Weather, 1.0, &mut ScreenUi::new())),
+            "cloud-off"
+        );
+        assert_eq!(
+            icon(&m.scene_for_role(Role::GhActivity, 1.0, &mut ScreenUi::new())),
+            "cloud-off"
+        );
     }
 
     #[test]
@@ -602,10 +634,13 @@ mod tests {
         m.apply(electricity_event(), 0.0);
         m.apply(link(LinkTarget::Electricity, true), 0.0);
         assert!(!m.link().api);
-        let s = m.scene(0, 5.0);
+        let s = m.scene(0, 5.0, &mut ScreenUi::new());
         assert!(!has_icon(&s, "plug-zap"), "power mix ignores the API link");
         assert!(s.lit_count() > 0);
-        assert!(has_icon(&m.scene(1, 5.0), "plug-zap"), "cpu still connects");
+        assert!(
+            has_icon(&m.scene(1, 5.0, &mut ScreenUi::new()), "plug-zap"),
+            "cpu still connects"
+        );
     }
 
     #[test]
@@ -618,7 +653,7 @@ mod tests {
         for i in 0..=100 {
             m.tick(i as f64 * 0.033);
         }
-        let s = m.scene(0, 3.4);
+        let s = m.scene(0, 3.4, &mut ScreenUi::new());
         assert!(s.zoom < 1.0, "mid transition");
         assert!(
             has_icon(&s, "plug-zap"),
@@ -638,8 +673,14 @@ mod tests {
             1.0,
         );
         m.tick(1.0);
-        assert!(has_icon(&m.scene(0, 1.4), "package-plus"));
-        assert!(has_icon(&m.scene(1, 1.4), "package-plus"));
+        assert!(has_icon(
+            &m.scene(0, 1.4, &mut ScreenUi::new()),
+            "package-plus"
+        ));
+        assert!(has_icon(
+            &m.scene(1, 1.4, &mut ScreenUi::new()),
+            "package-plus"
+        ));
     }
 
     #[test]
@@ -660,7 +701,7 @@ mod tests {
             );
         }
         m.tick(1.0);
-        let s = m.scene(0, 1.5);
+        let s = m.scene(0, 1.5, &mut ScreenUi::new());
         let texts: Vec<String> = s
             .items
             .iter()

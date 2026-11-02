@@ -1,6 +1,7 @@
 //! The 30 Hz render loop: drain events, advance the model, render four scenes,
 //! orient, diff, hand frames to display threads. Also night mode.
 
+use rackscreen_core::p2::ui::ScreenUi;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -29,6 +30,8 @@ pub struct ScreenSlot {
     pub role: Role,
     pub orient: Orient,
     pub mailbox: Mailbox,
+    /// Rolls, glides and marquees of whatever role this panel is showing.
+    pub ui: ScreenUi,
     cur: Pixmap,
     oriented: Pixmap,
     prev: Pixmap,
@@ -42,6 +45,7 @@ impl ScreenSlot {
             role,
             orient,
             mailbox,
+            ui: ScreenUi::new(),
             cur: new_pixmap(),
             oriented: new_pixmap(),
             prev: new_pixmap(),
@@ -245,7 +249,7 @@ impl RenderLoop {
             };
 
             for s in &mut self.screens {
-                let scene = model.scene(s.index, now);
+                let scene = model.scene(s.index, now, &mut s.ui);
                 renderer.render(&scene, &mut s.cur);
                 if let Some(f) = fade {
                     darken(&mut s.cur, 1.0 - f);

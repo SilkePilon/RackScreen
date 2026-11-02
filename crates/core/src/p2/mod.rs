@@ -5,5 +5,6 @@ pub mod layout;
 pub mod marquee;
 pub mod ring;
 pub mod roll;
+pub mod screen;
 pub mod text;
 pub mod ui;

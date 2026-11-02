@@ -4,6 +4,7 @@ use crate::anim::{breathe, pulse, Secs};
 use crate::format::{fmt_eta, fmt_speed};
 use crate::model::Model;
 pub use crate::p2::font::FontId;
+use crate::p2::ui::ScreenUi;
 use crate::theme::layout::*;
 use crate::theme::{
     Color, Role, BADGE_FILL, BLACK, BLUE, DIM_GREY, GREEN, GREY, RED, VIOLET, WHITE,
@@ -417,7 +418,8 @@ fn heartbeat(now: Secs) -> f32 {
     }
 }
 
-pub fn role_scene(model: &Model, role: Role, now: Secs) -> Scene {
+pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
+    ui.for_role(role);
     match role {
         Role::Cpu => {
             let pct = model.smooth_cpu(now);
@@ -759,7 +761,7 @@ mod tests {
     #[test]
     fn cpu_scene_after_settling_shows_value() {
         let m = model_with_cpu(42.0);
-        let s = role_scene(&m, Role::Cpu, 5.0);
+        let s = role_scene(&m, Role::Cpu, 5.0, &mut ScreenUi::new());
         assert_eq!(s.lit_count(), 25);
         let badge_text = s.items.iter().find_map(|d| match d {
             Drawable::Badge { text, .. } => Some(text.clone()),
@@ -780,7 +782,7 @@ mod tests {
             },
             0.0,
         );
-        let s = role_scene(&m, Role::Health, 0.0);
+        let s = role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new());
         assert_eq!(s.lit_count(), 60);
         let dots = s
             .items
@@ -813,7 +815,7 @@ mod tests {
             0.0,
         );
         // the rings sweep in from empty, so read them once the sweep has settled
-        let s = role_scene(&m, Role::Health, 1.0);
+        let s = role_scene(&m, Role::Health, 1.0, &mut ScreenUi::new());
         let rings: Vec<_> = s
             .items
             .iter()
@@ -825,7 +827,7 @@ mod tests {
         }
         assert_eq!(s.lit_count(), 54, "outer ring is the 90% torrent");
         assert_eq!(
-            role_scene(&m, Role::Health, 0.0).lit_count(),
+            role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new()).lit_count(),
             0,
             "at the arrival instant both rings are still empty"
         );
@@ -834,7 +836,7 @@ mod tests {
             _ => None,
         });
         assert_eq!(text.as_deref(), Some("3.0M"));
-        let s2 = role_scene(&m, Role::Health, 5.5);
+        let s2 = role_scene(&m, Role::Health, 5.5, &mut ScreenUi::new());
         let text2 = s2.items.iter().find_map(|d| match d {
             Drawable::Badge { text, .. } => Some(text.clone()),
             _ => None,
@@ -853,7 +855,7 @@ mod tests {
             },
             0.0,
         );
-        let s = role_scene(&m, Role::Health, 0.0);
+        let s = role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new());
         assert_eq!(s.lit_count(), 60);
         if let Some(Drawable::Ring { states, .. }) =
             s.items.iter().find(|d| matches!(d, Drawable::Ring { .. }))

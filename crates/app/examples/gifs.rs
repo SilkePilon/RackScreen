@@ -17,6 +17,7 @@ use gif::{DisposalMethod, Encoder, Frame, Repeat};
 use rackscreen_core::anim::Secs;
 use rackscreen_core::event::Event;
 use rackscreen_core::model::{Model, Thresholds};
+use rackscreen_core::p2::ui::ScreenUi;
 use rackscreen_core::screens::TRANSITION_SECS;
 use rackscreen_core::theme::layout::{CX, CY, SIZE};
 use rackscreen_core::theme::Role;
@@ -199,6 +200,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
 
     let mut out = GifOut::new(path)?;
     let mut px = new_pixmap();
+    let mut ui = ScreenUi::new();
     let mut seconds = 0u64;
     for f in 0..total {
         let now = f as Secs / FPS;
@@ -223,7 +225,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
         if f < warmup_frames {
             continue;
         }
-        renderer.render(&model.scene(0, now), &mut px);
+        renderer.render(&model.scene(0, now, &mut ui), &mut px);
         round_mask(&mut px);
         out.push(&px)?;
     }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{Event, LinkTarget, Robustness, Torrent};
 use rackscreen_core::model::{Model, Thresholds};
+use rackscreen_core::p2::ui::ScreenUi;
 use rackscreen_core::theme::Role;
 use rackscreen_render::frame::new_pixmap;
 use rackscreen_render::renderer::Renderer;
@@ -111,7 +112,10 @@ fn cpu_idle() {
     let m = ready_model();
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Cpu, 5.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
         red > 200 && g > 140 && b < 80,
@@ -129,7 +133,7 @@ fn all_roles_idle() {
     let mut r = Renderer::new().unwrap();
     for role in CLASSIC {
         let mut px = new_pixmap();
-        r.render(&m.scene_for_role(role, 5.0), &mut px);
+        r.render(&m.scene_for_role(role, 5.0, &mut ScreenUi::new()), &mut px);
         check(&format!("idle_{}", role.icon()), &px);
     }
 }
@@ -140,7 +144,7 @@ fn connecting_and_no_data() {
     let m = Model::new(Thresholds::default());
     let mut px = new_pixmap();
     // `scene` (not `scene_for_role`): the connecting scene comes from the link check.
-    r.render(&m.scene(0, 0.0), &mut px);
+    r.render(&m.scene(0, 0.0, &mut ScreenUi::new()), &mut px);
     check("connecting", &px);
     let mut m2 = Model::new(Thresholds::default());
     m2.apply(
@@ -151,7 +155,10 @@ fn connecting_and_no_data() {
         0.0,
     );
     let mut px2 = new_pixmap();
-    r.render(&m2.scene_for_role(Role::Cpu, 0.5), &mut px2);
+    r.render(
+        &m2.scene_for_role(Role::Cpu, 0.5, &mut ScreenUi::new()),
+        &mut px2,
+    );
     check("no_data", &px2);
 }
 
@@ -168,7 +175,10 @@ fn pod_crash_splash_mid_swap() {
     m.tick(5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene(Role::Pods.index(), 5.35), &mut px);
+    r.render(
+        &m.scene(Role::Pods.index(), 5.35, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("pods_splash", &px);
 }
 
@@ -207,7 +217,10 @@ fn torrent_mode() {
     );
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Health, 5.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Health, 5.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("torrent", &px);
 }
 
@@ -250,7 +263,10 @@ fn torrent_unwind() {
     m.tick(1.3);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Health, 1.3), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Health, 1.3, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("torrent_unwind", &px);
 }
 
@@ -309,7 +325,10 @@ fn thermal_idle() {
     let mut px = new_pixmap();
     // 2.5 s, not 5.0: the temperature badge fades in over each 5 s window, so at
     // exactly 5.0 it would be fully transparent.
-    r.render(&m.scene_for_role(Role::Thermal, 2.5), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Thermal, 2.5, &mut ScreenUi::new()),
+        &mut px,
+    );
     // 68 °C is deep in the amber-to-red half of the ramp
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
@@ -324,7 +343,10 @@ fn storage_idle_and_degraded() {
     let mut r = Renderer::new().unwrap();
     let m = storage_model(volumes(21, &[]));
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Storage, 5.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Storage, 5.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
         red > 130 && b > 200 && g < 180,
@@ -334,7 +356,10 @@ fn storage_idle_and_degraded() {
 
     let m2 = storage_model(volumes(6, &[2]));
     let mut px2 = new_pixmap();
-    r.render(&m2.scene_for_role(Role::Storage, 5.0), &mut px2);
+    r.render(
+        &m2.scene_for_role(Role::Storage, 5.0, &mut ScreenUi::new()),
+        &mut px2,
+    );
     check("storage_degraded", &px2);
 }
 
@@ -387,7 +412,10 @@ fn power_mix_ring() {
     let m = electricity_model();
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::PowerMix, 5.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::PowerMix, 5.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     // segment 0 is the head of the solar section
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
@@ -404,15 +432,24 @@ fn price_carbon_and_renewable() {
 
     // 1.2 s: the needle has eased onto its band.
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Price, 1.2), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Price, 1.2, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("price", &px);
 
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Carbon, 5.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Carbon, 5.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("carbon", &px);
 
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Renewable, 1.2), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Renewable, 1.2, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("renewable", &px);
 }
 
@@ -422,7 +459,10 @@ fn electricity_without_a_token_shows_a_key() {
     assert!(!m.token_present());
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Carbon, 2.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Carbon, 2.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("no_token", &px);
 }
 
@@ -555,7 +595,7 @@ fn new_roles_idle() {
     ] {
         let mut px = new_pixmap();
         // 2.5 s: the alternating badges are in their first window and faded in
-        r.render(&m.scene_for_role(role, 2.5), &mut px);
+        r.render(&m.scene_for_role(role, 2.5, &mut ScreenUi::new()), &mut px);
         check(name, &px);
     }
 }
@@ -581,10 +621,16 @@ fn ups_on_battery_and_iss_during_pass() {
     }
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Ups, 4.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Ups, 4.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("ups_on_battery", &px);
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Iss, 4.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Iss, 4.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("iss_pass", &px);
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
@@ -598,7 +644,10 @@ fn sky_without_location_shows_a_pin() {
     let m = ready_model();
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Sun, 2.0), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Sun, 2.0, &mut ScreenUi::new()),
+        &mut px,
+    );
     check("no_location", &px);
 }
 
@@ -613,7 +662,7 @@ fn iris_mid_transition() {
         m.tick(t);
         t += 1.0 / 30.0;
     }
-    let s = m.scene(0, 3.25);
+    let s = m.scene(0, 3.25, &mut ScreenUi::new());
     assert!(s.zoom < 0.5 && s.zoom > 0.1, "zoom {}", s.zoom);
     assert!(s.ring_reveal < 1.0, "reveal {}", s.ring_reveal);
     let mut r = Renderer::new().unwrap();
@@ -635,7 +684,7 @@ fn sweep_hold() {
     m.tick(5.0);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene(3, 6.0), &mut px);
+    r.render(&m.scene(3, 6.0, &mut ScreenUi::new()), &mut px);
     let (red, g, b) = pixel(&px, 120, 18);
     assert!(
         red > 140 && g < 120 && b < 120,
@@ -656,7 +705,10 @@ fn tick_until(m: &mut Model, from: f64, to: f64) {
 fn render_face(m: &Model, now: f64) -> Pixmap {
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
-    r.render(&m.scene_for_role(Role::Face, now), &mut px);
+    r.render(
+        &m.scene_for_role(Role::Face, now, &mut ScreenUi::new()),
+        &mut px,
+    );
     px
 }
 
@@ -746,4 +798,42 @@ fn face_sunny_shades_and_sleepy() {
     let (red, ..) = pixel(&px, 75, 95);
     assert!(red < 60, "sleepy: the top of the eye is closed, got {red}");
     check("face_sleepy", &px);
+}
+
+#[test]
+fn p2_sample_screen() {
+    use rackscreen_core::p2::chart::Card;
+    use rackscreen_core::p2::ring::RingSpec;
+    use rackscreen_core::p2::screen::{compose, P2Screen};
+    use rackscreen_core::theme::p2::{BLUE, TEXT2};
+    let mut s = P2Screen::new("cpu", "42");
+    s.unit = Some("%".into());
+    s.ring = RingSpec::fill(0.42, BLUE);
+    s.pill = Some(("7 nodes · avg".into(), TEXT2));
+    s.card = Some(Card::Spark {
+        series: (0..31)
+            .map(|i| 30.0 + 20.0 * ((i as f32) * 0.4).sin())
+            .collect(),
+        prev: None,
+        scroll: 1.0,
+        min: 0.0,
+        max: 100.0,
+        now_idx: None,
+        color: BLUE,
+        caption: "last 60 s".into(),
+    });
+    let mut ui = ScreenUi::new();
+    let scene = compose(&s, &mut ui, 5.0);
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&scene, &mut px);
+    assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
+    let (red, g, b) = pixel(&px, 226, 120);
+    assert!(
+        b > 200 && red < 140 && g > 140,
+        "blue fill at 3 o'clock, got {red},{g},{b}"
+    );
+    let (t, ..) = pixel(&px, 120, 226);
+    assert!((15..=35).contains(&t), "track at 6 o'clock, got {t}");
+    check("p2_sample", &px);
 }
