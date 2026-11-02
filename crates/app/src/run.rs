@@ -235,6 +235,18 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
 
 /// Sky and GitHub sources: public APIs and local maths, independent of the cluster.
 fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
+    if cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty() {
+        runtime.spawn(rackscreen_sources::jellyfin::run_jellyfin(
+            rackscreen_sources::jellyfin::JellyfinConfig {
+                url: cfg.jellyfin.url.trim().to_string(),
+                api_key: cfg.jellyfin.api_key.clone(),
+                poll_secs: cfg.jellyfin.poll_secs,
+            },
+            ctx.clone(),
+        ));
+    } else if cfg.jellyfin.enabled {
+        tracing::warn!("jellyfin enabled but no url set; the role says Check config");
+    }
     let location = cfg.location();
     let needs_location = cfg.weather.enabled || cfg.rain.enabled || cfg.iss.enabled;
     let Some((lat, lon)) = location else {

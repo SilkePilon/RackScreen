@@ -1,0 +1,51 @@
+[
+  {
+    "Id": "s1",
+    "UserName": "silke",
+    "DeviceName": "Living room TV",
+    "LastActivityDate": "2026-09-07T12:00:05.000Z",
+    "NowPlayingItem": {
+      "Name": "Blade Runner 2049",
+      "Type": "Movie",
+      "ProductionYear": 2017,
+      "RunTimeTicks": 98400000000
+    },
+    "PlayState": { "PositionTicks": 37200000000, "IsPaused": false }
+  },
+  {
+    "Id": "s2",
+    "UserName": "sam",
+    "DeviceName": "iPad",
+    "LastActivityDate": "2026-09-07T12:00:02.000Z",
+    "NowPlayingItem": {
+      "Name": "Home",
+      "Type": "Episode",
+      "SeriesName": "The Expanse",
+      "ParentIndexNumber": 2,
+      "IndexNumber": 5,
+      "RunTimeTicks": 26400000000
+    },
+    "PlayState": { "PositionTicks": 14800000000, "IsPaused": false },
+    "TranscodingInfo": { "Container": "ts", "IsVideoDirect": false }
+  },
+  {
+    "Id": "s3",
+    "UserName": "guest",
+    "DeviceName": "Firefox",
+    "LastActivityDate": "2026-09-07T11:59:00.000Z",
+    "NowPlayingItem": {
+      "Name": "Dune: Part Two",
+      "Type": "Movie",
+      "ProductionYear": 2024,
+      "RunTimeTicks": 99600000000
+    },
+    "PlayState": { "PositionTicks": 6000000000, "IsPaused": true }
+  },
+  {
+    "Id": "s4",
+    "UserName": "idle",
+    "DeviceName": "Phone",
+    "LastActivityDate": "2026-09-07T11:30:00.000Z",
+    "PlayState": { "CanSeek": false }
+  }
+]

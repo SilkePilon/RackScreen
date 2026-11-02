@@ -46,7 +46,7 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Load => rack::load(model, now),
         Role::Media => media::media(model, now),
         Role::Ci => github::ci(model, now),
-        Role::Jellyfin => return None, // Task 7
+        Role::Jellyfin => media::jellyfin(model, now),
         Role::PowerMix | Role::Face => return None,
     })
 }

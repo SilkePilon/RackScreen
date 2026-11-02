@@ -150,6 +150,40 @@ pub struct CiRun {
     pub duration_secs: Option<i64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JfKind {
+    Movie,
+    Episode,
+    Other,
+}
+
+/// One Jellyfin session with something playing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JfSession {
+    pub title: String,
+    pub kind: JfKind,
+    pub series: Option<String>,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+    pub year: Option<u32>,
+    pub runtime_secs: f64,
+    /// Where playback was at the poll.
+    pub position_secs: f64,
+    pub paused: bool,
+    pub transcoding: bool,
+    pub user: String,
+    pub device: String,
+    /// `LastActivityDate` as sent, ISO 8601 UTC; sorts lexically.
+    pub last_activity: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JfStatus {
+    Ok,
+    Offline,
+    Unauthorized,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -415,6 +449,11 @@ pub enum Event {
         repo: String,
         ok: bool,
         at: i64,
+    },
+    /// One poll of `/Sessions`: the sessions with an item, or why there are none.
+    Jellyfin {
+        status: JfStatus,
+        sessions: Vec<JfSession>,
     },
     /// Prometheus answered but has no series for the role (exporter not
     /// installed); the next data event for the role clears it.

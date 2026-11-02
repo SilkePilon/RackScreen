@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, CiRun, CiStatus, Download, Event, IssPass, LinkTarget, MoonPhase,
-    NodeLoad, Robustness, Torrent,
+    App, AppHealth, AppSync, CiRun, CiStatus, Download, Event, IssPass, JfKind, JfSession,
+    JfStatus, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
 };
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::mood::Mood;
@@ -93,6 +93,42 @@ fn ci_runs(newest: CiStatus) -> Vec<CiRun> {
         .collect()
 }
 
+fn jf_movie(paused: bool) -> JfSession {
+    JfSession {
+        title: "Blade Runner 2049".into(),
+        kind: JfKind::Movie,
+        series: None,
+        season: None,
+        episode: None,
+        year: Some(2017),
+        runtime_secs: 9840.0,
+        position_secs: 3720.0,
+        paused,
+        transcoding: false,
+        user: "silke".into(),
+        device: "Living room TV".into(),
+        last_activity: "2026-09-07T12:00:05.000Z".into(),
+    }
+}
+
+fn jf_episode() -> JfSession {
+    JfSession {
+        title: "Home".into(),
+        kind: JfKind::Episode,
+        series: Some("The Expanse".into()),
+        season: Some(2),
+        episode: Some(5),
+        year: None,
+        runtime_secs: 2640.0,
+        position_secs: 1480.0,
+        paused: false,
+        transcoding: true,
+        user: "sam".into(),
+        device: "iPad".into(),
+        last_activity: "2026-09-07T12:00:02.000Z".into(),
+    }
+}
+
 fn full_model() -> Model {
     let mut m = Model::new(Thresholds::default());
     m.set_unix_now(UNIX);
@@ -101,6 +137,7 @@ fn full_model() -> Model {
     m.set_token_present(true);
     m.set_location_present(true);
     m.set_github_token_present(true);
+    m.set_jellyfin_configured(true);
     for t in [
         LinkTarget::K8sApi,
         LinkTarget::Prometheus,
@@ -495,6 +532,13 @@ fn full_model() -> Model {
         0.0,
     );
     m.apply(Event::CiRuns(ci_runs(CiStatus::InProgress)), 0.0);
+    m.apply(
+        Event::Jellyfin {
+            status: JfStatus::Ok,
+            sessions: vec![jf_movie(false), jf_episode()],
+        },
+        0.0,
+    );
     m.tick(0.0);
     m
 }
@@ -976,4 +1020,57 @@ fn ci_alternate_states() {
     let mut p = full_model();
     p.apply(Event::CiRuns(ci_runs(CiStatus::Success)), 0.0);
     check("p2_ci_passed", &render(&p, Role::Ci, 120.0));
+}
+
+#[test]
+fn jellyfin_alternate_states() {
+    let mut e = full_model();
+    e.apply(
+        Event::Jellyfin {
+            status: JfStatus::Ok,
+            sessions: vec![jf_movie(false)],
+        },
+        0.0,
+    );
+    check("p2_jellyfin_movie", &render(&e, Role::Jellyfin, 120.0));
+    let mut p = full_model();
+    p.apply(
+        Event::Jellyfin {
+            status: JfStatus::Ok,
+            sessions: vec![jf_movie(true)],
+        },
+        0.0,
+    );
+    check("p2_jellyfin_paused", &render(&p, Role::Jellyfin, 120.0));
+    let mut i = full_model();
+    i.set_unix_now(UNIX + 2 * 3600);
+    i.apply(
+        Event::Jellyfin {
+            status: JfStatus::Ok,
+            sessions: vec![],
+        },
+        0.0,
+    );
+    check("p2_jellyfin_idle", &render(&i, Role::Jellyfin, 120.0));
+    let mut o = full_model();
+    o.apply(
+        Event::Jellyfin {
+            status: JfStatus::Offline,
+            sessions: vec![],
+        },
+        0.0,
+    );
+    check("p2_jellyfin_offline", &render(&o, Role::Jellyfin, 120.0));
+    let mut k = full_model();
+    k.apply(
+        Event::Jellyfin {
+            status: JfStatus::Unauthorized,
+            sessions: vec![],
+        },
+        0.0,
+    );
+    check("p2_jellyfin_key", &render(&k, Role::Jellyfin, 120.0));
+    let mut c = full_model();
+    c.set_jellyfin_configured(false);
+    check("p2_jellyfin_config", &render(&c, Role::Jellyfin, 120.0));
 }

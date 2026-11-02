@@ -3,8 +3,8 @@
 use crate::anim::Secs;
 use crate::electricity::{price_level, PriceLevel, Source};
 use crate::event::{
-    App, AppHealth, CiRun, Download, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness,
-    Torrent,
+    App, AppHealth, CiRun, Download, Event, IssPass, JfSession, JfStatus, LinkTarget, MoonPhase,
+    NodeLoad, Robustness, Torrent,
 };
 use crate::face::{Face, FaceFrame};
 use crate::history::{History, Hourly};
@@ -256,6 +256,29 @@ pub struct CiState {
     pub last_pass_at: Option<i64>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct JellyfinState {
+    pub status: JfStatus,
+    pub sessions: Vec<JfSession>,
+    /// Monotonic time of the last poll; positions extrapolate from it.
+    pub polled_at: Secs,
+    pub have: bool,
+    /// The last item seen playing this run and when (unix seconds).
+    pub last_seen: Option<(String, i64)>,
+}
+
+impl Default for JellyfinState {
+    fn default() -> Self {
+        Self {
+            status: JfStatus::Offline,
+            sessions: Vec::new(),
+            polled_at: 0.0,
+            have: false,
+            last_seen: None,
+        }
+    }
+}
+
 /// A CI pass keeps the face happy for this long (unix clock).
 pub const CI_RECENT_SECS: i64 = 1800;
 
@@ -322,6 +345,7 @@ pub struct Model {
     mains: MainsState,
     load: LoadState,
     ci: CiState,
+    jellyfin: JellyfinState,
     /// Entrypoint req/s every 3 s, 90 s.
     traffic_hist: History,
     /// Restarts and mean input voltage per unix hour, 24 h.
@@ -408,6 +432,7 @@ impl Model {
             mains: MainsState::default(),
             load: LoadState::default(),
             ci: CiState::default(),
+            jellyfin: JellyfinState::default(),
             traffic_hist: History::new(31, 3.0),
             restarts_hist: Hourly::new(),
             mains_hist: Hourly::new(),
@@ -607,6 +632,9 @@ impl Model {
     }
     pub fn ci(&self) -> &CiState {
         &self.ci
+    }
+    pub fn jellyfin(&self) -> &JellyfinState {
+        &self.jellyfin
     }
     pub fn set_token_present(&mut self, present: bool) {
         self.token_present = present;
@@ -1016,6 +1044,18 @@ impl Model {
                     self.ci.last_pass_at = Some(self.ci.last_pass_at.map_or(at, |t| t.max(at)));
                 }
             }
+            Event::Jellyfin { status, sessions } => {
+                if status == JfStatus::Ok {
+                    if let Some(s) = crate::p2::roles::media::pick_session(&sessions) {
+                        self.jellyfin.last_seen =
+                            Some((crate::p2::roles::media::display_title(s), self.unix_now));
+                    }
+                }
+                self.jellyfin.status = status;
+                self.jellyfin.sessions = sessions;
+                self.jellyfin.polled_at = now;
+                self.jellyfin.have = true;
+            }
             Event::NoExporter { role } => {
                 if !self.exporter_missing.contains(&role) {
                     self.exporter_missing.push(role);
@@ -1130,7 +1170,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{CiRun, CiStatus, Download, NodeLoad};
+    use crate::event::{CiRun, CiStatus, Download, JfKind, JfSession, JfStatus, NodeLoad};
     use crate::p2::ui::ScreenUi;
     use crate::scene::Drawable;
 
@@ -1851,5 +1891,64 @@ mod tests {
             Some(1_788_782_400 - 60),
             "an older pass does not move it back"
         );
+    }
+    fn session(title: &str, pos: f64, paused: bool) -> JfSession {
+        JfSession {
+            title: title.into(),
+            kind: JfKind::Movie,
+            series: None,
+            season: None,
+            episode: None,
+            year: Some(2017),
+            runtime_secs: 9840.0,
+            position_secs: pos,
+            paused,
+            transcoding: false,
+            user: "silke".into(),
+            device: "TV".into(),
+            last_activity: "2026-09-07T12:00:05.000Z".into(),
+        }
+    }
+
+    #[test]
+    fn jellyfin_polls_are_stamped_and_remember_the_last_item() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_unix_now(1_788_782_400);
+        assert!(!m.jellyfin().have);
+        m.apply(
+            Event::Jellyfin {
+                status: JfStatus::Ok,
+                sessions: vec![session("Blade Runner 2049", 3720.0, false)],
+            },
+            5.0,
+        );
+        let j = m.jellyfin();
+        assert!(j.have && j.status == JfStatus::Ok);
+        assert_eq!((j.sessions.len(), j.polled_at), (1, 5.0));
+        assert_eq!(
+            j.last_seen,
+            Some(("Blade Runner 2049".to_string(), 1_788_782_400))
+        );
+        m.set_unix_now(1_788_782_400 + 7200);
+        m.apply(
+            Event::Jellyfin {
+                status: JfStatus::Ok,
+                sessions: vec![],
+            },
+            10.0,
+        );
+        assert_eq!(
+            m.jellyfin().last_seen,
+            Some(("Blade Runner 2049".to_string(), 1_788_782_400)),
+            "kept while idle"
+        );
+        m.apply(
+            Event::Jellyfin {
+                status: JfStatus::Offline,
+                sessions: vec![],
+            },
+            11.0,
+        );
+        assert_eq!(m.jellyfin().status, JfStatus::Offline);
     }
 }

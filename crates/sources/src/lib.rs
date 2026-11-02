@@ -13,6 +13,7 @@ pub mod fake;
 pub mod github;
 pub mod http;
 pub mod iss;
+pub mod jellyfin;
 pub mod k8s;
 pub mod open_meteo;
 pub mod prices;

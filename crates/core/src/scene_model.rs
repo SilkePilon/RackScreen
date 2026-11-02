@@ -41,7 +41,7 @@ impl crate::model::Model {
             Role::Load => !(link.prom && self.load().have),
             Role::Media => !(link.prom && self.media().have),
             Role::Ci => !(link.github && self.ci().have),
-            Role::Jellyfin => true,
+            Role::Jellyfin => !self.jellyfin().have,
         }
     }
 
