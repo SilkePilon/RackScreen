@@ -123,6 +123,26 @@ pub enum Event {
         mem: Vec<f32>,
         net_rx_mbps: Vec<f32>,
     },
+    /// Hourly forecast from Open-Meteo: the next 12 hours from the current
+    /// hour, plus today's low and high.
+    Forecast {
+        hourly_temp_c: Vec<f32>,
+        hourly_precip_mm: Vec<f32>,
+        day_min_c: f32,
+        day_max_c: f32,
+    },
+    /// The last 24 hourly EAQI values ending at the current hour, oldest first,
+    /// gaps skipped.
+    AirQualityHistory {
+        hourly: Vec<f32>,
+    },
+    /// Longhorn actual size per volume in bytes.
+    VolumeSizes(Vec<(String, u64)>),
+    /// `finishedAt` of every Argo CD application's last operation, unix seconds,
+    /// sent once after the initial list so today's sync count survives a restart.
+    AppSyncHistory {
+        finished_at: Vec<i64>,
+    },
     PodSnapshot {
         running: u32,
         pending: u32,

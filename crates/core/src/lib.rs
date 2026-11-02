@@ -27,4 +27,5 @@ pub mod scene_thermal;
 pub mod scene_ups;
 pub mod scene_weather;
 pub mod screens;
+pub mod sky;
 pub mod theme;

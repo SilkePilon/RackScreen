@@ -32,7 +32,16 @@ fn status_str<'a>(status: &'a Value, path: &[&str]) -> Option<&'a str> {
 
 /// The app plus the raw operation phase (`Running`, `Succeeded`, ...), which
 /// the tracker needs for the sync-finished edge.
-pub fn parse_app(obj: &DynamicObject) -> (App, Option<String>) {
+/// The app, the raw operation phase (`Running`, `Succeeded`, ...) the tracker
+/// needs for the sync-finished edge, and when that operation finished.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Parsed {
+    pub app: App,
+    pub phase: Option<String>,
+    pub finished_at: Option<i64>,
+}
+
+pub fn parse_app(obj: &DynamicObject) -> Parsed {
     let status = obj.data.get("status").cloned().unwrap_or(Value::Null);
     let sync = match status_str(&status, &["sync", "status"]) {
         Some("Synced") => AppSync::Synced,
@@ -48,13 +57,19 @@ pub fn parse_app(obj: &DynamicObject) -> (App, Option<String>) {
         _ => AppHealth::Unknown,
     };
     let phase = status_str(&status, &["operationState", "phase"]).map(str::to_string);
-    let app = App {
-        name: obj.metadata.name.clone().unwrap_or_default(),
-        sync,
-        health,
-        operating: phase.as_deref() == Some("Running"),
-    };
-    (app, phase)
+    let finished_at = status_str(&status, &["operationState", "finishedAt"])
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.timestamp());
+    Parsed {
+        app: App {
+            name: obj.metadata.name.clone().unwrap_or_default(),
+            sync,
+            health,
+            operating: phase.as_deref() == Some("Running"),
+        },
+        phase,
+        finished_at,
+    }
 }
 
 fn is_bad(h: AppHealth) -> bool {
@@ -67,6 +82,8 @@ fn is_bad(h: AppHealth) -> bool {
 pub struct AppTracker {
     apps: BTreeMap<String, App>,
     phases: HashMap<String, String>,
+    /// `finishedAt` of each app's last operation, unix seconds.
+    finished: HashMap<String, i64>,
     synced: bool,
 }
 
@@ -75,18 +92,34 @@ impl AppTracker {
         self.synced = false;
         self.apps.clear();
         self.phases.clear();
+        self.finished.clear();
     }
 
     pub fn init_done(&mut self) -> Vec<Event> {
         self.synced = true;
-        vec![self.snapshot()]
+        let mut finished_at: Vec<i64> = self.finished.values().copied().collect();
+        finished_at.sort_unstable();
+        vec![Event::AppSyncHistory { finished_at }, self.snapshot()]
     }
 
     pub fn snapshot(&self) -> Event {
         Event::Apps(self.apps.values().cloned().collect())
     }
 
-    pub fn apply(&mut self, (app, phase): (App, Option<String>)) -> Vec<Event> {
+    pub fn apply(&mut self, parsed: Parsed) -> Vec<Event> {
+        let Parsed {
+            app,
+            phase,
+            finished_at,
+        } = parsed;
+        match finished_at {
+            Some(t) => {
+                self.finished.insert(app.name.clone(), t);
+            }
+            None => {
+                self.finished.remove(&app.name);
+            }
+        }
         let mut out = Vec::new();
         let prev = self.apps.get(&app.name).cloned();
         if self.synced {
@@ -125,6 +158,7 @@ impl AppTracker {
 
     pub fn delete(&mut self, name: &str) -> Vec<Event> {
         self.phases.remove(name);
+        self.finished.remove(name);
         if self.apps.remove(name).is_none() || !self.synced {
             return Vec::new();
         }
@@ -237,9 +271,9 @@ mod tests {
     #[test]
     fn parses_the_fixture() {
         let o: DynamicObject = serde_json::from_str(APP).unwrap();
-        let (app, phase) = parse_app(&o);
+        let p = parse_app(&o);
         assert_eq!(
-            app,
+            p.app,
             App {
                 name: "arr-stack".into(),
                 sync: AppSync::Synced,
@@ -247,15 +281,16 @@ mod tests {
                 operating: false,
             }
         );
-        assert_eq!(phase.as_deref(), Some("Succeeded"));
-        let (running, _) = parse_app(&obj("OutOfSync", "Progressing", Some("Running")));
-        assert!(running.operating);
-        assert_eq!(running.sync, AppSync::OutOfSync);
-        assert_eq!(running.health, AppHealth::Progressing);
-        let (bare, phase) = parse_app(&obj("Weird", "Odd", None));
+        assert_eq!(p.phase.as_deref(), Some("Succeeded"));
+        assert_eq!(p.finished_at, Some(1_788_627_225), "2026-09-05T16:53:45Z");
+        let running = parse_app(&obj("OutOfSync", "Progressing", Some("Running")));
+        assert!(running.app.operating);
+        assert_eq!(running.app.sync, AppSync::OutOfSync);
+        assert_eq!(running.app.health, AppHealth::Progressing);
+        let bare = parse_app(&obj("Weird", "Odd", None));
         assert_eq!(
-            (bare.sync, bare.health, phase),
-            (AppSync::Unknown, AppHealth::Unknown, None)
+            (bare.app.sync, bare.app.health, bare.phase, bare.finished_at),
+            (AppSync::Unknown, AppHealth::Unknown, None, None)
         );
     }
 
@@ -267,8 +302,14 @@ mod tests {
             .apply(parse_app(&obj("Synced", "Healthy", Some("Succeeded"))))
             .is_empty());
         let done = t.init_done();
-        assert_eq!(done.len(), 1);
-        assert!(matches!(&done[0], Event::Apps(list) if list.len() == 1));
+        assert_eq!(done.len(), 2);
+        assert_eq!(
+            done[0],
+            Event::AppSyncHistory {
+                finished_at: vec![1_788_627_225]
+            }
+        );
+        assert!(matches!(&done[1], Event::Apps(list) if list.len() == 1));
         // an operation starting then finishing: a sync splash on the finish
         let evs = t.apply(parse_app(&obj("OutOfSync", "Healthy", Some("Running"))));
         assert!(matches!(evs.as_slice(), [Event::Apps(_)]));

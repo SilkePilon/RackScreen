@@ -467,6 +467,62 @@ impl FakeState {
         }
     }
 
+    /// Twelve hours that cool off after a shower in the afternoon.
+    fn forecast(&self) -> Event {
+        let hourly_temp_c: Vec<f32> = (0..12)
+            .map(|i| self.temp + 3.0 * ((i as f32 + 2.0) / 12.0 * std::f32::consts::PI).sin() - 1.0)
+            .collect();
+        let hourly_precip_mm: Vec<f32> = (0..12)
+            .map(|i| if (5..8).contains(&i) { 0.8 } else { 0.0 })
+            .collect();
+        Event::Forecast {
+            day_min_c: hourly_temp_c.iter().cloned().fold(f32::MAX, f32::min) - 2.0,
+            day_max_c: hourly_temp_c.iter().cloned().fold(f32::MIN, f32::max) + 1.0,
+            hourly_temp_c,
+            hourly_precip_mm,
+        }
+    }
+
+    fn air_history(&self) -> Event {
+        Event::AirQualityHistory {
+            hourly: (0..24)
+                .map(|i| {
+                    (self.eaqi + 10.0 * ((i as f32) / 24.0 * std::f32::consts::TAU * 1.5).sin())
+                        .max(1.0)
+                })
+                .collect(),
+        }
+    }
+
+    fn volume_sizes(&self) -> Event {
+        let n = self.volumes.len().max(1) as u64;
+        Event::VolumeSizes(
+            self.volumes
+                .iter()
+                .enumerate()
+                .map(|(i, (name, _))| {
+                    (
+                        name.clone(),
+                        self.storage_used * (n - i as u64) * 2 / (n * (n + 1)),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// Yesterday evening and this morning, on the fake clock.
+    fn app_sync_history(&self) -> Event {
+        let now = self.unix_now();
+        Event::AppSyncHistory {
+            finished_at: vec![
+                now - 5 * 3600,
+                now - 3 * 3600,
+                now - 3 * 3600 + 600,
+                now - 20 * 3600,
+            ],
+        }
+    }
+
     pub fn initial(&self) -> Vec<Event> {
         vec![
             Event::Link {
@@ -515,10 +571,13 @@ impl FakeState {
             Event::Torrents(self.torrents.clone()),
             self.node_temps(),
             self.storage(),
+            self.volume_sizes(),
             self.electricity(),
             self.prices(),
             self.weather(),
+            self.forecast(),
             self.air(),
+            self.air_history(),
             self.rain(),
             self.sky(),
             self.iss(),
@@ -526,6 +585,7 @@ impl FakeState {
             self.ups(),
             self.net(),
             self.apps(),
+            self.app_sync_history(),
         ]
     }
 
@@ -593,12 +653,15 @@ impl FakeState {
         if self.ticks.is_multiple_of(10) {
             out.push(self.node_temps());
             out.push(self.storage());
+            out.push(self.volume_sizes());
             out.push(self.electricity());
             out.push(self.air());
+            out.push(self.air_history());
         }
         if self.ticks.is_multiple_of(30) {
             self.weather_idx += 1;
             out.push(self.weather());
+            out.push(self.forecast());
         }
         if self.ticks.is_multiple_of(60) {
             out.push(self.sky());
@@ -935,6 +998,14 @@ mod tests {
         assert!(evs
             .iter()
             .any(|e| matches!(e, Event::MetricsHistory { cpu, .. } if cpu.len() == 31)));
+        assert!(evs.iter().any(|e| matches!(e, Event::Forecast { .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::AirQualityHistory { .. })));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, Event::AppSyncHistory { .. })));
+        assert!(evs.iter().any(|e| matches!(e, Event::VolumeSizes(_))));
     }
 
     #[test]

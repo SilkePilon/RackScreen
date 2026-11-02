@@ -140,6 +140,21 @@ pub fn parse_matrix(json: &str) -> Vec<f64> {
         .unwrap_or_default()
 }
 
+/// Actual size per volume; Longhorn exports one series per node holding a
+/// replica, so the largest sample per name wins.
+pub fn volume_sizes_from(v: &[(HashMap<String, String>, f64)]) -> Vec<(String, u64)> {
+    let mut map: std::collections::BTreeMap<String, u64> = Default::default();
+    for (m, val) in v {
+        let Some(name) = m.get("volume") else {
+            continue;
+        };
+        let bytes = val.max(0.0) as u64;
+        let e = map.entry(name.clone()).or_insert(bytes);
+        *e = (*e).max(bytes);
+    }
+    map.into_iter().collect()
+}
+
 pub fn range_path(q: &str, start: i64, end: i64, step: u32) -> String {
     format!(
         "/api/v1/query_range?query={}&start={start}&end={end}&step={step}",
@@ -198,6 +213,7 @@ const Q_TEMPS_FALLBACK: &str =
 const Q_LH_ROBUST: &str = "longhorn_volume_robustness";
 const Q_LH_USED: &str = "sum(longhorn_volume_actual_size_bytes)";
 const Q_LH_CAP: &str = "sum(longhorn_volume_capacity_bytes)";
+const Q_LH_SIZE: &str = "longhorn_volume_actual_size_bytes";
 const Q_UPS_STATUS: &str = "nut_ups_status";
 const Q_UPS_CHARGE: &str = "nut_battery_charge";
 const Q_UPS_LOAD: &str = "nut_load";
@@ -447,6 +463,10 @@ async fn poll(
             used_bytes: used,
             capacity_bytes: cap,
         });
+        let sizes = volume_sizes_from(&parse_vector(&query(t, Q_LH_SIZE).await?));
+        if !sizes.is_empty() {
+            out.push(Event::VolumeSizes(sizes));
+        }
     }
     let status = parse_vector(&query(t, Q_UPS_STATUS).await?);
     if !status.is_empty() {
@@ -832,6 +852,19 @@ mod tests {
                 mem: vec![3.0],
                 net_rx_mbps: vec![4.0, 8.0],
             }
+        );
+    }
+    #[test]
+    fn volume_sizes_keep_the_largest_sample_per_volume() {
+        let v = parse_vector(
+            r#"{"data":{"result":[
+            {"metric":{"volume":"pvc-a","node":"n1"},"value":[1,"100"]},
+            {"metric":{"volume":"pvc-a","node":"n2"},"value":[1,"120"]},
+            {"metric":{"volume":"pvc-b","node":"n1"},"value":[1,"7"]}]}}"#,
+        );
+        assert_eq!(
+            volume_sizes_from(&v),
+            vec![("pvc-a".into(), 120), ("pvc-b".into(), 7)]
         );
     }
 }

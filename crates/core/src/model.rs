@@ -120,6 +120,16 @@ impl GithubState {
     }
 }
 
+/// Argo syncs per local hour today, and the last one seen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeployLog {
+    /// Local day index (days since the epoch in local time) the buckets belong to.
+    pub day: i64,
+    pub hours: [u32; 24],
+    /// App name and the monotonic time of the last sync.
+    pub last: Option<(String, Secs)>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WeatherState {
     pub temp_c: f32,
@@ -130,12 +140,17 @@ pub struct WeatherState {
     pub wind_from_deg: f32,
     pub at: String,
     pub have: bool,
+    pub hourly_temp_c: Vec<f32>,
+    pub hourly_precip_mm: Vec<f32>,
+    pub day_min_c: Option<f32>,
+    pub day_max_c: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AirState {
     pub eaqi: f32,
     pub have: bool,
+    pub hourly: Vec<f32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -245,6 +260,7 @@ pub struct ClusterState {
     pub have_nodes: bool,
     pub have_temps: bool,
     pub have_storage: bool,
+    pub volume_bytes: Vec<(String, u64)>,
 }
 
 /// What the fold wants the animation layer to do. Consumed by Task 5.
@@ -327,6 +343,7 @@ pub struct Model {
     /// Carbon intensity and renewable share per unix hour, 24 h.
     carbon_hist: Hourly,
     renewable_hist: Hourly,
+    deploys: DeployLog,
     /// Percent of total production per source, eased.
     shares: HashMap<Source, Smooth>,
     renewable: Smooth,
@@ -430,6 +447,7 @@ impl Model {
             net_hist: History::new(31, 2.0),
             carbon_hist: Hourly::new(),
             renewable_hist: Hourly::new(),
+            deploys: DeployLog::default(),
             shares: HashMap::new(),
             renewable: Smooth::new(0.0, SMOOTH_SECS),
             fossil_free: Smooth::new(0.0, SMOOTH_SECS),
@@ -566,6 +584,30 @@ impl Model {
     /// The current unix hour, the hourly buffers' key.
     pub fn unix_hour(&self) -> i64 {
         self.unix_now.div_euclid(3600)
+    }
+    pub fn deploys_log(&self) -> &DeployLog {
+        &self.deploys
+    }
+    /// Seconds since the epoch on the local clock.
+    pub fn local_secs(&self) -> i64 {
+        self.unix_now + self.utc_offset_secs as i64
+    }
+    pub fn local_day(&self) -> i64 {
+        self.local_secs().div_euclid(86_400)
+    }
+    pub fn local_hour(&self) -> usize {
+        (self.local_secs().rem_euclid(86_400) / 3600) as usize
+    }
+    /// The unix hour at local midnight, the first hour "today" in the hourly buffers.
+    pub fn local_midnight_unix_hour(&self) -> i64 {
+        (self.local_day() * 86_400 - self.utc_offset_secs as i64).div_euclid(3600)
+    }
+    fn roll_deploy_day(&mut self) {
+        let day = self.local_day();
+        if self.deploys.day != day {
+            self.deploys.day = day;
+            self.deploys.hours = [0; 24];
+        }
     }
     pub fn electricity(&self) -> &ElectricityState {
         &self.electricity
@@ -795,6 +837,7 @@ impl Model {
     /// Drain animation requests into the queues and advance them, then advance
     /// each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
+        self.roll_deploy_day();
         self.retarget_price_needle(now);
         // sources that left the mix ease to zero, then stop costing anything
         self.shares
@@ -1289,6 +1332,7 @@ impl Model {
                     wind_from_deg,
                     at,
                     have: true,
+                    ..std::mem::take(&mut self.weather)
                 };
             }
             Event::AirQuality { eaqi } => {
@@ -1296,7 +1340,11 @@ impl Model {
                     self.fx.push(FxRequest::AirWorse);
                 }
                 self.eaqi.set(eaqi, now);
-                self.air = AirState { eaqi, have: true };
+                self.air = AirState {
+                    eaqi,
+                    have: true,
+                    ..std::mem::take(&mut self.air)
+                };
             }
             Event::Rain { from, mm_per_h } => {
                 let slots = current_slots(from, &mm_per_h, self.unix_now);
@@ -1358,7 +1406,36 @@ impl Model {
                     have: true,
                 };
             }
-            Event::AppSynced { .. } => self.fx.push(FxRequest::AppSynced),
+            Event::AppSynced { name } => {
+                self.roll_deploy_day();
+                let h = self.local_hour();
+                self.deploys.hours[h] += 1;
+                self.deploys.last = Some((name, now));
+                self.fx.push(FxRequest::AppSynced);
+            }
+            Event::AppSyncHistory { finished_at } => {
+                self.roll_deploy_day();
+                let offset = self.utc_offset_secs as i64;
+                for t in finished_at {
+                    let local = t + offset;
+                    if local.div_euclid(86_400) == self.deploys.day {
+                        self.deploys.hours[(local.rem_euclid(86_400) / 3600) as usize] += 1;
+                    }
+                }
+            }
+            Event::Forecast {
+                hourly_temp_c,
+                hourly_precip_mm,
+                day_min_c,
+                day_max_c,
+            } => {
+                self.weather.hourly_temp_c = hourly_temp_c;
+                self.weather.hourly_precip_mm = hourly_precip_mm;
+                self.weather.day_min_c = Some(day_min_c);
+                self.weather.day_max_c = Some(day_max_c);
+            }
+            Event::AirQualityHistory { hourly } => self.air.hourly = hourly,
+            Event::VolumeSizes(sizes) => self.state.volume_bytes = sizes,
             Event::AppDegraded { .. } => self.fx.push(FxRequest::AppDegraded),
             Event::AppHealthy { .. } => self.fx.push(FxRequest::AppHealthy),
         }
@@ -2604,5 +2681,66 @@ mod tests {
             carbon_gco2: carbon,
             updated_at: String::new(),
         }
+    }
+    #[test]
+    fn forecast_air_history_and_volume_sizes_are_kept() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Forecast {
+                hourly_temp_c: vec![13.4, 13.6],
+                hourly_precip_mm: vec![0.0, 1.1],
+                day_min_c: 10.3,
+                day_max_c: 13.6,
+            },
+            0.0,
+        );
+        assert_eq!(m.weather().hourly_temp_c, vec![13.4, 13.6]);
+        assert_eq!(m.weather().day_min_c, Some(10.3));
+        assert!(!m.weather().have, "a forecast alone is not current weather");
+        m.apply(
+            Event::AirQualityHistory {
+                hourly: vec![58.0, 55.0],
+            },
+            0.0,
+        );
+        assert_eq!(m.air().hourly, vec![58.0, 55.0]);
+        m.apply(Event::VolumeSizes(vec![("pvc-a".into(), 7)]), 0.0);
+        assert_eq!(m.state().volume_bytes, vec![("pvc-a".to_string(), 7)]);
+    }
+
+    #[test]
+    fn deploys_are_counted_per_local_hour_today() {
+        let mut m = Model::new(Thresholds::default());
+        // 2026-09-07 12:00 UTC in Amsterdam (+2): local 14:00
+        m.set_unix_now(1_788_782_400);
+        m.set_utc_offset_secs(7200);
+        assert_eq!((m.local_hour(), m.local_secs() % 86_400), (14, 14 * 3600));
+        m.apply(
+            Event::AppSyncHistory {
+                finished_at: vec![
+                    1_788_782_400 - 3 * 3600,  // 11:00 today
+                    1_788_782_400 - 20 * 3600, // 18:00 yesterday
+                    1_788_782_400 + 60,        // 14:01 today
+                ],
+            },
+            0.0,
+        );
+        let log = m.deploys_log();
+        assert_eq!(log.hours[11], 1);
+        assert_eq!(log.hours[14], 1);
+        assert_eq!(log.hours.iter().sum::<u32>(), 2);
+        m.apply(
+            Event::AppSynced {
+                name: "grafana".into(),
+            },
+            5.0,
+        );
+        assert_eq!(m.deploys_log().hours[14], 2);
+        assert_eq!(m.deploys_log().last, Some(("grafana".to_string(), 5.0)));
+        // the next local day empties the buckets but keeps the last sync
+        m.set_unix_now(1_788_782_400 + 12 * 3600);
+        m.tick(6.0);
+        assert_eq!(m.deploys_log().hours.iter().sum::<u32>(), 0);
+        assert!(m.deploys_log().last.is_some());
     }
 }
