@@ -346,7 +346,7 @@ reveal sweeps the ring arc in over 0.8 s).
   and leader centring for power-mix, capsule inward shift, mood priority
   table, hero fit per role.
 - Render goldens re-captured for every role (normal, warning and no-data
-  states) and the face moods; the boot reveal golden.
+  states) and the face moods.
 - Bench test for scene + render time per role.
 
 ## Docs and release
