@@ -642,3 +642,62 @@ fn p2_sample_screen() {
     r.render(&compose(&s, &mut ui, 5.0), &mut px);
     check("p2_sample", &px);
 }
+
+#[test]
+fn p2_sample_download_and_lines() {
+    use rackscreen_core::p2::chart::{Card, CardLine};
+    use rackscreen_core::p2::ring::RingSpec;
+    use rackscreen_core::p2::screen::{compose, P2Screen};
+    use rackscreen_core::scene::FontId;
+    use rackscreen_core::theme::p2::{BLUE, CYAN, ORANGE, TEXT, TEXT2, TEXT3, VIOLET};
+    let mut s = P2Screen::new("media", "121");
+    s.ring = RingSpec::parts(vec![
+        (37.0 / 121.0, ORANGE),
+        (30.0 / 121.0, CYAN),
+        (54.0 / 121.0, VIOLET),
+    ]);
+    s.pill = Some(("1 downloading".into(), BLUE));
+    s.card = Some(Card::Download {
+        title: "The Lord of the Rings: The Return of the King".into(),
+        progress: 0.35,
+        label: "35 % · 19 min left".into(),
+        done: false,
+    });
+    let mut ui = ScreenUi::new();
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&compose(&s, &mut ui, 3.0), &mut px);
+    check("p2_sample_download", &px);
+    let mut j = P2Screen::new("now playing", "1:41:54");
+    j.hero_scale = 0.62;
+    j.unit = Some("left".into());
+    j.unit_below = true;
+    j.ring = RingSpec::fill(0.38, ORANGE);
+    j.pill = Some(("Direct play".into(), rackscreen_core::theme::p2::OK));
+    j.card = Some(Card::Lines(vec![
+        CardLine {
+            text: "Blade Runner 2049".into(),
+            font: FontId::Bold,
+            px: 11.0,
+            color: TEXT,
+            dy: 7.0,
+        },
+        CardLine {
+            text: "2017 · 2h 44m".into(),
+            font: FontId::Medium,
+            px: 8.5,
+            color: TEXT2,
+            dy: 21.0,
+        },
+        CardLine {
+            text: "silke · Living room TV  ·  +1 more".into(),
+            font: FontId::Medium,
+            px: 8.5,
+            color: TEXT3,
+            dy: 32.0,
+        },
+    ]));
+    let mut ui = ScreenUi::new();
+    r.render(&compose(&j, &mut ui, 3.0), &mut px);
+    check("p2_sample_lines", &px);
+}

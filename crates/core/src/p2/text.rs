@@ -5,7 +5,7 @@ use crate::anim::Secs;
 use crate::p2::font::{advance, cap_height, digit_width, measure, FontId};
 use crate::p2::layout::*;
 use crate::p2::marquee::GAP_PX;
-use crate::p2::ui::ScreenUi;
+use crate::p2::ui::{ScreenUi, UiKey};
 use crate::scene::{ClipRect, Drawable};
 use crate::theme::layout::CX;
 use crate::theme::p2::{TEXT2, TEXT3};
@@ -242,6 +242,52 @@ pub fn ring_ends(start: &str, end: &str) -> Vec<Drawable> {
     ]
 }
 
+/// A text run centred on `cx` that scrolls (hold, slide, wrap) when wider than
+/// `slot_w`, hard-clipped to `slot_w × clip_h` at `clip_y`. Cards use it for
+/// titles and captions; the pill has its own copy of the same rule.
+#[allow(clippy::too_many_arguments)]
+pub fn marquee_run(
+    ui: &mut ScreenUi,
+    key: UiKey,
+    text: &str,
+    cx: f32,
+    baseline: f32,
+    slot_w: f32,
+    font: FontId,
+    px: f32,
+    color: Color,
+    clip_y: f32,
+    clip_h: f32,
+    now: Secs,
+) -> Vec<Drawable> {
+    let tw = measure(font, px, text, 0.0);
+    let run = |x: f32, clip: Option<ClipRect>| Drawable::Run {
+        x,
+        baseline,
+        text: text.to_string(),
+        font,
+        px,
+        letter_spacing: 0.0,
+        color,
+        alpha: 1.0,
+        clip,
+    };
+    let mq = ui.marquee(key, text, now);
+    match mq.offset(tw, slot_w, now) {
+        None => vec![run(cx - tw / 2.0, None)],
+        Some(off) => {
+            let x0 = cx - slot_w / 2.0;
+            let clip = Some(ClipRect {
+                x: x0,
+                y: clip_y,
+                w: slot_w,
+                h: clip_h,
+            });
+            vec![run(x0 - off, clip), run(x0 - off + tw + GAP_PX, clip)]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +454,64 @@ mod tests {
             "start is upper right, end upper left"
         );
         assert!(r[0].1 < 60.0 && r[1].1 < 60.0);
+    }
+    #[test]
+    fn marquee_run_centres_short_text_and_scrolls_long_text() {
+        let mut ui = ScreenUi::new();
+        let short = marquee_run(
+            &mut ui,
+            ("line", 0),
+            "Dune",
+            120.0,
+            160.0,
+            88.0,
+            FontId::SemiBold,
+            10.0,
+            TEXT,
+            150.0,
+            20.0,
+            0.0,
+        );
+        let r = runs(&short);
+        assert_eq!(r.len(), 1);
+        let w = measure(FontId::SemiBold, 10.0, "Dune", 0.0);
+        assert!((r[0].0 - (120.0 - w / 2.0)).abs() < 1e-3, "centred");
+        assert!(!r[0].5, "no clip when it fits");
+        let long = "The Lord of the Rings: The Return of the King";
+        let at = |ui: &mut ScreenUi, now: f64| {
+            marquee_run(
+                ui,
+                ("line", 1),
+                long,
+                120.0,
+                160.0,
+                88.0,
+                FontId::SemiBold,
+                10.0,
+                TEXT,
+                150.0,
+                20.0,
+                now,
+            )
+        };
+        let wide = at(&mut ui, 0.0);
+        let r = runs(&wide);
+        assert_eq!(r.len(), 2, "text and its repeat");
+        assert!(r[0].5 && r[1].5);
+        assert!(
+            (r[0].0 - (120.0 - 44.0)).abs() < 1e-3,
+            "holding at the slot's left edge"
+        );
+        match &wide[0] {
+            Drawable::Run { clip: Some(c), .. } => {
+                assert_eq!((c.x, c.y, c.w, c.h), (76.0, 150.0, 88.0, 20.0));
+            }
+            _ => panic!("clipped run"),
+        }
+        let moved = runs(&at(&mut ui, 2.5));
+        assert!(
+            (moved[0].0 - (r[0].0 - 30.0)).abs() < 1e-3,
+            "30 px/s after the 1.5 s hold"
+        );
     }
 }

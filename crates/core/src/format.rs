@@ -127,6 +127,49 @@ pub fn fmt_capacity(used: u64, cap: u64) -> (String, String) {
     }
 }
 
+/// Time left on a download: `19 min left`, `3h 05m left`, `<1 min left`; unknown is `-- left`.
+pub fn fmt_left(secs: i64) -> String {
+    if !(0..=864_000).contains(&secs) {
+        return "-- left".into();
+    }
+    let mins = secs / 60;
+    if mins < 1 {
+        "<1 min left".into()
+    } else if mins < 60 {
+        format!("{mins} min left")
+    } else {
+        format!("{}h {:02}m left", mins / 60, mins % 60)
+    }
+}
+
+/// A short duration: `48s`, `2m 14s`, `3h 05m`.
+pub fn fmt_mins_secs(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3600 {
+        format!("{}m {:02}s", s / 60, s % 60)
+    } else {
+        format!("{}h {:02}m", s / 3600, (s % 3600) / 60)
+    }
+}
+
+/// Playback time as `h:mm:ss` from an hour up, `m:ss` below.
+pub fn fmt_hms(secs: f64) -> String {
+    let s = secs.max(0.0).floor() as i64;
+    let (h, m, x) = (s / 3600, (s % 3600) / 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{x:02}")
+    } else {
+        format!("{m}:{x:02}")
+    }
+}
+
+/// Whole days of uptime.
+pub fn fmt_days(secs: f64) -> String {
+    format!("{}", (secs.max(0.0) / 86_400.0).floor() as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +231,21 @@ mod tests {
             ("49 of 128 GB".to_string(), "79 GB free".to_string())
         );
         assert_eq!(fmt_capacity(0, 0).0, "0 of 0 GB");
+    }
+    #[test]
+    fn new_screen_formatters() {
+        assert_eq!(fmt_left(19 * 60 + 12), "19 min left");
+        assert_eq!(fmt_left(45), "<1 min left");
+        assert_eq!(fmt_left(3 * 3600 + 5 * 60), "3h 05m left");
+        assert_eq!(fmt_left(-1), "-- left");
+        assert_eq!(fmt_mins_secs(134), "2m 14s");
+        assert_eq!(fmt_mins_secs(48), "48s");
+        assert_eq!(fmt_mins_secs(3 * 3600 + 5 * 60 + 9), "3h 05m");
+        assert_eq!(fmt_hms(6114.0), "1:41:54");
+        assert_eq!(fmt_hms(302.0), "5:02");
+        assert_eq!(fmt_hms(0.4), "0:00");
+        assert_eq!(fmt_hms(-3.0), "0:00");
+        assert_eq!(fmt_days(82.1 * 86_400.0), "82");
+        assert_eq!(fmt_days(0.4 * 86_400.0), "0");
     }
 }

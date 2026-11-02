@@ -3,11 +3,21 @@
 use crate::anim::Secs;
 use crate::p2::font::FontId;
 use crate::p2::layout::CAPTION_PX;
-use crate::p2::text::{middle_baseline, run_centred};
+use crate::p2::text::{marquee_run, middle_baseline, run_centred};
 use crate::p2::ui::ScreenUi;
 use crate::scene::Drawable;
-use crate::theme::p2::{CYAN, TEXT, TEXT2, TEXT3, TRACK};
+use crate::theme::p2::{BLUE, CYAN, OK, TEXT, TEXT2, TEXT3, TRACK};
 use crate::theme::Color;
+
+/// One text line of a `Card::Lines`, `dy` below the chart-area top.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CardLine {
+    pub text: String,
+    pub font: FontId,
+    pub px: f32,
+    pub color: Color,
+    pub dy: f32,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Card {
@@ -56,6 +66,16 @@ pub enum Card {
     },
     /// A sliding strip of ticks and letters with `deg` under the centre marker.
     Compass { deg: f32, label: String },
+    /// The media download: a marqueed title, a 5 px progress bar (`BLUE`,
+    /// `OK` when done) and a caption such as `35 % · 19 min left`.
+    Download {
+        title: String,
+        progress: f32,
+        label: String,
+        done: bool,
+    },
+    /// Up to three marqueed text lines (the Jellyfin card).
+    Lines(Vec<CardLine>),
 }
 
 /// Sample a horizontal-tangent cubic between consecutive points (no overshoot).
@@ -436,6 +456,61 @@ pub fn card_drawables(
             });
             out.push(caption(label, x, y, w, h, 3.0, CAPTION_PX, TEXT3));
         }
+        Card::Download {
+            title,
+            progress,
+            label,
+            done,
+        } => {
+            out.extend(marquee_run(
+                ui,
+                ("dl-title", 0),
+                title,
+                x + w / 2.0,
+                middle_baseline(FontId::SemiBold, 10.0, y + 3.0),
+                w,
+                FontId::SemiBold,
+                10.0,
+                TEXT,
+                y - 5.0,
+                16.0,
+                now,
+            ));
+            let bh = 5.0;
+            let by = y + 13.0;
+            out.push(bar(x, by, w, bh, bh / 2.0, TRACK, 1.0));
+            let p = ui.glide_with(("dl", 0), progress.clamp(0.0, 1.0), now, 0.6);
+            let col = if *done { OK } else { BLUE };
+            out.push(bar(x, by, (p * w).max(bh), bh, bh / 2.0, col, 1.0));
+            out.push(caption(
+                label,
+                x,
+                by,
+                w,
+                bh,
+                10.0,
+                CAPTION_PX,
+                if *done { OK } else { TEXT2 },
+            ));
+        }
+        Card::Lines(lines) => {
+            for (i, l) in lines.iter().enumerate() {
+                out.extend(marquee_run(
+                    ui,
+                    ("line", i as u32),
+                    &l.text,
+                    x + w / 2.0,
+                    middle_baseline(l.font, l.px, y + l.dy),
+                    w,
+                    l.font,
+                    l.px,
+                    l.color,
+                    y + l.dy - l.px * 0.8,
+                    l.px * 1.6,
+                    now,
+                ));
+            }
+        }
     }
     out
 }
@@ -688,5 +763,99 @@ mod tests {
         assert_eq!(compass_name(225.0), "SW");
         assert_eq!(compass_name(359.0), "N");
         assert_eq!(compass_name(100.0), "E");
+    }
+    #[test]
+    fn download_card_has_title_bar_and_caption() {
+        let mut ui = ScreenUi::new();
+        let card = Card::Download {
+            title: "Dune: Part Two".into(),
+            progress: 0.35,
+            label: "35 % · 19 min left".into(),
+            done: false,
+        };
+        let ds = card_drawables(&card, &mut ui, AREA, 0.0);
+        let r = rects(&ds);
+        assert_eq!(r.len(), 2, "track and fill");
+        assert_eq!(
+            (r[0].0, r[0].1, r[0].2, r[0].3, r[0].4),
+            (AREA.0, AREA.1 + 13.0, AREA.2, 5.0, TRACK)
+        );
+        assert_eq!(r[1].4, BLUE);
+        assert!((r[1].2 - 0.35 * AREA.2).abs() < 1e-3);
+        let t = texts(&ds);
+        assert_eq!(t, ["Dune: Part Two", "35 % · 19 min left"]);
+        assert!(ds.iter().any(|d| matches!(d, Drawable::Run { text, px, font, color, .. } if text == "Dune: Part Two" && *px == 10.0 && *font == FontId::SemiBold && *color == TEXT)));
+        assert!(ds.iter().any(|d| matches!(d, Drawable::Run { text, px, color, .. } if text == "35 % · 19 min left" && *px == 8.5 && *color == TEXT2)));
+        let done = Card::Download {
+            title: "Dune: Part Two".into(),
+            progress: 1.0,
+            label: "added just now".into(),
+            done: true,
+        };
+        let ds = card_drawables(&done, &mut ui, AREA, 5.0);
+        let r = rects(&ds);
+        assert_eq!(r[1].4, OK);
+        assert!(ds.iter().any(|d| matches!(d, Drawable::Run { text, color, .. } if text == "added just now" && *color == OK)));
+        let tiny = Card::Download {
+            title: "x".into(),
+            progress: 0.0,
+            label: "0 % · --".into(),
+            done: false,
+        };
+        let ds = card_drawables(&tiny, &mut ScreenUi::new(), AREA, 6.0);
+        assert!(
+            (rects(&ds)[1].2 - 5.0).abs() < 1e-3,
+            "never thinner than its height"
+        );
+    }
+
+    #[test]
+    fn lines_card_places_each_line_and_marquees_long_ones() {
+        let mut ui = ScreenUi::new();
+        let card = Card::Lines(vec![
+            CardLine {
+                text: "Blade Runner".into(),
+                font: FontId::Bold,
+                px: 11.0,
+                color: TEXT,
+                dy: 7.0,
+            },
+            CardLine {
+                text: "2017 · 2h 44m".into(),
+                font: FontId::Medium,
+                px: 8.5,
+                color: TEXT2,
+                dy: 21.0,
+            },
+            CardLine {
+                text: "silke · Living room TV  ·  +1 more".into(),
+                font: FontId::Medium,
+                px: 8.5,
+                color: TEXT3,
+                dy: 32.0,
+            },
+        ]);
+        let ds = card_drawables(&card, &mut ui, AREA, 0.0);
+        let t = texts(&ds);
+        assert_eq!(t.len(), 4, "the long third line is drawn twice");
+        assert_eq!(
+            &t[..3],
+            [
+                "Blade Runner",
+                "2017 · 2h 44m",
+                "silke · Living room TV  ·  +1 more"
+            ]
+        );
+        let base: Vec<f32> = ds
+            .iter()
+            .filter_map(|d| match d {
+                Drawable::Run { baseline, .. } => Some(*baseline),
+                _ => None,
+            })
+            .collect();
+        assert!((base[0] - middle_baseline(FontId::Bold, 11.0, AREA.1 + 7.0)).abs() < 1e-3);
+        assert!((base[1] - middle_baseline(FontId::Medium, 8.5, AREA.1 + 21.0)).abs() < 1e-3);
+        assert!(base[2] > base[1] && base[1] > base[0]);
+        assert_eq!(rects(&ds).len(), 0, "no bars, no divider");
     }
 }
