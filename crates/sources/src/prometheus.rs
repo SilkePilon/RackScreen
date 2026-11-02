@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use kube::Client;
-use rackscreen_core::event::{Event, LinkTarget, Robustness};
+use rackscreen_core::event::{Event, LinkTarget, NodeLoad, Robustness};
+use rackscreen_core::theme::Role;
 use serde_json::Value;
 
 use crate::tunnel::{find_pod_for_service, Tunnel};
@@ -177,16 +178,48 @@ async fn query_range(t: &mut Tunnel, q: &str, start: i64, end: i64, step: u32) -
 }
 
 /// One range query per sparkline so the lines are full at boot: cpu and
-/// download over the last 60 s at 2 s, memory over 90 s at 3 s.
-async fn prefill(t: &mut Tunnel) -> Result<Event> {
-    let end = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+/// download over the last 60 s at 2 s, memory over 90 s at 3 s, entrypoint
+/// req/s over 90 s at 3 s.
+async fn prefill(t: &mut Tunnel) -> Result<Vec<Event>> {
+    let end = unix_now();
     let cpu = parse_matrix(&query_range(t, Q_CPU, end - 60, end, 2).await?);
     let mem = parse_matrix(&query_range(t, Q_MEM, end - 90, end, 3).await?);
     let net = parse_matrix(&query_range(t, Q_NET_RX, end - 60, end, 2).await?);
-    Ok(history_event(cpu, mem, net))
+    let mut out = vec![history_event(cpu, mem, net)];
+    let rps = parse_matrix(&query_range(t, Q_TRAFFIC_RPS, end - 90, end, 3).await?);
+    if !rps.is_empty() {
+        out.push(Event::TrafficHistory {
+            req_per_sec: rps.into_iter().map(|v| v as f32).collect(),
+        });
+    }
+    Ok(out)
+}
+
+/// Restarts per hour and the hourly mean mains voltage over the last 24 h,
+/// one sample per hour ending now; re-run every `HOURLY_REFRESH_SECS`.
+async fn hourly_prefill(t: &mut Tunnel) -> Result<Vec<Event>> {
+    let end = unix_now();
+    let mut out = Vec::new();
+    let restarts = hourly_from(&parse_matrix_ts(
+        &query_range(t, Q_RESTARTS_HOURLY, end - 23 * 3600, end, 3600).await?,
+    ));
+    if !restarts.is_empty() {
+        out.push(Event::RestartsHistory { hourly: restarts });
+    }
+    let mains = hourly_from(&parse_matrix_ts(
+        &query_range(t, Q_MAINS_HOURLY, end - 23 * 3600, end, 3600).await?,
+    ));
+    if !mains.is_empty() {
+        out.push(Event::MainsHistory { hourly: mains });
+    }
+    Ok(out)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// `192.168.1.5:9100` -> `.5`
@@ -196,6 +229,183 @@ pub fn node_tag(instance: &str) -> String {
         Some(last) if last != ip => format!(".{last}"),
         _ => ip.to_string(),
     }
+}
+
+/// The node a series belongs to: the `node` label kube-prometheus adds, the
+/// `nodename` of a `node_uname_info` join, else the instance's last octet.
+pub fn node_name(m: &HashMap<String, String>) -> String {
+    m.get("node")
+        .or_else(|| m.get("nodename"))
+        .cloned()
+        .unwrap_or_else(|| node_tag(m.get("instance").map(String::as_str).unwrap_or("")))
+}
+
+/// `portfolio-portfolio-http@kubernetes` → `portfolio`: drop the provider,
+/// a trailing port name or number, and a repeated `namespace-name` half.
+pub fn short_service(s: &str) -> String {
+    let base = s.split('@').next().unwrap_or(s);
+    let mut toks: Vec<&str> = base.split('-').collect();
+    if toks.len() > 1 {
+        let last = toks[toks.len() - 1];
+        let port_name = matches!(
+            last,
+            "http" | "https" | "web" | "webui" | "tcp" | "udp" | "svc"
+        );
+        if port_name || last.chars().all(|c| c.is_ascii_digit()) {
+            toks.pop();
+        }
+    }
+    let n = toks.len();
+    if n >= 2 && n.is_multiple_of(2) && toks[..n / 2] == toks[n / 2..] {
+        toks.truncate(n / 2);
+    }
+    toks.join("-")
+}
+
+/// `signal-cli-65cd44c9db-tf9t6` → `signal-cli`: drop the pod suffix and the
+/// replica-set hash.
+pub fn short_pod(pod: &str) -> String {
+    let alnum = |t: &str| {
+        t.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    };
+    let mut toks: Vec<&str> = pod.split('-').collect();
+    if toks.len() > 1 && toks[toks.len() - 1].len() == 5 && alnum(toks[toks.len() - 1]) {
+        toks.pop();
+    }
+    if toks.len() > 1 {
+        let last = toks[toks.len() - 1];
+        if (8..=10).contains(&last.len()) && alnum(last) && last.chars().any(|c| c.is_ascii_digit())
+        {
+            toks.pop();
+        }
+    }
+    toks.join("-")
+}
+
+/// `(timestamp, value)` pairs of the first series of a `query_range` matrix.
+pub fn parse_matrix_ts(json: &str) -> Vec<(i64, f64)> {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    let Some(first) = v
+        .get("data")
+        .and_then(|d| d.get("result"))
+        .and_then(|r| r.as_array())
+        .and_then(|r| r.first())
+    else {
+        return Vec::new();
+    };
+    first
+        .get("values")
+        .and_then(|vs| vs.as_array())
+        .map(|vs| {
+            vs.iter()
+                .filter_map(|pair| {
+                    let p = pair.as_array()?;
+                    let ts = p.first()?.as_f64()? as i64;
+                    let val = p.get(1)?.as_str()?.parse::<f64>().ok()?;
+                    Some((ts, val))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `(unix hour, value)` per matrix sample, NaN samples dropped.
+pub fn hourly_from(m: &[(i64, f64)]) -> Vec<(i64, f32)> {
+    m.iter()
+        .filter(|(_, v)| v.is_finite())
+        .map(|(ts, v)| (ts.div_euclid(3600), *v as f32))
+        .collect()
+}
+
+/// The largest sample per node, sorted by node name.
+pub fn per_node(v: &[(HashMap<String, String>, f64)]) -> Vec<(String, f32)> {
+    let mut map: std::collections::BTreeMap<String, f32> = Default::default();
+    for (m, val) in v {
+        if !val.is_finite() {
+            continue;
+        }
+        let e = map.entry(node_name(m)).or_insert(*val as f32);
+        *e = e.max(*val as f32);
+    }
+    map.into_iter().collect()
+}
+
+/// `None` when Traefik exports nothing at all.
+pub fn traffic_from(
+    rps: Option<f64>,
+    top: &[(HashMap<String, String>, f64)],
+    all: Option<f64>,
+    err: Option<f64>,
+) -> Option<Event> {
+    let rps = rps?;
+    let mut top: Vec<(String, f32)> = top
+        .iter()
+        .map(|(m, v)| {
+            (
+                short_service(m.get("service").map(String::as_str).unwrap_or("?")),
+                *v as f32,
+            )
+        })
+        .collect();
+    top.sort_by(|a, b| b.1.total_cmp(&a.1));
+    top.truncate(3);
+    let all = all.unwrap_or(0.0);
+    let error_share = if all > 0.0 {
+        (err.unwrap_or(0.0) / all) as f32
+    } else {
+        0.0
+    };
+    Some(Event::Traffic {
+        req_per_sec: rps as f32,
+        top,
+        service_rps: all as f32,
+        error_share,
+    })
+}
+
+/// `None` when kube-state-metrics exports nothing.
+pub fn restarts_from(total: Option<f64>, top: &[(HashMap<String, String>, f64)]) -> Option<Event> {
+    let total = total?;
+    let worst = top
+        .iter()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .filter(|(_, v)| v.round() >= 1.0)
+        .map(|(m, v)| {
+            (
+                short_pod(m.get("pod").map(String::as_str).unwrap_or("?")),
+                v.round() as u32,
+            )
+        });
+    Some(Event::Restarts {
+        total_24h: total.round().max(0.0) as u32,
+        worst,
+    })
+}
+
+/// Load averages joined by node name; a node missing from a series reads 0.
+pub fn load_from(
+    l1: &[(HashMap<String, String>, f64)],
+    l5: &[(HashMap<String, String>, f64)],
+    l15: &[(HashMap<String, String>, f64)],
+    cores: &[(HashMap<String, String>, f64)],
+) -> Vec<NodeLoad> {
+    let by = |v: &[(HashMap<String, String>, f64)]| -> HashMap<String, f32> {
+        per_node(v).into_iter().collect()
+    };
+    let (m5, m15, mc) = (by(l5), by(l15), by(cores));
+    per_node(l1)
+        .into_iter()
+        .map(|(node, load1)| NodeLoad {
+            load5: m5.get(&node).copied().unwrap_or(0.0),
+            load15: m15.get(&node).copied().unwrap_or(0.0),
+            cores: mc.get(&node).copied().unwrap_or(1.0).max(1.0) as u32,
+            node,
+            load1,
+        })
+        .collect()
 }
 
 const Q_CPU: &str = "100-avg(rate(node_cpu_seconds_total{mode=\"idle\"}[2m]))*100";
@@ -217,6 +427,29 @@ const Q_LH_SIZE: &str = "longhorn_volume_actual_size_bytes";
 const Q_UPS_STATUS: &str = "nut_ups_status";
 const Q_UPS_CHARGE: &str = "nut_battery_charge";
 const Q_UPS_LOAD: &str = "nut_load";
+const Q_RADARR: &str = "sum(radarr_movies_total)";
+const Q_SONARR: &str = "sum(sonarr_series_total)";
+const Q_LIDARR: &str = "sum(lidarr_artists_total)";
+const Q_TRAFFIC_RPS: &str = "sum(rate(traefik_entrypoint_requests_total[1m]))";
+const Q_TRAFFIC_TOP: &str = "topk(3, sum by (service)(rate(traefik_service_requests_total[5m])))";
+/// The 5xx share is divided here, not in PromQL: a quiet site makes the
+/// quotient an empty result, which would read as "no exporter".
+const Q_TRAFFIC_ALL: &str = "sum(rate(traefik_service_requests_total[5m]))";
+const Q_TRAFFIC_5XX: &str = "sum(rate(traefik_service_requests_total{code=~\"5..\"}[5m]))";
+const Q_RESTARTS: &str = "sum(increase(kube_pod_container_status_restarts_total[24h]))";
+const Q_RESTARTS_TOP: &str =
+    "topk(1, sum by (namespace, pod)(increase(kube_pod_container_status_restarts_total[24h])))";
+const Q_RESTARTS_HOURLY: &str = "sum(increase(kube_pod_container_status_restarts_total[1h]))";
+const Q_UPTIME: &str = "time() - node_boot_time_seconds";
+const Q_FANS: &str = "node_hwmon_fan_rpm";
+const Q_MAINS_V: &str = "nut_input_voltage_volts";
+const Q_MAINS_HOURLY: &str = "avg(nut_input_voltage_volts)";
+const Q_LOAD1: &str = "node_load1";
+const Q_LOAD5: &str = "node_load5";
+const Q_LOAD15: &str = "node_load15";
+const Q_CORES: &str = "count by (node, instance)(node_cpu_seconds_total{mode=\"idle\"})";
+/// The hourly range queries (restarts, mains) are refreshed this often.
+pub const HOURLY_REFRESH_SECS: u64 = 300;
 const Q_UPS_RUNTIME: &str = "nut_battery_runtime_seconds";
 /// Physical interfaces only: no veth, cni, flannel or bridge traffic, which
 /// would count every pod packet twice. Two minutes so a 60 s scrape interval
@@ -485,6 +718,72 @@ async fn poll(
     if let (Some(rx_bps), Some(tx_bps)) = (rx, tx) {
         out.push(Event::Network { rx_bps, tx_bps });
     }
+    // media library
+    let movies = parse_scalar(&query(t, Q_RADARR).await?);
+    let series = parse_scalar(&query(t, Q_SONARR).await?);
+    let artists = parse_scalar(&query(t, Q_LIDARR).await?);
+    out.push(
+        if movies.is_none() && series.is_none() && artists.is_none() {
+            Event::NoExporter { role: Role::Media }
+        } else {
+            Event::MediaLibrary {
+                movies: movies.unwrap_or(0.0).max(0.0) as u32,
+                series: series.unwrap_or(0.0).max(0.0) as u32,
+                artists: artists.unwrap_or(0.0).max(0.0) as u32,
+            }
+        },
+    );
+    // traffic
+    let rps = parse_scalar(&query(t, Q_TRAFFIC_RPS).await?);
+    let top = parse_vector(&query(t, Q_TRAFFIC_TOP).await?);
+    let all = parse_scalar(&query(t, Q_TRAFFIC_ALL).await?);
+    let err = parse_scalar(&query(t, Q_TRAFFIC_5XX).await?);
+    out.push(
+        traffic_from(rps, &top, all, err).unwrap_or(Event::NoExporter {
+            role: Role::Traffic,
+        }),
+    );
+    // restarts
+    let total = parse_scalar(&query(t, Q_RESTARTS).await?);
+    let worst = parse_vector(&query(t, Q_RESTARTS_TOP).await?);
+    out.push(restarts_from(total, &worst).unwrap_or(Event::NoExporter {
+        role: Role::Restarts,
+    }));
+    // uptime
+    let up = per_node(&parse_vector(&query(t, Q_UPTIME).await?));
+    out.push(if up.is_empty() {
+        Event::NoExporter { role: Role::Uptime }
+    } else {
+        Event::Uptime(up.into_iter().map(|(n, s)| (n, s as f64)).collect())
+    });
+    // fans
+    let fans = per_node(&parse_vector(&query(t, Q_FANS).await?));
+    out.push(if fans.is_empty() {
+        Event::NoExporter { role: Role::Fans }
+    } else {
+        Event::Fans(fans)
+    });
+    // mains
+    out.push(match parse_scalar(&query(t, Q_MAINS_V).await?) {
+        Some(volts) => Event::Mains {
+            volts: volts as f32,
+            ups_load_pct: parse_scalar(&query(t, Q_UPS_LOAD).await?)
+                .map(as_percent)
+                .unwrap_or(0.0),
+        },
+        None => Event::NoExporter { role: Role::Mains },
+    });
+    // load
+    let l1 = parse_vector(&query(t, Q_LOAD1).await?);
+    let l5 = parse_vector(&query(t, Q_LOAD5).await?);
+    let l15 = parse_vector(&query(t, Q_LOAD15).await?);
+    let cores = parse_vector(&query(t, Q_CORES).await?);
+    let nodes = load_from(&l1, &l5, &l15, &cores);
+    out.push(if nodes.is_empty() {
+        Event::NoExporter { role: Role::Load }
+    } else {
+        Event::Load(nodes)
+    });
     Ok(out)
 }
 
@@ -533,15 +832,25 @@ pub async fn run_prometheus(client: Client, cfg: PromConfig, ctx: SourceCtx) {
         backoff = 5;
         if !prefilled {
             match prefill(&mut t).await {
-                Ok(ev) => {
-                    ctx.emit(ev);
+                Ok(evs) => {
+                    ctx.emit_all(evs);
                     prefilled = true;
                 }
                 Err(e) => tracing::warn!("prometheus prefill: {e:#}"),
             }
         }
+        let mut hourly_at: Option<std::time::Instant> = None;
         let mut failures = 0;
         loop {
+            if hourly_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(HOURLY_REFRESH_SECS)) {
+                match hourly_prefill(&mut t).await {
+                    Ok(evs) => {
+                        ctx.emit_all(evs);
+                        hourly_at = Some(std::time::Instant::now());
+                    }
+                    Err(e) => tracing::warn!("prometheus hourly ranges: {e:#}"),
+                }
+            }
             match poll(&mut t, &mut alerts, &mut storage, &mut ups).await {
                 Ok(evs) => {
                     failures = 0;
@@ -865,6 +1174,153 @@ mod tests {
         assert_eq!(
             volume_sizes_from(&v),
             vec![("pvc-a".into(), 120), ("pvc-b".into(), 7)]
+        );
+    }
+    #[test]
+    fn node_name_prefers_the_node_label() {
+        let mut m = HashMap::new();
+        m.insert("instance".to_string(), "192.168.0.98:9100".to_string());
+        assert_eq!(node_name(&m), ".98");
+        m.insert("node".to_string(), "raspberrypi-5-16gb-1".to_string());
+        assert_eq!(node_name(&m), "raspberrypi-5-16gb-1");
+        let mut n = HashMap::new();
+        n.insert("nodename".to_string(), "hp-1".to_string());
+        assert_eq!(node_name(&n), "hp-1");
+        assert_eq!(node_name(&HashMap::new()), "");
+    }
+
+    #[test]
+    fn service_and_pod_names_are_shortened() {
+        assert_eq!(
+            short_service("portfolio-portfolio-http@kubernetes"),
+            "portfolio"
+        );
+        assert_eq!(short_service("n8n-n8n-http@kubernetes"), "n8n");
+        assert_eq!(
+            short_service("windesheim-readers-windesheim-readers-http@kubernetes"),
+            "windesheim-readers"
+        );
+        assert_eq!(
+            short_service("arr-stack-sonarr-webui@kubernetes"),
+            "arr-stack-sonarr"
+        );
+        assert_eq!(
+            short_service("jotihunt-client-http@kubernetes"),
+            "jotihunt-client"
+        );
+        assert_eq!(short_service("grafana-3000@kubernetes"), "grafana");
+        assert_eq!(short_service("api@file"), "api");
+        assert_eq!(short_pod("signal-cli-65cd44c9db-tf9t6"), "signal-cli");
+        assert_eq!(short_pod("csi-smb-node-jvfhl"), "csi-smb-node");
+        assert_eq!(
+            short_pod("longhorn-csi-plugin-f9zw2"),
+            "longhorn-csi-plugin"
+        );
+        assert_eq!(short_pod("prometheus-0"), "prometheus-0");
+        assert_eq!(short_pod("redis"), "redis");
+    }
+
+    #[test]
+    fn matrix_with_timestamps_and_hourly_keys() {
+        let v = parse_matrix_ts(MATRIX);
+        assert_eq!(v.len(), 4);
+        assert_eq!(v[0], (1, 4.5));
+        assert!(v[2].1.is_nan());
+        let h = hourly_from(&[(3_600_000, 1.0), (3_603_600, 2.5), (3_607_200, f64::NAN)]);
+        assert_eq!(h, vec![(1000, 1.0), (1001, 2.5)], "NaN hours are dropped");
+        assert!(parse_matrix_ts("nope").is_empty());
+    }
+
+    fn labelled(pairs: &[(&[(&str, &str)], f64)]) -> Vec<(HashMap<String, String>, f64)> {
+        pairs
+            .iter()
+            .map(|(ls, v)| {
+                (
+                    ls.iter()
+                        .map(|(k, x)| (k.to_string(), x.to_string()))
+                        .collect(),
+                    *v,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn traffic_restarts_and_load_events() {
+        let top = labelled(&[
+            (&[("service", "n8n-n8n-http@kubernetes")], 0.022),
+            (&[("service", "portfolio-portfolio-http@kubernetes")], 0.015),
+            (&[("service", "jotihunt-client-http@kubernetes")], 0.0),
+        ]);
+        let ev = traffic_from(Some(0.0333), &top, Some(0.037), Some(0.002)).unwrap();
+        assert_eq!(
+            ev,
+            Event::Traffic {
+                req_per_sec: 0.0333,
+                top: vec![
+                    ("n8n".into(), 0.022),
+                    ("portfolio".into(), 0.015),
+                    ("jotihunt-client".into(), 0.0)
+                ],
+                service_rps: 0.037,
+                error_share: 0.002 / 0.037,
+            }
+        );
+        assert!(
+            matches!(traffic_from(Some(1.0), &[], Some(0.0), None).unwrap(), Event::Traffic { error_share, .. } if error_share == 0.0)
+        );
+        assert!(
+            traffic_from(None, &top, None, None).is_none(),
+            "no entrypoint series: no exporter"
+        );
+        let worst = labelled(&[(
+            &[
+                ("namespace", "hermes"),
+                ("pod", "signal-cli-65cd44c9db-tf9t6"),
+            ],
+            36.14,
+        )]);
+        assert_eq!(
+            restarts_from(Some(56.148), &worst),
+            Some(Event::Restarts {
+                total_24h: 56,
+                worst: Some(("signal-cli".into(), 36)),
+            })
+        );
+        assert_eq!(
+            restarts_from(Some(0.0), &[]),
+            Some(Event::Restarts {
+                total_24h: 0,
+                worst: None,
+            })
+        );
+        assert_eq!(restarts_from(None, &[]), None);
+        let l1 = labelled(&[
+            (&[("node", "pi-1"), ("instance", "a")], 0.81),
+            (&[("node", "hp-1"), ("instance", "b")], 0.19),
+        ]);
+        let l5 = labelled(&[(&[("node", "pi-1")], 0.7), (&[("node", "hp-1")], 0.2)]);
+        let l15 = labelled(&[(&[("node", "pi-1")], 0.6)]);
+        let cores = labelled(&[(&[("node", "pi-1")], 4.0), (&[("node", "hp-1")], 12.0)]);
+        let nodes = load_from(&l1, &l5, &l15, &cores);
+        assert_eq!(nodes.len(), 2);
+        let pi = nodes.iter().find(|n| n.node == "pi-1").unwrap();
+        assert_eq!(
+            (pi.load1, pi.load5, pi.load15, pi.cores),
+            (0.81, 0.7, 0.6, 4)
+        );
+        let hp = nodes.iter().find(|n| n.node == "hp-1").unwrap();
+        assert_eq!((hp.load15, hp.cores), (0.0, 12), "a missing series reads 0");
+        assert!(load_from(&[], &l5, &l15, &cores).is_empty());
+        let fans = labelled(&[
+            (&[("node", "pi-1"), ("sensor", "fan1")], 4838.0),
+            (&[("node", "pi-1"), ("sensor", "fan2")], 5000.0),
+            (&[("node", "pi-2"), ("sensor", "fan1")], 4516.0),
+        ]);
+        assert_eq!(
+            per_node(&fans),
+            vec![("pi-1".to_string(), 5000.0), ("pi-2".to_string(), 4516.0)],
+            "max per node, sorted"
         );
     }
 }

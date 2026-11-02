@@ -2,7 +2,9 @@
 
 use crate::anim::Secs;
 use crate::electricity::{price_level, PriceLevel, Source};
-use crate::event::{App, AppHealth, Event, IssPass, LinkTarget, MoonPhase, Robustness, Torrent};
+use crate::event::{
+    App, AppHealth, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
+};
 use crate::face::{Face, FaceFrame};
 use crate::history::{History, Hourly};
 use crate::mood::{mood, Mood, MoodInputs};
@@ -183,6 +185,66 @@ pub struct IssState {
     pub have: bool,
 }
 
+/// Library counts from the arr exporter; the download card state arrives in Task 5.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MediaState {
+    pub movies: u32,
+    pub series: u32,
+    pub artists: u32,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TrafficState {
+    pub req_per_sec: f32,
+    /// The three busiest services, `(short name, req/s)`, busiest first.
+    pub top: Vec<(String, f32)>,
+    pub service_rps: f32,
+    /// 0..=1 share of 5xx responses over the last 5 min.
+    pub error_share: f32,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RestartsState {
+    pub total_24h: u32,
+    pub worst: Option<(String, u32)>,
+    pub have: bool,
+    /// When the 24 h counter last rose between two polls.
+    pub last_rise_at: Option<Secs>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UptimeState {
+    /// `(node, seconds up)`, sorted by node name.
+    pub nodes: Vec<(String, f64)>,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FansState {
+    /// `(node, rpm)`, sorted by node name.
+    pub fans: Vec<(String, f32)>,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MainsState {
+    pub volts: f32,
+    pub ups_load_pct: f32,
+    pub have: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LoadState {
+    /// Sorted by node name.
+    pub nodes: Vec<NodeLoad>,
+    pub have: bool,
+}
+
+/// A rising restart counter worries the face for this long.
+pub const RESTART_RECENT_SECS: Secs = 300.0;
+
 /// Ring fill for a bit rate: 100 kbit/s is (almost) empty, 1 Gbit/s is full,
 /// four decades in between, and a floor so idle still shows a little.
 pub fn net_fill(bps: f64) -> f32 {
@@ -235,6 +297,18 @@ pub struct Model {
     rain: RainState,
     sky: SkyState,
     iss: IssState,
+    media: MediaState,
+    traffic: TrafficState,
+    restarts: RestartsState,
+    uptime: UptimeState,
+    fans: FansState,
+    mains: MainsState,
+    load: LoadState,
+    /// Entrypoint req/s every 3 s, 90 s.
+    traffic_hist: History,
+    /// Restarts and mean input voltage per unix hour, 24 h.
+    restarts_hist: Hourly,
+    mains_hist: Hourly,
     /// The sparkline buffers: cpu % at 2 s, mem % at 3 s, download Mb/s at 2 s.
     cpu_hist: History,
     mem_hist: History,
@@ -308,6 +382,16 @@ impl Model {
             rain: RainState::default(),
             sky: SkyState::default(),
             iss: IssState::default(),
+            media: MediaState::default(),
+            traffic: TrafficState::default(),
+            restarts: RestartsState::default(),
+            uptime: UptimeState::default(),
+            fans: FansState::default(),
+            mains: MainsState::default(),
+            load: LoadState::default(),
+            traffic_hist: History::new(31, 3.0),
+            restarts_hist: Hourly::new(),
+            mains_hist: Hourly::new(),
             cpu_hist: History::new(31, 2.0),
             mem_hist: History::new(31, 3.0),
             net_hist: History::new(31, 2.0),
@@ -353,7 +437,7 @@ impl Model {
     }
 
     /// The rack facts the face reads each frame.
-    pub fn mood_inputs(&self) -> MoodInputs {
+    pub fn mood_inputs(&self, now: Secs) -> MoodInputs {
         let st = &self.state;
         let th = self.thresholds;
         let hottest = st.temps.iter().map(|(_, c)| *c).fold(0.0_f32, f32::max);
@@ -373,7 +457,10 @@ impl Model {
             hot: (st.have_temps && hottest >= th.hot_temp)
                 || (st.have_metrics && (st.cpu_pct >= th.hot_cpu || st.mem_pct >= th.hot_mem)),
             pods_failed: st.pods_failed > 0,
-            recent_restart: false,
+            recent_restart: self
+                .restarts
+                .last_rise_at
+                .is_some_and(|t| now - t < RESTART_RECENT_SECS),
             bedtime: self.bedtime_near,
             ci_passed_recently: false,
             cheap_price: self.current_price().is_some_and(|p| {
@@ -466,6 +553,36 @@ impl Model {
     pub fn iss(&self) -> &IssState {
         &self.iss
     }
+    pub fn media(&self) -> &MediaState {
+        &self.media
+    }
+    pub fn traffic(&self) -> &TrafficState {
+        &self.traffic
+    }
+    pub fn traffic_history(&self) -> &History {
+        &self.traffic_hist
+    }
+    pub fn restarts(&self) -> &RestartsState {
+        &self.restarts
+    }
+    pub fn restarts_hourly(&self) -> &Hourly {
+        &self.restarts_hist
+    }
+    pub fn uptime(&self) -> &UptimeState {
+        &self.uptime
+    }
+    pub fn fans(&self) -> &FansState {
+        &self.fans
+    }
+    pub fn mains(&self) -> &MainsState {
+        &self.mains
+    }
+    pub fn mains_hourly(&self) -> &Hourly {
+        &self.mains_hist
+    }
+    pub fn load(&self) -> &LoadState {
+        &self.load
+    }
     pub fn set_token_present(&mut self, present: bool) {
         self.token_present = present;
     }
@@ -511,8 +628,6 @@ impl Model {
     pub fn exporter_missing(&self, role: Role) -> bool {
         self.exporter_missing.contains(&role)
     }
-    // the apply arms of the Prometheus events call this (Task 3)
-    #[allow(dead_code)]
     pub(crate) fn clear_exporter(&mut self, role: Role) {
         self.exporter_missing.retain(|r| *r != role);
     }
@@ -598,7 +713,7 @@ impl Model {
     /// Advance the deploy day, the face and each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
         self.roll_deploy_day();
-        let mood = mood(&self.mood_inputs());
+        let mood = mood(&self.mood_inputs(now));
         self.face.tick(mood, now);
         let mut waiting: Vec<usize> = Vec::new();
         for (i, s) in self.screens.iter_mut().enumerate() {
@@ -798,6 +913,73 @@ impl Model {
                 LinkTarget::Github => self.link.github = up,
                 LinkTarget::ArgoCd => self.link.argocd = up,
             },
+            Event::MediaLibrary {
+                movies,
+                series,
+                artists,
+            } => {
+                self.clear_exporter(Role::Media);
+                self.media.movies = movies;
+                self.media.series = series;
+                self.media.artists = artists;
+                self.media.have = true;
+            }
+            Event::Traffic {
+                req_per_sec,
+                top,
+                service_rps,
+                error_share,
+            } => {
+                self.clear_exporter(Role::Traffic);
+                self.traffic_hist.push(req_per_sec, now);
+                self.traffic = TrafficState {
+                    req_per_sec,
+                    top,
+                    service_rps,
+                    error_share,
+                    have: true,
+                };
+            }
+            Event::TrafficHistory { req_per_sec } => self.traffic_hist.prefill(&req_per_sec, now),
+            Event::Restarts { total_24h, worst } => {
+                self.clear_exporter(Role::Restarts);
+                if self.restarts.have && total_24h > self.restarts.total_24h {
+                    self.restarts.last_rise_at = Some(now);
+                }
+                self.restarts.total_24h = total_24h;
+                self.restarts.worst = worst;
+                self.restarts.have = true;
+            }
+            Event::RestartsHistory { hourly } => self.restarts_hist.replace(&hourly),
+            Event::Uptime(mut nodes) => {
+                self.clear_exporter(Role::Uptime);
+                nodes.sort_by(|a, b| a.0.cmp(&b.0));
+                self.uptime = UptimeState { nodes, have: true };
+            }
+            Event::Fans(mut fans) => {
+                self.clear_exporter(Role::Fans);
+                fans.sort_by(|a, b| a.0.cmp(&b.0));
+                self.fans = FansState { fans, have: true };
+            }
+            Event::Mains {
+                volts,
+                ups_load_pct,
+            } => {
+                self.clear_exporter(Role::Mains);
+                let hour = self.unix_hour();
+                self.mains_hist.push(hour, volts);
+                self.mains = MainsState {
+                    volts,
+                    ups_load_pct,
+                    have: true,
+                };
+            }
+            Event::MainsHistory { hourly } => self.mains_hist.replace(&hourly),
+            Event::Load(mut nodes) => {
+                self.clear_exporter(Role::Load);
+                nodes.sort_by(|a, b| a.node.cmp(&b.node));
+                self.load = LoadState { nodes, have: true };
+            }
             Event::NoExporter { role } => {
                 if !self.exporter_missing.contains(&role) {
                     self.exporter_missing.push(role);
@@ -912,6 +1094,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::NodeLoad;
     use crate::p2::ui::ScreenUi;
     use crate::scene::Drawable;
 
@@ -1286,12 +1469,12 @@ mod tests {
             },
             0.0,
         );
-        let i = m.mood_inputs();
+        let i = m.mood_inputs(0.0);
         assert!(i.nodes_not_ready && !i.on_battery && !i.hot);
         m.tick(1.0);
         assert_eq!(m.face_mood(), crate::mood::Mood::Sad);
         m.apply(metrics(95.0, None), 2.0);
-        assert!(m.mood_inputs().hot, "cpu over hot_cpu");
+        assert!(m.mood_inputs(0.0).hot, "cpu over hot_cpu");
         m.apply(
             Event::NodeSnapshot {
                 ready: 4,
@@ -1356,5 +1539,187 @@ mod tests {
         m.set_arr_configured(true);
         m.set_jellyfin_configured(true);
         assert!(m.arr_configured() && m.jellyfin_configured());
+    }
+    fn node_load(node: &str, l1: f32, cores: u32) -> NodeLoad {
+        NodeLoad {
+            node: node.into(),
+            load1: l1,
+            load5: l1 * 0.9,
+            load15: l1 * 0.8,
+            cores,
+        }
+    }
+
+    #[test]
+    fn new_prometheus_events_fill_their_states_and_clear_the_exporter_flag() {
+        let mut m = Model::new(Thresholds::default());
+        m.set_unix_now(3600 * 1000 + 100);
+        for role in [
+            Role::Media,
+            Role::Traffic,
+            Role::Restarts,
+            Role::Uptime,
+            Role::Fans,
+            Role::Mains,
+            Role::Load,
+        ] {
+            m.apply(Event::NoExporter { role }, 0.0);
+        }
+        m.apply(
+            Event::MediaLibrary {
+                movies: 37,
+                series: 30,
+                artists: 54,
+            },
+            0.0,
+        );
+        assert_eq!(
+            (
+                m.media().movies,
+                m.media().series,
+                m.media().artists,
+                m.media().have
+            ),
+            (37, 30, 54, true)
+        );
+        assert!(!m.exporter_missing(Role::Media));
+        m.apply(
+            Event::TrafficHistory {
+                req_per_sec: (0..40).map(|i| i as f32).collect(),
+            },
+            0.0,
+        );
+        assert_eq!(m.traffic_history().len(), 31);
+        m.apply(
+            Event::Traffic {
+                req_per_sec: 4.2,
+                top: vec![("n8n".into(), 2.0), ("grafana".into(), 1.0)],
+                service_rps: 4.0,
+                error_share: 0.02,
+            },
+            1.0,
+        );
+        assert!(m.traffic().have && m.traffic().req_per_sec == 4.2);
+        assert_eq!(m.traffic().top[0].0, "n8n");
+        assert_eq!(m.traffic_history().series()[30], 4.2);
+        assert!(!m.exporter_missing(Role::Traffic));
+        m.apply(
+            Event::RestartsHistory {
+                hourly: (0..24)
+                    .map(|i| (1000 - 23 + i, if i == 20 { 7.0 } else { 0.0 }))
+                    .collect(),
+            },
+            1.0,
+        );
+        assert_eq!(m.restarts_hourly().len(), 24);
+        assert_eq!(m.restarts_hourly().last_24(m.unix_hour())[20], Some(7.0));
+        m.apply(
+            Event::Restarts {
+                total_24h: 56,
+                worst: Some(("signal-cli".into(), 36)),
+            },
+            2.0,
+        );
+        assert_eq!(m.restarts().total_24h, 56);
+        assert_eq!(m.restarts().worst, Some(("signal-cli".to_string(), 36)));
+        assert_eq!(
+            m.restarts().last_rise_at,
+            None,
+            "the first sample is not a rise"
+        );
+        m.apply(
+            Event::Uptime(vec![("pi-2".into(), 500.0), ("pi-1".into(), 6_884_104.0)]),
+            2.0,
+        );
+        assert_eq!(m.uptime().nodes[0].0, "pi-1", "sorted by name");
+        m.apply(Event::Fans(vec![("pi-1".into(), 4838.0)]), 2.0);
+        assert!(m.fans().have && m.fans().fans.len() == 1);
+        m.apply(
+            Event::MainsHistory {
+                hourly: (0..24)
+                    .map(|i| (1000 - 23 + i, 230.0 + i as f32 * 0.1))
+                    .collect(),
+            },
+            2.0,
+        );
+        m.apply(
+            Event::Mains {
+                volts: 234.0,
+                ups_load_pct: 7.0,
+            },
+            2.0,
+        );
+        assert_eq!(
+            (m.mains().volts, m.mains().ups_load_pct, m.mains().have),
+            (234.0, 7.0, true)
+        );
+        assert_eq!(
+            m.mains_hourly().values().last(),
+            Some(&234.0),
+            "the live sample replaces the current hour"
+        );
+        m.apply(
+            Event::Load(vec![node_load("pi-1", 0.81, 4), node_load("hp-1", 0.73, 8)]),
+            2.0,
+        );
+        assert_eq!(m.load().nodes.len(), 2);
+        assert_eq!(m.load().nodes[0].node, "hp-1", "sorted by name");
+        for role in [
+            Role::Media,
+            Role::Traffic,
+            Role::Restarts,
+            Role::Uptime,
+            Role::Fans,
+            Role::Mains,
+            Role::Load,
+        ] {
+            assert!(!m.exporter_missing(role), "{role:?} cleared by its data");
+        }
+    }
+
+    #[test]
+    fn a_rising_restart_counter_worries_the_face_for_five_minutes() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Restarts {
+                total_24h: 10,
+                worst: None,
+            },
+            0.0,
+        );
+        assert!(!m.mood_inputs(1.0).recent_restart);
+        m.apply(
+            Event::Restarts {
+                total_24h: 10,
+                worst: None,
+            },
+            5.0,
+        );
+        assert!(!m.mood_inputs(6.0).recent_restart, "no rise");
+        m.apply(
+            Event::Restarts {
+                total_24h: 11,
+                worst: Some(("x".into(), 1)),
+            },
+            10.0,
+        );
+        assert!(m.mood_inputs(10.0).recent_restart);
+        assert!(m.mood_inputs(309.0).recent_restart);
+        assert!(
+            !m.mood_inputs(310.0).recent_restart,
+            "300 s later it is over"
+        );
+        m.apply(
+            Event::Restarts {
+                total_24h: 9,
+                worst: None,
+            },
+            400.0,
+        );
+        assert!(
+            !m.mood_inputs(400.0).recent_restart,
+            "a falling 24 h window is not a restart"
+        );
+        m.tick(10.5);
     }
 }

@@ -108,6 +108,16 @@ pub struct IssPass {
     pub visible: bool,
 }
 
+/// One node's load averages and core count, for the load role.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeLoad {
+    pub node: String,
+    pub load1: f32,
+    pub load5: f32,
+    pub load15: f32,
+    pub cores: u32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -318,6 +328,48 @@ pub enum Event {
         target: LinkTarget,
         up: bool,
     },
+    /// Library counts from the scraparr exporter.
+    MediaLibrary {
+        movies: u32,
+        series: u32,
+        artists: u32,
+    },
+    /// Traefik: requests per second at the entrypoints, the three busiest
+    /// services (short name, req/s), the summed service rate and the 5xx share.
+    Traffic {
+        req_per_sec: f32,
+        top: Vec<(String, f32)>,
+        service_rps: f32,
+        error_share: f32,
+    },
+    /// The last 90 s of entrypoint req/s every 3 s, oldest first.
+    TrafficHistory {
+        req_per_sec: Vec<f32>,
+    },
+    /// Container restarts over 24 h and the worst pod (short name, count).
+    Restarts {
+        total_24h: u32,
+        worst: Option<(String, u32)>,
+    },
+    /// Restarts per hour, `(unix hour, count)`, oldest first.
+    RestartsHistory {
+        hourly: Vec<(i64, f32)>,
+    },
+    /// Seconds since boot per node.
+    Uptime(Vec<(String, f64)>),
+    /// Fan speed per node in rpm; nodes without a fan are absent.
+    Fans(Vec<(String, f32)>),
+    /// UPS input voltage and load.
+    Mains {
+        volts: f32,
+        ups_load_pct: f32,
+    },
+    /// Hourly mean input voltage, `(unix hour, volts)`, oldest first.
+    MainsHistory {
+        hourly: Vec<(i64, f32)>,
+    },
+    /// Load averages per node.
+    Load(Vec<NodeLoad>),
     /// Prometheus answered but has no series for the role (exporter not
     /// installed); the next data event for the role clears it.
     NoExporter {

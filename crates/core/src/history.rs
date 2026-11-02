@@ -154,6 +154,25 @@ impl Hourly {
     pub fn is_empty(&self) -> bool {
         self.slots.is_empty()
     }
+
+    /// The 24 hours ending at `unix_hour_now`, oldest first; an hour without a
+    /// sample is `None`.
+    pub fn last_24(&self, unix_hour_now: i64) -> Vec<Option<f32>> {
+        (0..HOURLY_CAP)
+            .map(|i| {
+                let h = unix_hour_now - (HOURLY_CAP - 1) + i;
+                self.slots.iter().find(|s| s.0 == h).map(|s| s.1)
+            })
+            .collect()
+    }
+
+    /// Replace everything with `(unix hour, value)` pairs, oldest first.
+    pub fn replace(&mut self, hourly: &[(i64, f32)]) {
+        self.slots.clear();
+        for (h, v) in hourly {
+            self.push(*h, *v);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -217,5 +236,26 @@ mod tests {
         );
         assert_eq!(h.values_since(128), vec![28.0, 29.0]);
         assert!((h.mean().unwrap() - 17.5).abs() < 1e-5);
+    }
+    #[test]
+    fn last_24_lines_the_slots_up_with_gaps() {
+        let mut h = Hourly::new();
+        h.push(100, 1.0);
+        h.push(101, 2.0);
+        h.push(103, 4.0);
+        let v = h.last_24(103);
+        assert_eq!(v.len(), 24);
+        assert_eq!(v[23], Some(4.0));
+        assert_eq!(v[22], None, "hour 102 was never pushed");
+        assert_eq!(v[21], Some(2.0));
+        assert_eq!(v[20], Some(1.0));
+        assert!(v[..20].iter().all(|x| x.is_none()));
+        assert_eq!(
+            h.last_24(104)[23],
+            None,
+            "a newer current hour shifts everything left"
+        );
+        assert_eq!(h.last_24(104)[22], Some(4.0));
+        assert!(Hourly::new().last_24(5).iter().all(|x| x.is_none()));
     }
 }
