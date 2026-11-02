@@ -44,6 +44,8 @@ pub struct ScreenUi {
     rolls: HashMap<UiKey, Roll>,
     marquees: HashMap<UiKey, Marquee>,
     fades: HashMap<UiKey, ColorFade>,
+    /// The outgoing role's state while a slide runs.
+    out: Option<Box<ScreenUi>>,
 }
 
 impl ScreenUi {
@@ -55,9 +57,31 @@ impl ScreenUi {
     /// nothing rolls or glides across a role change.
     pub fn for_role(&mut self, role: Role) {
         if self.role != Some(role) {
+            let out = self.out.take();
             *self = Self::default();
             self.role = Some(role);
+            self.out = out;
         }
+    }
+
+    /// State for the outgoing half of a slide away from `from`. The first call
+    /// moves this screen's state (which belongs to `from`) into the slot, so
+    /// the incoming role starts fresh here and the old one keeps animating.
+    pub fn outgoing(&mut self, from: Role) -> &mut ScreenUi {
+        if self.out.as_ref().and_then(|o| o.role) != Some(from) {
+            let mut prev = std::mem::take(self);
+            prev.out = None;
+            if prev.role != Some(from) {
+                prev = ScreenUi::default();
+            }
+            self.out = Some(Box::new(prev));
+        }
+        self.out.as_mut().expect("set above")
+    }
+
+    /// The slide is over: drop the outgoing state.
+    pub fn end_slide(&mut self) {
+        self.out = None;
     }
 
     pub fn role(&self) -> Option<Role> {
@@ -208,6 +232,31 @@ mod tests {
             ui.glide(("ring", 0), 0.9, 0.0),
             0.9,
             "new role starts fresh"
+        );
+    }
+    #[test]
+    fn outgoing_keeps_the_old_roles_state_while_the_new_one_starts_fresh() {
+        let mut ui = ScreenUi::new();
+        ui.for_role(Role::Cpu);
+        ui.glide(("x", 0), 10.0, 0.0);
+        ui.glide(("x", 0), 50.0, 1.0);
+        let mid = ui.outgoing(Role::Cpu).glide(("x", 0), 50.0, 1.2);
+        assert!(
+            mid > 10.0 && mid < 50.0,
+            "the cpu glide carries on in the outgoing slot"
+        );
+        assert_eq!(ui.role(), None);
+        ui.for_role(Role::Mem);
+        assert_eq!(
+            ui.outgoing(Role::Cpu).role(),
+            Some(Role::Cpu),
+            "for_role leaves the slot alone"
+        );
+        ui.end_slide();
+        assert_eq!(
+            ui.outgoing(Role::Cpu).role(),
+            None,
+            "after the slide the slot starts empty"
         );
     }
 }

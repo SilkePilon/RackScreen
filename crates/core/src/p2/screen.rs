@@ -210,7 +210,7 @@ mod tests {
         assert!(items
             .iter()
             .any(|d| matches!(d, Drawable::Polyline { width, .. } if *width == 1.8)));
-        assert_eq!(scene.zoom, 1.0);
+        assert!(scene.slide.is_none());
     }
 
     #[test]

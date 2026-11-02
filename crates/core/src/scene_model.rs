@@ -4,7 +4,7 @@ use crate::anim::Secs;
 use crate::p2::screen::compose;
 use crate::p2::status::{connecting_scene, no_data_screen, NoData};
 use crate::p2::ui::ScreenUi;
-use crate::scene::{role_scene, Scene};
+use crate::scene::{role_scene, Scene, Slide};
 use crate::theme::Role;
 
 impl crate::model::Model {
@@ -59,11 +59,19 @@ impl crate::model::Model {
         };
         let role = state.current();
         if let Some(tr) = state.transition(now) {
-            let shown = if tr.t < 0.5 { tr.from } else { tr.to };
-            let mut s = self.scene_for_role(shown, now, ui);
-            s.zoom = crate::screens::transition_zoom(tr.t);
+            let (out_at, inc_at) = crate::screens::slide(tr.t);
+            let out = self.scene_for_role(tr.from, now, ui.outgoing(tr.from));
+            let inc = self.scene_for_role(tr.to, now, ui);
+            let mut s = Scene::new();
+            s.slide = Some(Box::new(Slide {
+                out,
+                out_at,
+                inc,
+                inc_at,
+            }));
             return s;
         }
+        ui.end_slide();
         self.scene_for_role(role, now, ui)
     }
 
@@ -231,41 +239,31 @@ mod tests {
     }
 
     #[test]
-    fn cycling_screen_transitions_with_iris() {
+    fn cycling_screen_slides_between_roles() {
         let mut m = ready_model();
         m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
         for i in 0..=100 {
             m.tick(i as f64 * 0.033);
         }
-        // at 3.3 s: transition started at ~3.0, first half shows cpu shrinking
         let mut ui = ScreenUi::new();
-        let s = m.scene(0, 3.15, &mut ui);
-        assert!(s.zoom < 1.0 && s.zoom > 0.0);
-        assert_eq!(title_of(&s).as_deref(), Some("CPU"));
         let s = m.scene(0, 3.4, &mut ui);
-        assert_eq!(
-            title_of(&s).as_deref(),
-            Some("MEMORY"),
-            "second half shows the incoming role"
+        let sl = s.slide.as_ref().expect("mid slide");
+        assert_eq!(title_of(&sl.out).as_deref(), Some("CPU"));
+        assert_eq!(title_of(&sl.inc).as_deref(), Some("MEMORY"));
+        assert!(
+            sl.out_at.dy < 0.0 && sl.inc_at.dy > 0.0,
+            "old goes up, new comes from below"
         );
-        // transition ends at ~3.53 s, then mem dwells; settled by 5.94 s
-        for i in 101..=180 {
+        for i in 101..=200 {
             m.tick(i as f64 * 0.033);
         }
         assert_eq!(m.current_role(0), Role::Mem);
-        assert!(m.screen(0).unwrap().transition(5.94).is_none());
-        assert_eq!(m.scene(0, 5.94, &mut ScreenUi::new()).zoom, 1.0);
-        // the next cycle (3 s after ~3.53 s) wraps back to cpu
-        for i in 181..=200 {
-            m.tick(i as f64 * 0.033);
-        }
-        let tr = m
-            .screen(0)
-            .unwrap()
-            .transition(6.6)
-            .expect("second cycle started");
-        assert_eq!((tr.from, tr.to), (Role::Mem, Role::Cpu));
-        assert!(m.scene(0, 6.6, &mut ScreenUi::new()).zoom < 1.0);
+        assert!(m.scene(0, 6.6, &mut ui).slide.is_none(), "settled on mem");
+        assert_eq!(
+            ui.outgoing(Role::Cpu).role(),
+            None,
+            "the outgoing slot was dropped"
+        );
     }
 
     #[test]
@@ -274,7 +272,7 @@ mod tests {
         m.set_screens(vec![vec![Role::Thermal]], vec![15.0]);
         let s = m.scene(0, 1.0, &mut ScreenUi::new());
         assert_eq!(pill_of(&s).as_deref(), Some("Waiting for data"));
-        assert_eq!(s.zoom, 1.0);
+        assert!(s.slide.is_none());
         let s = m.scene(7, 1.0, &mut ScreenUi::new());
         assert!(connecting(&s));
     }
@@ -425,8 +423,11 @@ mod tests {
             m.tick(i as f64 * 0.033);
         }
         let s = m.scene(0, 3.4, &mut ScreenUi::new());
-        assert!(s.zoom < 1.0, "mid transition");
-        assert!(connecting(&s), "incoming cpu half is the connecting scene");
+        let sl = s.slide.as_ref().expect("mid transition");
+        assert!(
+            connecting(&sl.inc),
+            "incoming cpu half is the connecting scene"
+        );
     }
     #[test]
     fn new_roles_wait_jellyfin_checks_config_and_exporters_can_be_missing() {

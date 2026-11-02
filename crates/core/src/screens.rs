@@ -1,9 +1,10 @@
-//! Per-physical-screen role list, cycling and the iris transition.
+//! Per-physical-screen role list, cycling and the slide transition.
 
 use crate::anim::{Easing, Secs};
+use crate::scene::Placement;
 use crate::theme::Role;
 
-pub const TRANSITION_SECS: Secs = 0.5;
+pub const TRANSITION_SECS: Secs = 0.75;
 /// Quiet time between two serialised transitions, so the SPI bus is idle for a
 /// moment before the next screen starts pushing full frames again.
 pub const TRANSITION_GAP_SECS: Secs = 0.5;
@@ -126,14 +127,25 @@ impl ScreenState {
     }
 }
 
-/// Scale about the centre for a transition instant: the outgoing scene
-/// shrinks with ease-in over the first half, the incoming grows with ease-out.
-pub fn transition_zoom(t: f32) -> f32 {
-    if t < 0.5 {
-        1.0 - (1.0 - Easing::OutCubic.apply(1.0 - t / 0.5))
-    } else {
-        Easing::OutCubic.apply((t - 0.5) / 0.5)
-    }
+/// Placement of the outgoing and incoming scene at `t ∈ 0..1`: the old one
+/// moves up and out, the new one comes in from below, both a touch smaller
+/// mid-move.
+pub fn slide(t: f32) -> (Placement, Placement) {
+    let t = t.clamp(0.0, 1.0);
+    let e = Easing::InOutCubic.apply(t);
+    let s = 1.0 - 0.08 * (std::f32::consts::PI * t).sin();
+    (
+        Placement {
+            dy: -240.0 * e,
+            scale: s,
+            alpha: 1.0 - 0.6 * e,
+        },
+        Placement {
+            dy: 240.0 * (1.0 - e),
+            scale: s,
+            alpha: 0.4 + 0.6 * e,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -163,11 +175,11 @@ mod tests {
         let tr = s.transition(5.2).unwrap();
         assert_eq!((tr.from, tr.to), (Role::Cpu, Role::Thermal));
         assert!(tr.t > 0.0 && tr.t < 0.5);
-        s.tick(5.7);
-        assert!(s.transition(5.7).is_none());
+        s.tick(5.9);
+        assert!(s.transition(5.9).is_none());
         assert_eq!(s.current(), Role::Thermal);
-        s.tick(10.8);
-        assert_eq!(s.transition(10.8).unwrap().to, Role::Cpu, "wraps around");
+        s.tick(11.0);
+        assert_eq!(s.transition(11.0).unwrap().to, Role::Cpu, "wraps around");
     }
 
     /// Tick two screens at 30 Hz and return the tick index at which each one's
@@ -214,12 +226,21 @@ mod tests {
     }
 
     #[test]
-    fn cycle_floor_and_zoom_shape() {
+    fn cycle_floor() {
         let s = ScreenState::new(vec![Role::Cpu, Role::Mem], 1.0);
         assert_eq!(s.cycle_secs, MIN_CYCLE_SECS);
-        assert_eq!(transition_zoom(0.0), 1.0);
-        assert!(transition_zoom(0.49) < 0.1);
-        assert_eq!(transition_zoom(0.5), 0.0);
-        assert_eq!(transition_zoom(1.0), 1.0);
+    }
+    #[test]
+    fn slide_moves_old_up_and_new_in_from_below() {
+        let (o, i) = slide(0.0);
+        assert_eq!((o.dy, o.scale, o.alpha), (0.0, 1.0, 1.0));
+        assert!((i.dy - 240.0).abs() < 1e-3 && (i.alpha - 0.4).abs() < 1e-6);
+        let (o, i) = slide(0.5);
+        assert!((o.dy + 120.0).abs() < 1e-3 && (i.dy - 120.0).abs() < 1e-3);
+        assert!((o.scale - 0.92).abs() < 1e-4 && (i.scale - 0.92).abs() < 1e-4);
+        assert!((o.alpha - 0.7).abs() < 1e-4 && (i.alpha - 0.7).abs() < 1e-4);
+        let (o, i) = slide(1.0);
+        assert!((o.dy + 240.0).abs() < 1e-3);
+        assert_eq!((i.dy, i.scale, i.alpha), (0.0, 1.0, 1.0));
     }
 }
