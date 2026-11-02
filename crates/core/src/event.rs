@@ -118,6 +118,16 @@ pub struct NodeLoad {
     pub cores: u32,
 }
 
+/// The arr download shown on the media card.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Download {
+    pub title: String,
+    /// 0.0 ..= 1.0
+    pub progress: f32,
+    /// seconds; negative means unknown
+    pub eta_secs: i64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -370,6 +380,12 @@ pub enum Event {
     },
     /// Load averages per node.
     Load(Vec<NodeLoad>),
+    /// The arr download with the least time left, `None` when the queues are empty.
+    Download(Option<Download>),
+    /// An item left the arr queue completed.
+    MediaAdded {
+        title: String,
+    },
     /// Prometheus answered but has no series for the role (exporter not
     /// installed); the next data event for the role clears it.
     NoExporter {

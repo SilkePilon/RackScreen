@@ -370,8 +370,37 @@ fn spawn_k8s_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: Sourc
                 poll_secs: cfg2.qbittorrent.poll_secs,
             };
             tokio::spawn(rackscreen_sources::qbittorrent::run_qbittorrent(
-                client, q, ctx,
+                client.clone(),
+                q,
+                ctx.clone(),
             ));
+        }
+        if cfg2.media.keyed() {
+            let app = |kind, a: &crate::config::ArrCfg| rackscreen_sources::arr::ArrApp {
+                kind,
+                service: a.service.clone(),
+                port: a.port,
+                api_key: a.api_key.trim().to_string(),
+            };
+            let apps: Vec<rackscreen_sources::arr::ArrApp> = [
+                app(rackscreen_sources::arr::ArrKind::Radarr, &cfg2.media.radarr),
+                app(rackscreen_sources::arr::ArrKind::Sonarr, &cfg2.media.sonarr),
+                app(rackscreen_sources::arr::ArrKind::Lidarr, &cfg2.media.lidarr),
+            ]
+            .into_iter()
+            .filter(|a| !a.api_key.is_empty())
+            .collect();
+            tokio::spawn(rackscreen_sources::arr::run_arr(
+                client,
+                rackscreen_sources::arr::ArrConfig {
+                    namespace: cfg2.media.namespace.clone(),
+                    apps,
+                    poll_secs: 10,
+                },
+                ctx,
+            ));
+        } else if cfg2.media.enabled {
+            tracing::warn!("media enabled but no arr api key set; the media card shows the qBittorrent torrent");
         }
     });
 }

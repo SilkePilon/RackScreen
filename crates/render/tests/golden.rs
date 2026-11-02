@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
+    App, AppHealth, AppSync, Download, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness,
+    Torrent,
 };
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::mood::Mood;
@@ -460,6 +461,14 @@ fn full_model() -> Model {
         },
         0.0,
     );
+    m.apply(
+        Event::Download(Some(Download {
+            title: "The Lord of the Rings: The Return of the King".into(),
+            progress: 0.35,
+            eta_secs: 19 * 60 + 12,
+        })),
+        0.0,
+    );
     m.tick(0.0);
     m
 }
@@ -902,4 +911,33 @@ fn rack_roles_warning_states() {
         0.0,
     );
     check("p2_traffic_noexporter", &render(&e, Role::Traffic, 120.0));
+}
+
+#[test]
+fn media_alternate_states() {
+    let mut a = full_model();
+    a.apply(Event::Download(None), 0.0);
+    a.apply(
+        Event::MediaAdded {
+            title: "Dune: Part Two".into(),
+        },
+        100.0,
+    );
+    check("p2_media_added", &render(&a, Role::Media, 120.0));
+    let mut t = full_model();
+    t.apply(Event::Download(None), 0.0);
+    link(&mut t, LinkTarget::QBittorrent);
+    t.apply(
+        Event::Torrents(vec![Torrent {
+            name: "ubuntu-24.04.2-live-server-amd64.iso".into(),
+            progress: 78.0,
+            eta_secs: 900,
+            speed_bps: 9_000_000,
+        }]),
+        0.0,
+    );
+    check("p2_media_torrent", &render(&t, Role::Media, 120.0));
+    let mut i = full_model();
+    i.apply(Event::Download(None), 0.0);
+    check("p2_media_idle", &render(&i, Role::Media, 120.0));
 }

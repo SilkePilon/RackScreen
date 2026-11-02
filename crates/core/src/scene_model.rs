@@ -39,7 +39,8 @@ impl crate::model::Model {
             Role::Fans => !(link.prom && self.fans().have),
             Role::Mains => !(link.prom && self.mains().have),
             Role::Load => !(link.prom && self.load().have),
-            Role::Media | Role::Ci | Role::Jellyfin => true,
+            Role::Media => !(link.prom && self.media().have),
+            Role::Ci | Role::Jellyfin => true,
         }
     }
 

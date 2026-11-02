@@ -3,7 +3,7 @@
 use crate::anim::Secs;
 use crate::electricity::{price_level, PriceLevel, Source};
 use crate::event::{
-    App, AppHealth, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
+    App, AppHealth, Download, Event, IssPass, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
 };
 use crate::face::{Face, FaceFrame};
 use crate::history::{History, Hourly};
@@ -192,6 +192,10 @@ pub struct MediaState {
     pub series: u32,
     pub artists: u32,
     pub have: bool,
+    /// The arr download with the least time left.
+    pub download: Option<Download>,
+    /// The last item that left the queue completed, and when (monotonic).
+    pub last_added: Option<(String, Secs)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -980,6 +984,8 @@ impl Model {
                 nodes.sort_by(|a, b| a.node.cmp(&b.node));
                 self.load = LoadState { nodes, have: true };
             }
+            Event::Download(d) => self.media.download = d,
+            Event::MediaAdded { title } => self.media.last_added = Some((title, now)),
             Event::NoExporter { role } => {
                 if !self.exporter_missing.contains(&role) {
                     self.exporter_missing.push(role);
@@ -1094,7 +1100,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::NodeLoad;
+    use crate::event::{Download, NodeLoad};
     use crate::p2::ui::ScreenUi;
     use crate::scene::Drawable;
 
@@ -1721,5 +1727,28 @@ mod tests {
             "a falling 24 h window is not a restart"
         );
         m.tick(10.5);
+    }
+    #[test]
+    fn download_and_added_items_are_kept() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Download(Some(Download {
+                title: "Dune".into(),
+                progress: 0.35,
+                eta_secs: 1152,
+            })),
+            0.0,
+        );
+        assert_eq!(m.media().download.as_ref().unwrap().title, "Dune");
+        m.apply(Event::Download(None), 1.0);
+        assert!(m.media().download.is_none());
+        m.apply(
+            Event::MediaAdded {
+                title: "Dune".into(),
+            },
+            2.0,
+        );
+        assert_eq!(m.media().last_added, Some(("Dune".to_string(), 2.0)));
+        assert!(!m.media().have, "the card alone is not library data");
     }
 }

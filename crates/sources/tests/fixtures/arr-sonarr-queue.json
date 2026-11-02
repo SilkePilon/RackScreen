@@ -1,0 +1,19 @@
+{
+  "page": 1,
+  "pageSize": 5,
+  "totalRecords": 1,
+  "records": [
+    {
+      "id": 7,
+      "seriesId": 3,
+      "episodeId": 44,
+      "series": { "title": "The Expanse" },
+      "episode": { "seasonNumber": 2, "episodeNumber": 5, "title": "Home" },
+      "title": "The.Expanse.S02E05.1080p",
+      "size": 2400000000,
+      "sizeleft": 600000000,
+      "timeleft": "1.02:03:04",
+      "status": "downloading"
+    }
+  ]
+}

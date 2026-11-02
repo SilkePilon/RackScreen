@@ -1,0 +1,19 @@
+{
+  "page": 1,
+  "pageSize": 5,
+  "totalRecords": 1,
+  "records": [
+    {
+      "id": 9,
+      "artistId": 4,
+      "albumId": 21,
+      "artist": { "artistName": "Daft Punk" },
+      "album": { "title": "Discovery" },
+      "title": "Daft Punk - Discovery (2001) FLAC",
+      "size": 500000000,
+      "sizeleft": 250000000,
+      "timeleft": "00:04:30",
+      "status": "downloading"
+    }
+  ]
+}

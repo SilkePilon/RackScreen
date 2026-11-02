@@ -3,6 +3,7 @@
 pub mod cluster;
 pub mod energy;
 pub mod github;
+pub mod media;
 pub mod power_mix;
 pub mod rack;
 pub mod sky;
@@ -43,7 +44,8 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Fans => rack::fans(model, now),
         Role::Mains => rack::mains(model, now),
         Role::Load => rack::load(model, now),
-        Role::Media | Role::Ci | Role::Jellyfin => return None, // Tasks 5–7
+        Role::Media => media::media(model, now),
+        Role::Ci | Role::Jellyfin => return None, // Tasks 6–7
         Role::PowerMix | Role::Face => return None,
     })
 }

@@ -1,0 +1,27 @@
+{
+  "page": 1,
+  "pageSize": 5,
+  "totalRecords": 2,
+  "records": [
+    {
+      "id": 101,
+      "movieId": 12,
+      "movie": { "title": "Dune: Part Two", "year": 2024 },
+      "title": "Dune.Part.Two.2024.2160p.WEB.H265",
+      "size": 12000000000,
+      "sizeleft": 7800000000,
+      "timeleft": "00:19:12",
+      "status": "downloading"
+    },
+    {
+      "id": 102,
+      "movieId": 13,
+      "movie": { "title": "Blade Runner 2049", "year": 2017 },
+      "title": "Blade.Runner.2049.2017.1080p",
+      "size": 8000000000,
+      "sizeleft": 0,
+      "timeleft": "00:00:00",
+      "status": "completed"
+    }
+  ]
+}
