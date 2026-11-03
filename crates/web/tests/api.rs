@@ -765,3 +765,24 @@ async fn gif_search_needs_a_key_and_keys_stay_secret() {
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn show_cards_are_cached_pngs_and_unknown_shows_404() {
+    let f = fixture("");
+    let resp = f
+        .app
+        .clone()
+        .oneshot(get("/api/shows/freight/card.png?frame=2"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()[header::CONTENT_TYPE], "image/png");
+    assert_eq!(
+        resp.headers()[header::CACHE_CONTROL],
+        "public, max-age=86400"
+    );
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    assert!(body.starts_with(b"\x89PNG"));
+    let (st, _, _) = send(&f.app, get("/api/shows/nope/card.png")).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}

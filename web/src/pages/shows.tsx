@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { PlayIcon, ShuffleIcon } from "lucide-react"
+import { useEffect, useState } from "react"
 
 import { HeaderActions, PageBody, PageIntro } from "@/components/page"
 import { PanelMirror } from "@/components/panel-mirror"
@@ -28,27 +29,9 @@ import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { useDraft, useField } from "@/lib/draft"
 import { useControl, useShows, useStatus } from "@/lib/queries"
+import { SHOW_CARD_FRAMES, showCardUrl } from "@/lib/show-card"
 import type { ShowInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-const PANEL_MASK = [12.5, 37.5, 62.5, 87.5]
-  .map((x) => `radial-gradient(circle at ${x}% 50%, #000 26px, transparent 27px)`)
-  .join(", ")
-
-// A tiny painted horizon per show, so the cards read at a glance.
-const SCENES: Record<string, [string, string, string]> = {
-  freight: ["#1b1340", "#d9575b", "#f2a65a"],
-  "deep-sea": ["#03142b", "#0b4a6e", "#2bb3c0"],
-  "paper-plane": ["#9fd3ff", "#e8f4ff", "#ffffff"],
-  storm: ["#0d1017", "#2c3445", "#8c9cff"],
-  day: ["#ffcf7a", "#7cc4ff", "#1b2a4a"],
-  space: ["#000005", "#1a1240", "#a48bfa"],
-  birds: ["#3b1d3f", "#f06a5d", "#ffc56e"],
-  fireworks: ["#05060f", "#1d1b3a", "#f2b84b"],
-  alpine: ["#2b3a67", "#f7b2a6", "#ffe3c4"],
-  caravan: ["#f2a65a", "#f7d08a", "#c06a3a"],
-  "desert-night": ["#060a1a", "#1d2547", "#d6d6e0"],
-}
 
 export default function Shows() {
   const d = useDraft()
@@ -87,7 +70,7 @@ export default function Shows() {
                   playDisabled={night || play.isPending}
                 />
               ))
-            : Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-48 rounded-xl" />)}
+            : Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="aspect-[2/1.38] rounded-xl" />)}
         </div>
       </Section>
     </PageBody>
@@ -188,30 +171,28 @@ function ShowCard({
     const next = allIds.filter((id) => (id === show.id ? v : list.includes(id)))
     f.set(next.length === allIds.length ? undefined : next)
   }
-  const [a, b, c] = SCENES[show.id] ?? ["#111", "#333", "#777"]
+  const [active, setActive] = useState(false)
   return (
     <article
+      onPointerEnter={() => setActive(true)}
+      onPointerLeave={() => setActive(false)}
+      onFocus={() => setActive(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setActive(false)
+      }}
       className={cn(
         "group flex flex-col overflow-hidden rounded-xl border bg-card transition-[border-color,opacity]",
         !on && "opacity-60 hover:opacity-100",
       )}
     >
-      <div className="relative h-28 overflow-hidden bg-black" aria-hidden>
-        {/* The scene seen through four round panels, like the rack shows it. */}
-        <div
-          className="absolute inset-0 transition-transform duration-700 ease-out group-hover:scale-105 motion-reduce:transition-none"
-          style={{
-            background: `linear-gradient(180deg, transparent 62%, rgba(0,0,0,.55) 62%), linear-gradient(180deg, ${a} 12%, ${b} 55%, ${c} 88%)`,
-            maskImage: PANEL_MASK,
-            WebkitMaskImage: PANEL_MASK,
-          }}
-        />
+      <div className="relative">
+        <ShowStill id={show.id} active={active} />
         <Button
           size="sm"
           variant="secondary"
           onClick={onPlay}
           disabled={playDisabled}
-          className="absolute top-2.5 right-2.5 h-7 bg-black/50 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-black/70 focus-visible:opacity-100 max-sm:opacity-100"
+          className="absolute top-2.5 right-2.5 h-7 bg-black/50 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 hover:bg-black/70 focus-visible:opacity-100 disabled:opacity-0 group-hover:disabled:opacity-50 max-sm:opacity-100"
         >
           <PlayIcon data-icon="inline-start" />
           Play now
@@ -231,5 +212,54 @@ function ShowCard({
         />
       </div>
     </article>
+  )
+}
+
+const CYCLE_MS = 600
+
+/**
+ * The show's own pixels: a still of its world at native resolution, scaled
+ * up crisp. While `active` (hover or focus) it cycles through the other
+ * stills, which are only fetched on the first hover.
+ */
+function ShowStill({ id, active }: { id: string; active: boolean }) {
+  const [loaded, setLoaded] = useState(false)
+  const [warm, setWarm] = useState(false)
+  const [frame, setFrame] = useState(0)
+  const [still] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+  const cycle = active && !still
+  if (cycle && !warm) setWarm(true)
+  useEffect(() => {
+    if (!cycle) return
+    let k = 0
+    const timer = window.setInterval(() => setFrame((k = (k % (SHOW_CARD_FRAMES - 1)) + 1)), CYCLE_MS)
+    return () => {
+      window.clearInterval(timer)
+      setFrame(0)
+    }
+  }, [cycle])
+  const frames = warm ? Array.from({ length: SHOW_CARD_FRAMES }, (_, k) => k) : [0]
+  return (
+    <div className="relative aspect-[2/1] overflow-hidden bg-black" aria-hidden>
+      {!loaded && <Skeleton className="absolute inset-0 rounded-none" />}
+      {frames.map((k) => (
+        <img
+          key={k}
+          src={showCardUrl(id, k)}
+          alt=""
+          width={120}
+          height={60}
+          loading={k === 0 ? "lazy" : "eager"}
+          decoding="async"
+          draggable={false}
+          onLoad={k === 0 ? () => setLoaded(true) : undefined}
+          className={cn(
+            "absolute inset-0 size-full [image-rendering:pixelated]",
+            k === frame ? "opacity-100" : "opacity-0",
+            !loaded && "invisible",
+          )}
+        />
+      ))}
+    </div>
   )
 }
