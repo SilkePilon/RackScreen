@@ -52,18 +52,16 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`moon`** — the illuminated fraction, the phase, days to full and new moon | **`iss`** — a countdown to the next ISS pass with its start, duration and height |
 | <img src=".github/media/screens/ups.gif" alt="UPS role" width="200"> | <img src=".github/media/screens/net.gif" alt="NET role" width="200"> |
 | **`ups`** — battery charge, on mains or on battery, runtime and load | **`net`** — total traffic, download and upload in the pill, download as a sparkline |
-| <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | <img src=".github/media/screens/face.gif" alt="FACE role" width="200"> |
-| **`deploys`** — Argo CD syncs today, one segment per application, syncs per hour | **`face`** — two eyes whose mood comes from the rack: scared on battery, sad with a node down, angry on an alert, happy on a clear day |
-| <img src=".github/media/screens/media.gif" alt="MEDIA role" width="200"> | <img src=".github/media/screens/traffic.gif" alt="WEB TRAFFIC role" width="200"> |
-| **`media`** — movies, series and artists on the ring; the active arr download in the card, or the last item added | **`traffic`** — Traefik requests per second, the three busiest services on the ring, the error share in the pill |
-| <img src=".github/media/screens/restarts.gif" alt="RESTARTS role" width="200"> | <img src=".github/media/screens/uptime.gif" alt="UPTIME role" width="200"> |
-| **`restarts`** — container restarts in 24 h, one segment per hour coloured by count, the worst pod in the pill | **`uptime`** — the longest node uptime, a segment per node, amber for a reboot in the last day |
-| <img src=".github/media/screens/fans.gif" alt="FANS role" width="200"> | <img src=".github/media/screens/mains.gif" alt="MAINS role" width="200"> |
-| **`fans`** — the loudest fan in rpm, a bar per node with a fan | **`mains`** — UPS input voltage on six bands over 200–260 V, the last 24 h as a sparkline |
-| <img src=".github/media/screens/load.gif" alt="LOAD role" width="200"> | <img src=".github/media/screens/ci.gif" alt="CI role" width="200"> |
-| **`load`** — the highest 1-minute load, a segment per node by load per core, cluster means in the card | **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill |
-| <img src=".github/media/screens/jellyfin.gif" alt="NOW PLAYING role" width="200"> | |
-| **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card | |
+| <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | <img src=".github/media/screens/media.gif" alt="MEDIA role" width="200"> |
+| **`deploys`** — Argo CD syncs today, one segment per application, syncs per hour | **`media`** — movies, series and artists on the ring; the active arr download in the card, or the last item added |
+| <img src=".github/media/screens/traffic.gif" alt="WEB TRAFFIC role" width="200"> | <img src=".github/media/screens/restarts.gif" alt="RESTARTS role" width="200"> |
+| **`traffic`** — Traefik requests per second, the three busiest services on the ring, the error share in the pill | **`restarts`** — container restarts in 24 h, one segment per hour coloured by count, the worst pod in the pill |
+| <img src=".github/media/screens/uptime.gif" alt="UPTIME role" width="200"> | <img src=".github/media/screens/fans.gif" alt="FANS role" width="200"> |
+| **`uptime`** — the longest node uptime, a segment per node, amber for a reboot in the last day | **`fans`** — the loudest fan in rpm, a bar per node with a fan |
+| <img src=".github/media/screens/mains.gif" alt="MAINS role" width="200"> | <img src=".github/media/screens/load.gif" alt="LOAD role" width="200"> |
+| **`mains`** — UPS input voltage on six bands over 200–260 V, the last 24 h as a sparkline | **`load`** — the highest 1-minute load, a segment per node by load per core, cluster means in the card |
+| <img src=".github/media/screens/ci.gif" alt="CI role" width="200"> | <img src=".github/media/screens/jellyfin.gif" alt="NOW PLAYING role" width="200"> |
+| **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill | **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -110,7 +108,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Thirty-one roles exist:
+Every screen shows one or more **roles** and cycles through them. Thirty roles exist:
 
 | Role | Data source | Tile |
 |---|---|---|
@@ -135,7 +133,6 @@ Every screen shows one or more **roles** and cycles through them. Thirty-one rol
 | `ups` | Prometheus (nut-exporter) | ring the charge, pill mains or battery, card runtime and load |
 | `net` | Prometheus (node-exporter) | ring the total, pill down and up, card a download sparkline |
 | `deploys` | Argo CD | syncs today, a segment per application, card syncs per hour |
-| `face` | everything above | two vector eyes; the mood comes from the rack, first match wins |
 | `media` | Prometheus (scraparr) + Radarr/Sonarr/Lidarr | ring movies, series and artists, pill the download count or the library size, card the active download or the last item added |
 | `traffic` | Prometheus (Traefik) | req/s, ring the three busiest services, pill the busiest and the 5xx share, card the last 90 s |
 | `restarts` | Prometheus (kube-state-metrics) | restarts in 24 h, a segment per hour (green 1, amber 2–5, red 6+), pill the worst pod, card restarts per hour |
@@ -182,17 +179,13 @@ The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienr
 
 Create a fine-grained personal access token at github.com with read access to contents, metadata and Actions on the repositories you care about (contributions and the events feed need no extra permission), turn on `github enabled` and paste it into `github token`. The calendar is refreshed every five minutes and the events feed every `github poll secs` (60, the minimum GitHub allows); together with the Actions checks for repositories pushed to recently that is a few hundred requests an hour, far below the limit. Without a token the role says "Token needed".
 
-## Face role
-
-`face` shows two off-white eyes that blink, glance around and breathe. Their mood is read from the rack every frame, first match wins: scared on battery, sad with a node down, angry on a firing alert or a degraded app or volume, hot over the thresholds, worried with a failed pod or a container restart in the last five minutes, sleepy half an hour before night mode, happy on a clear day, a cheap electricity hour or within half an hour of a passing CI run, content otherwise. A mood change glides over 0.4 s. There is nothing to configure.
-
 ## Media role
 
 `media` reads the library counts the [scraparr](https://github.com/thecfu/scraparr) exporter puts in Prometheus (`radarr_movies_total`, `sonarr_series_total`, `lidarr_artists_total`). The card shows the download with the least time left from the Radarr, Sonarr and Lidarr queues: turn on `media enabled` in **Configure** and paste each app's API key (Settings → General) into `radarr api key`, `sonarr api key` and `lidarr api key`; an app without a key is skipped. The services are reached over the same kube tunnel as Prometheus, in `media namespace` (`arr-stack`), `service: auto` picking the first service whose name contains the app's. Without any key the card falls back to the most complete qBittorrent torrent. When an item leaves a queue completed the card says "added just now" for a minute, then shows the last item added and its age.
 
 ## CI role
 
-`ci` shows the last twelve GitHub Actions runs across your repositories: passes over total as the number, one segment per run (green passed, red failed, blue running, dark cancelled), the newest run in the pill and the average run time in the card. It uses the `github token`; set `github ci repos` to a comma-separated `owner/repo` list, or leave it empty to watch your non-fork repositories pushed in the last seven days (at most ten). A repository the token cannot read is skipped with one warning an hour. A run that passes keeps the face happy for half an hour.
+`ci` shows the last twelve GitHub Actions runs across your repositories: passes over total as the number, one segment per run (green passed, red failed, blue running, dark cancelled), the newest run in the pill and the average run time in the card. It uses the `github token`; set `github ci repos` to a comma-separated `owner/repo` list, or leave it empty to watch your non-fork repositories pushed in the last seven days (at most ten). A repository the token cannot read is skipped with one warning an hour.
 
 ## Jellyfin role
 
@@ -294,7 +287,7 @@ display:
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
-#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face,
+#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys,
 #        media, traffic, restarts, uptime, fans, mains, load, ci, jellyfin
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
@@ -311,7 +304,7 @@ screens:
 - **`prometheus`** — where the metrics come from; `service: auto` picks the first service whose name contains "prometheus" and exposes `port`, and `ignore_alerts` keeps the always-on ones out of the health role.
 - **`qbittorrent`** — the client behind the download monitor; turn it off and HEALTH stays a health ring.
 - **`night`** — the window in which the panels dim, on the Pi's local clock.
-- **`thresholds`** — when a node counts as hot: the CPU and memory percentages that turn `cpu` amber and make the face hot, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
+- **`thresholds`** — when a node counts as hot: the CPU and memory percentages that turn `cpu` amber, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
 - **`electricity`** and **`price`** — see [Electricity mode](#electricity-mode).
 - **`location`**, **`weather`**, **`rain`**, **`iss`** — see [Sky roles](#sky-roles).
 - **`github`** — see [GitHub role](#github-role) and [CI role](#ci-role).

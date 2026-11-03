@@ -133,10 +133,6 @@ fn clips() -> Vec<Clip> {
                     (3.0, Step::Cmd(FakeCmd::AppToggle)),
                     (6.0, Step::Cmd(FakeCmd::AppToggle)),
                 ],
-                Role::Face => vec![
-                    (1.5, Step::Cmd(FakeCmd::NodeDown)),
-                    (5.0, Step::Cmd(FakeCmd::NodeUp)),
-                ],
                 Role::Media => vec![(3.0, Step::Cmd(FakeCmd::MediaDone))],
                 Role::Restarts => vec![(2.5, Step::Cmd(FakeCmd::KickRestart))],
                 Role::Mains => vec![

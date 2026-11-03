@@ -2,16 +2,12 @@
 pub mod anim;
 pub mod electricity;
 pub mod event;
-pub mod face;
-pub mod face_expr;
 pub mod format;
 pub mod history;
 pub mod model;
-pub mod mood;
 pub mod night;
 pub mod p2;
 pub mod scene;
-pub mod scene_face;
 pub mod scene_model;
 pub mod scene_rain;
 pub mod screens;

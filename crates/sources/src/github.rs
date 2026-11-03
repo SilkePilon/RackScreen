@@ -391,38 +391,6 @@ pub fn parse_user_repos(json: &str, now_unix: i64) -> Vec<String> {
     repos.into_iter().map(|(_, n)| n).collect()
 }
 
-/// Reports each run once, the first time it is seen completed as a pass or a
-/// failure, with its completion time; a repo's first page only primes.
-#[derive(Debug, Default)]
-pub struct CiTracker {
-    primed: HashSet<String>,
-    reported: HashSet<u64>,
-}
-
-impl CiTracker {
-    pub fn diff(&mut self, repo: &str, runs: &[CiRun]) -> Vec<Event> {
-        let completed = runs
-            .iter()
-            .filter(|r| matches!(r.status, CiStatus::Success | CiStatus::Failure));
-        if !self.primed.contains(repo) {
-            self.primed.insert(repo.to_string());
-            self.reported.extend(completed.map(|r| r.id));
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-        for r in completed {
-            if self.reported.insert(r.id) {
-                out.push(Event::CiRun {
-                    repo: repo.to_string(),
-                    ok: r.status == CiStatus::Success,
-                    at: r.updated_at,
-                });
-            }
-        }
-        out
-    }
-}
-
 /// One trip to the events feed. GitHub asks for a polling interval and hands
 /// out an ETag on a 304 as well, so both survive an unchanged feed.
 pub struct EventsPage {
@@ -576,7 +544,6 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
     let mut failures = 0u32;
     let mut warned_about_token = false;
     let mut last_calendar: Option<std::time::Instant> = None;
-    let mut ci = CiTracker::default();
     let mut ci_repos: Vec<String> = cfg.ci_repos.clone();
     let mut ci_discovered_at: Option<std::time::Instant> = None;
     let mut ci_warned: HashMap<String, std::time::Instant> = HashMap::new();
@@ -632,10 +599,7 @@ pub async fn run_github(cfg: GithubConfig, ctx: SourceCtx) {
             let mut all_runs: Vec<CiRun> = Vec::new();
             for repo in &ci_repos {
                 match http.ci_runs(repo).await {
-                    Ok(runs) => {
-                        ctx.emit_all(ci.diff(repo, &runs));
-                        all_runs.extend(runs);
-                    }
+                    Ok(runs) => all_runs.extend(runs),
                     // a per-repo miss (404 private, 403 no Actions scope) is
                     // logged once an hour and never takes the link down
                     Err(e) => {
@@ -926,51 +890,5 @@ mod tests {
         let json = format!("[{}]", many.join(","));
         assert_eq!(parse_user_repos(&json, now).len(), CI_MAX_REPOS);
         assert!(parse_user_repos("nope", now).is_empty());
-    }
-
-    #[test]
-    fn ci_tracker_reports_new_completions_with_their_time() {
-        let runs = parse_ci_runs(CI_RUNS, "r").unwrap();
-        let mut t = CiTracker::default();
-        assert!(t.diff("silkepilon/RackScreen", &runs).is_empty(), "primes");
-        let mut later = runs.clone();
-        later[0].status = CiStatus::Success;
-        later[0].updated_at = 1_788_782_000;
-        later[0].duration_secs = Some(95);
-        assert_eq!(
-            t.diff("silkepilon/RackScreen", &later),
-            vec![Event::CiRun {
-                repo: "silkepilon/RackScreen".into(),
-                ok: true,
-                at: 1_788_782_000,
-            }]
-        );
-        assert!(t.diff("silkepilon/RackScreen", &later).is_empty(), "once");
-        let mut cancelled = later.clone();
-        cancelled.insert(
-            0,
-            CiRun {
-                id: 402,
-                repo: "silkepilon/RackScreen".into(),
-                status: CiStatus::Other,
-                created_at: 1_788_782_100,
-                updated_at: 1_788_782_110,
-                duration_secs: None,
-            },
-        );
-        assert!(
-            t.diff("silkepilon/RackScreen", &cancelled).is_empty(),
-            "cancelled is neither"
-        );
-        let mut failed = cancelled.clone();
-        failed[0].status = CiStatus::Failure;
-        assert_eq!(
-            t.diff("silkepilon/RackScreen", &failed),
-            vec![Event::CiRun {
-                repo: "silkepilon/RackScreen".into(),
-                ok: false,
-                at: 1_788_782_110,
-            }]
-        );
     }
 }

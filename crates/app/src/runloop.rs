@@ -12,7 +12,7 @@ use chrono::Timelike;
 use rackscreen_core::anim::Secs;
 use rackscreen_core::event::Event;
 use rackscreen_core::model::{Model, Thresholds};
-use rackscreen_core::night::{bedtime_near, is_night};
+use rackscreen_core::night::is_night;
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
 use rackscreen_render::frame::Orient;
@@ -69,33 +69,6 @@ pub fn advance(deadline: Instant, tick: Duration, now: Instant) -> Instant {
         now
     } else {
         next
-    }
-}
-
-/// Sleepy around the night window; never when night is disabled or forced.
-pub fn face_bedtime(night: &NightWindow, minutes: u32, override_: Option<bool>) -> bool {
-    night.enabled && override_.is_none() && bedtime_near(minutes, night.start_min, night.end_min)
-}
-
-#[cfg(test)]
-mod bedtime_tests {
-    use super::*;
-
-    #[test]
-    fn bedtime_needs_night_enabled_and_no_override() {
-        let on = NightWindow {
-            enabled: true,
-            start_min: 1380,
-            end_min: 420,
-        };
-        let off = NightWindow {
-            enabled: false,
-            ..on
-        };
-        assert!(face_bedtime(&on, 1360, None));
-        assert!(!face_bedtime(&off, 1360, None));
-        assert!(!face_bedtime(&on, 1360, Some(false)));
-        assert!(!face_bedtime(&on, 720, None));
     }
 }
 
@@ -210,7 +183,6 @@ impl RenderLoop {
             while let Ok(ev) = self.rx.try_recv() {
                 model.apply(ev, now);
             }
-            model.set_bedtime_near(face_bedtime(&self.night, minutes, model.night_override()));
             model.tick(now);
 
             let night = match model.night_override() {

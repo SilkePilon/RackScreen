@@ -444,12 +444,6 @@ pub enum Event {
     },
     /// The last 12 Actions runs across the watched repos, newest first.
     CiRuns(Vec<CiRun>),
-    /// A run completed since the last poll; `at` is unix seconds.
-    CiRun {
-        repo: String,
-        ok: bool,
-        at: i64,
-    },
     /// One poll of `/Sessions`: the sessions with an item, or why there are none.
     Jellyfin {
         status: JfStatus,

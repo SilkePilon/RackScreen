@@ -15,7 +15,7 @@ use crate::p2::screen::P2Screen;
 use crate::theme::Role;
 
 /// The P2 screen for a role with live data. `None` for roles that still draw
-/// their legacy scene, and for power-mix and face, which draw themselves.
+/// their legacy scene, and for power-mix, which draws itself.
 pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
     Some(match role {
         Role::Cpu => cluster::cpu(model, now),
@@ -47,7 +47,7 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Media => media::media(model, now),
         Role::Ci => github::ci(model, now),
         Role::Jellyfin => media::jellyfin(model, now),
-        Role::PowerMix | Role::Face => return None,
+        Role::PowerMix => return None,
     })
 }
 

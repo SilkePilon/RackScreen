@@ -6,7 +6,6 @@ use rackscreen_core::event::{
     JfStatus, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
 };
 use rackscreen_core::model::{Model, Thresholds};
-use rackscreen_core::mood::Mood;
 use rackscreen_core::p2::ui::ScreenUi;
 use rackscreen_core::theme::Role;
 use rackscreen_render::frame::new_pixmap;
@@ -723,9 +722,6 @@ fn no_data_token_location_and_connecting() {
     let mut m = Model::new(Thresholds::default());
     link(&mut m, LinkTarget::K8sApi);
     for role in Role::ALL {
-        if role == Role::Face {
-            continue;
-        }
         check(
             &format!("p2_{}_nodata", role.name()),
             &render(&m, role, 0.0),
@@ -736,90 +732,6 @@ fn no_data_token_location_and_connecting() {
     let bare = Model::new(Thresholds::default());
     r.render(&bare.scene(0, 0.4, &mut ScreenUi::new()), &mut px);
     check("connecting", &px);
-}
-
-#[test]
-fn face_moods() {
-    let mut m = full_model();
-    // walk the priority table from the bottom up by adding one condition at a time
-    let capture = |m: &mut Model, mood: Mood| {
-        let mut t = 0.0;
-        while t < 2.0 {
-            m.tick(t);
-            t += 1.0 / 30.0;
-        }
-        assert_eq!(m.face_mood(), mood);
-        let px = render(m, Role::Face, 2.0);
-        check(&format!("face_{}", mood.name()), &px);
-    };
-    // a flat price day: the afternoon dip in `full_model` would otherwise read as cheap and happy
-    m.apply(
-        Event::Prices {
-            date: "2026-09-07".into(),
-            eur_per_kwh: vec![0.15; 96],
-            avg_eur_per_kwh: 0.15,
-            currency: "EUR".into(),
-        },
-        0.0,
-    );
-    capture(&mut m, Mood::Content);
-    m.apply(
-        Event::Weather {
-            temp_c: 21.0,
-            code: 0,
-            is_day: true,
-            wind_kmh: 1.0,
-            gust_kmh: 1.0,
-            wind_from_deg: 0.0,
-            at: String::new(),
-        },
-        0.0,
-    );
-    capture(&mut m, Mood::Happy);
-    m.set_bedtime_near(true);
-    capture(&mut m, Mood::Sleepy);
-    m.apply(
-        Event::PodSnapshot {
-            running: 38,
-            pending: 0,
-            failed: 1,
-            total: 39,
-        },
-        0.0,
-    );
-    capture(&mut m, Mood::Worried);
-    m.apply(
-        Event::NodeTemps(vec![("raspberrypi-5-8gb-1".into(), 80.0)]),
-        0.0,
-    );
-    capture(&mut m, Mood::Hot);
-    m.apply(
-        Event::AlertSnapshot {
-            firing: vec!["Down".into()],
-        },
-        0.0,
-    );
-    capture(&mut m, Mood::Angry);
-    m.apply(
-        Event::NodeSnapshot {
-            ready: 6,
-            total: 7,
-            not_ready: vec!["pi".into()],
-        },
-        0.0,
-    );
-    capture(&mut m, Mood::Sad);
-    m.apply(
-        Event::Ups {
-            on_battery: true,
-            low_battery: false,
-            charge_pct: 80.0,
-            load_pct: 7.0,
-            runtime_secs: 38 * 60,
-        },
-        0.0,
-    );
-    capture(&mut m, Mood::Scared);
 }
 
 #[test]

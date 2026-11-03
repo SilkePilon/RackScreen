@@ -1,14 +1,12 @@
 //! Cluster state and the fold of events into it.
 
 use crate::anim::Secs;
-use crate::electricity::{price_level, PriceLevel, Source};
+use crate::electricity::Source;
 use crate::event::{
-    App, AppHealth, CiRun, Download, Event, IssPass, JfSession, JfStatus, LinkTarget, MoonPhase,
-    NodeLoad, Robustness, Torrent,
+    App, CiRun, Download, Event, IssPass, JfSession, JfStatus, LinkTarget, MoonPhase, NodeLoad,
+    Robustness, Torrent,
 };
-use crate::face::{Face, FaceFrame};
 use crate::history::{History, Hourly};
-use crate::mood::{mood, Mood, MoodInputs};
 use crate::screens::ScreenState;
 use crate::theme::Role;
 
@@ -215,8 +213,6 @@ pub struct RestartsState {
     pub total_24h: u32,
     pub worst: Option<(String, u32)>,
     pub have: bool,
-    /// When the 24 h counter last rose between two polls.
-    pub last_rise_at: Option<Secs>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -252,8 +248,6 @@ pub struct CiState {
     /// Newest first, at most 12.
     pub runs: Vec<CiRun>,
     pub have: bool,
-    /// Unix time of the newest successful completion seen this run.
-    pub last_pass_at: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -278,12 +272,6 @@ impl Default for JellyfinState {
         }
     }
 }
-
-/// A CI pass keeps the face happy for this long (unix clock).
-pub const CI_RECENT_SECS: i64 = 1800;
-
-/// A rising restart counter worries the face for this long.
-pub const RESTART_RECENT_SECS: Secs = 300.0;
 
 /// Ring fill for a bit rate: 100 kbit/s is (almost) empty, 1 Gbit/s is full,
 /// four decades in between, and a floor so idle still shows a little.
@@ -384,10 +372,6 @@ pub struct Model {
     transition_free_at: Secs,
     /// xorshift64 state, for picking which waiting screen goes next.
     rng: u64,
-    /// The `face` role: mood tween and idle life.
-    face: Face,
-    /// Half an hour before night mode and ten minutes after: the face is sleepy.
-    bedtime_near: bool,
     /// Roles whose Prometheus query came back empty on the last poll.
     exporter_missing: Vec<Role>,
     /// An arr API key is configured: the media card never falls back to the
@@ -456,8 +440,6 @@ impl Model {
             one_at_a_time: false,
             transition_free_at: 0.0,
             rng: RNG_SEED,
-            face: Face::new(),
-            bedtime_near: false,
             exporter_missing: Vec::new(),
             arr_configured: false,
             jellyfin_configured: false,
@@ -475,54 +457,6 @@ impl Model {
     }
     pub fn night_override(&self) -> Option<bool> {
         self.night_override
-    }
-    pub fn set_bedtime_near(&mut self, near: bool) {
-        self.bedtime_near = near;
-    }
-
-    /// The rack facts the face reads each frame.
-    pub fn mood_inputs(&self, now: Secs) -> MoodInputs {
-        let st = &self.state;
-        let th = self.thresholds;
-        let hottest = st.temps.iter().map(|(_, c)| *c).fold(0.0_f32, f32::max);
-        MoodInputs {
-            on_battery: self.ups.have && self.ups.on_battery,
-            nodes_not_ready: st.have_nodes && st.nodes_ready < st.nodes_total,
-            alerts: !st.alerts.is_empty(),
-            app_degraded: self
-                .apps
-                .apps
-                .iter()
-                .any(|a| a.health == AppHealth::Degraded),
-            volume_degraded: st
-                .volumes
-                .iter()
-                .any(|(_, r)| matches!(r, Robustness::Degraded | Robustness::Faulted)),
-            hot: (st.have_temps && hottest >= th.hot_temp)
-                || (st.have_metrics && (st.cpu_pct >= th.hot_cpu || st.mem_pct >= th.hot_mem)),
-            pods_failed: st.pods_failed > 0,
-            recent_restart: self
-                .restarts
-                .last_rise_at
-                .is_some_and(|t| now - t < RESTART_RECENT_SECS),
-            bedtime: self.bedtime_near,
-            ci_passed_recently: self
-                .ci
-                .last_pass_at
-                .is_some_and(|t| self.unix_now - t < CI_RECENT_SECS),
-            cheap_price: self.current_price().is_some_and(|p| {
-                price_level(p, self.prices.avg).0.index() <= PriceLevel::Cheap.index()
-            }),
-            clear_day: self.weather.have && self.weather.code == 0 && self.weather.is_day,
-        }
-    }
-
-    pub fn face_mood(&self) -> Mood {
-        self.face.mood()
-    }
-
-    pub fn face_frame(&self, now: Secs) -> FaceFrame {
-        self.face.frame(now)
     }
     pub fn cpu_history(&self) -> &History {
         &self.cpu_hist
@@ -750,7 +684,6 @@ impl Model {
     /// Reseed the picker (zero is bumped, xorshift dies on it).
     pub fn set_rng_seed(&mut self, seed: u64) {
         self.rng = if seed == 0 { RNG_SEED } else { seed };
-        self.face.set_seed(seed);
     }
 
     /// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
@@ -763,11 +696,9 @@ impl Model {
         x
     }
 
-    /// Advance the deploy day, the face and each screen's cycle. Call once per frame.
+    /// Advance the deploy day and each screen's cycle. Call once per frame.
     pub fn tick(&mut self, now: Secs) {
         self.roll_deploy_day();
-        let mood = mood(&self.mood_inputs(now));
-        self.face.tick(mood, now);
         let mut waiting: Vec<usize> = Vec::new();
         for (i, s) in self.screens.iter_mut().enumerate() {
             if self.one_at_a_time {
@@ -996,9 +927,6 @@ impl Model {
             Event::TrafficHistory { req_per_sec } => self.traffic_hist.prefill(&req_per_sec, now),
             Event::Restarts { total_24h, worst } => {
                 self.clear_exporter(Role::Restarts);
-                if self.restarts.have && total_24h > self.restarts.total_24h {
-                    self.restarts.last_rise_at = Some(now);
-                }
                 self.restarts.total_24h = total_24h;
                 self.restarts.worst = worst;
                 self.restarts.have = true;
@@ -1038,11 +966,6 @@ impl Model {
             Event::CiRuns(runs) => {
                 self.ci.runs = runs;
                 self.ci.have = true;
-            }
-            Event::CiRun { ok, at, .. } => {
-                if ok {
-                    self.ci.last_pass_at = Some(self.ci.last_pass_at.map_or(at, |t| t.max(at)));
-                }
             }
             Event::Jellyfin { status, sessions } => {
                 if status == JfStatus::Ok {
@@ -1171,8 +1094,6 @@ impl Model {
 mod tests {
     use super::*;
     use crate::event::{CiRun, CiStatus, Download, JfKind, JfSession, JfStatus, NodeLoad};
-    use crate::p2::ui::ScreenUi;
-    use crate::scene::Drawable;
 
     fn metrics(cpu: f32, hot: Option<(&str, f32)>) -> Event {
         Event::Metrics {
@@ -1538,63 +1459,6 @@ mod tests {
         assert!(m.deploys_log().last.is_some());
     }
     #[test]
-    fn mood_inputs_reduce_rack_state_and_the_face_follows() {
-        let mut m = Model::new(Thresholds::default());
-        m.apply(
-            Event::NodeSnapshot {
-                ready: 3,
-                total: 4,
-                not_ready: vec!["pi-4".into()],
-            },
-            0.0,
-        );
-        let i = m.mood_inputs(0.0);
-        assert!(i.nodes_not_ready && !i.on_battery && !i.hot);
-        m.tick(1.0);
-        assert_eq!(m.face_mood(), crate::mood::Mood::Sad);
-        m.apply(metrics(95.0, None), 2.0);
-        assert!(m.mood_inputs(0.0).hot, "cpu over hot_cpu");
-        m.apply(
-            Event::NodeSnapshot {
-                ready: 4,
-                total: 4,
-                not_ready: vec![],
-            },
-            3.0,
-        );
-        m.apply(metrics(10.0, None), 3.0);
-        m.set_bedtime_near(true);
-        m.tick(3.0);
-        assert_eq!(m.face_mood(), crate::mood::Mood::Sleepy);
-        m.set_bedtime_near(false);
-        m.apply(
-            Event::Weather {
-                temp_c: 21.0,
-                code: 0,
-                is_day: true,
-                wind_kmh: 1.0,
-                gust_kmh: 1.0,
-                wind_from_deg: 0.0,
-                at: String::new(),
-            },
-            4.0,
-        );
-        m.tick(4.0);
-        assert_eq!(m.face_mood(), crate::mood::Mood::Happy, "a clear day");
-        let f = m.face_frame(4.2);
-        assert!(
-            f.e.lower > 0.0 && f.e.lower < 0.7,
-            "tweening toward happy: {}",
-            f.e.lower
-        );
-        assert_eq!(m.face_frame(4.2), f, "pure in `now`");
-        let s = m.scene_for_role(Role::Face, 4.2, &mut ScreenUi::new());
-        assert!(s
-            .items
-            .iter()
-            .any(|d| matches!(d, Drawable::RoundRect { .. })));
-    }
-    #[test]
     fn node_temps_are_kept() {
         let mut m = Model::new(Thresholds::default());
         m.apply(
@@ -1701,11 +1565,6 @@ mod tests {
         );
         assert_eq!(m.restarts().total_24h, 56);
         assert_eq!(m.restarts().worst, Some(("signal-cli".to_string(), 36)));
-        assert_eq!(
-            m.restarts().last_rise_at,
-            None,
-            "the first sample is not a rise"
-        );
         m.apply(
             Event::Uptime(vec![("pi-2".into(), 500.0), ("pi-1".into(), 6_884_104.0)]),
             2.0,
@@ -1757,51 +1616,6 @@ mod tests {
     }
 
     #[test]
-    fn a_rising_restart_counter_worries_the_face_for_five_minutes() {
-        let mut m = Model::new(Thresholds::default());
-        m.apply(
-            Event::Restarts {
-                total_24h: 10,
-                worst: None,
-            },
-            0.0,
-        );
-        assert!(!m.mood_inputs(1.0).recent_restart);
-        m.apply(
-            Event::Restarts {
-                total_24h: 10,
-                worst: None,
-            },
-            5.0,
-        );
-        assert!(!m.mood_inputs(6.0).recent_restart, "no rise");
-        m.apply(
-            Event::Restarts {
-                total_24h: 11,
-                worst: Some(("x".into(), 1)),
-            },
-            10.0,
-        );
-        assert!(m.mood_inputs(10.0).recent_restart);
-        assert!(m.mood_inputs(309.0).recent_restart);
-        assert!(
-            !m.mood_inputs(310.0).recent_restart,
-            "300 s later it is over"
-        );
-        m.apply(
-            Event::Restarts {
-                total_24h: 9,
-                worst: None,
-            },
-            400.0,
-        );
-        assert!(
-            !m.mood_inputs(400.0).recent_restart,
-            "a falling 24 h window is not a restart"
-        );
-        m.tick(10.5);
-    }
-    #[test]
     fn download_and_added_items_are_kept() {
         let mut m = Model::new(Thresholds::default());
         m.apply(
@@ -1836,7 +1650,7 @@ mod tests {
     }
 
     #[test]
-    fn ci_runs_are_kept_and_a_fresh_pass_makes_the_face_happy() {
+    fn ci_runs_are_kept() {
         let mut m = Model::new(Thresholds::default());
         m.set_unix_now(1_788_782_400);
         m.apply(
@@ -1848,52 +1662,6 @@ mod tests {
         );
         assert!(m.ci().have);
         assert_eq!(m.ci().runs.len(), 2);
-        assert_eq!(
-            m.ci().last_pass_at,
-            None,
-            "the list alone does not time a pass"
-        );
-        assert!(!m.mood_inputs(0.0).ci_passed_recently);
-        m.apply(
-            Event::CiRun {
-                repo: "silkepilon/RackScreen".into(),
-                ok: false,
-                at: 1_788_782_400 - 60,
-            },
-            1.0,
-        );
-        assert!(
-            !m.mood_inputs(1.0).ci_passed_recently,
-            "a failure is not a pass"
-        );
-        m.apply(
-            Event::CiRun {
-                repo: "silkepilon/RackScreen".into(),
-                ok: true,
-                at: 1_788_782_400 - 60,
-            },
-            2.0,
-        );
-        assert_eq!(m.ci().last_pass_at, Some(1_788_782_400 - 60));
-        assert!(m.mood_inputs(2.0).ci_passed_recently);
-        m.set_unix_now(1_788_782_400 - 60 + CI_RECENT_SECS);
-        assert!(
-            !m.mood_inputs(3.0).ci_passed_recently,
-            "30 min later it is over"
-        );
-        m.apply(
-            Event::CiRun {
-                repo: "x".into(),
-                ok: true,
-                at: 10,
-            },
-            4.0,
-        );
-        assert_eq!(
-            m.ci().last_pass_at,
-            Some(1_788_782_400 - 60),
-            "an older pass does not move it back"
-        );
     }
     fn session(title: &str, pos: f64, paused: bool) -> JfSession {
         JfSession {

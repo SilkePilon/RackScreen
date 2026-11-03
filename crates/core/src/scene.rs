@@ -129,7 +129,6 @@ pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Sc
     ui.for_role(role);
     match role {
         Role::PowerMix => crate::p2::roles::power_mix::power_mix_scene(model, now, ui),
-        Role::Face => crate::scene_face::face_scene(model, now),
         _ => {
             let screen = crate::p2::roles::screen(model, role, now)
                 .expect("every other role has a P2 builder");

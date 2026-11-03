@@ -75,7 +75,6 @@ pub enum Role {
     Ups,
     Net,
     Deploys,
-    Face,
     Media,
     Traffic,
     Restarts,
@@ -88,7 +87,7 @@ pub enum Role {
 }
 
 impl Role {
-    pub const ALL: [Role; 31] = [
+    pub const ALL: [Role; 30] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -110,7 +109,6 @@ impl Role {
         Role::Ups,
         Role::Net,
         Role::Deploys,
-        Role::Face,
         Role::Media,
         Role::Traffic,
         Role::Restarts,
@@ -157,7 +155,6 @@ impl Role {
             Role::Ups => "UPS",
             Role::Net => "NETWORK",
             Role::Deploys => "DEPLOYS TODAY",
-            Role::Face => "FACE",
             Role::Media => "MEDIA",
             Role::Traffic => "WEB TRAFFIC",
             Role::Restarts => "RESTARTS · 24H",
@@ -193,7 +190,6 @@ impl Role {
             Role::Ups => "ups",
             Role::Net => "net",
             Role::Deploys => "deploys",
-            Role::Face => "face",
             Role::Media => "media",
             Role::Traffic => "traffic",
             Role::Restarts => "restarts",
@@ -222,7 +218,6 @@ impl Role {
                 | Role::Ups
                 | Role::Net
                 | Role::Deploys
-                | Role::Face
                 | Role::Media
                 | Role::Traffic
                 | Role::Restarts
@@ -326,7 +321,6 @@ mod tests {
                 Role::Ups,
                 Role::Net,
                 Role::Deploys,
-                Role::Face,
                 Role::Media,
                 Role::Traffic,
                 Role::Restarts,
@@ -341,16 +335,14 @@ mod tests {
     }
 
     #[test]
-    fn thirty_one_roles_with_unique_names() {
-        assert_eq!(Role::ALL.len(), 31);
+    fn thirty_roles_with_unique_names() {
+        assert_eq!(Role::ALL.len(), 30);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 31);
-        assert_eq!(Role::parse("face"), Some(Role::Face));
-        assert!(Role::Face.is_cluster());
-        assert!(!Role::Face.is_sky());
-        assert_eq!(Role::ALL[21], Role::Face);
+        assert_eq!(names.len(), 30);
+        assert_eq!(Role::parse("face"), None);
+        assert_eq!(Role::ALL[20], Role::Deploys);
         assert_eq!(
-            &Role::ALL[22..],
+            &Role::ALL[21..],
             &[
                 Role::Media,
                 Role::Traffic,

@@ -1179,11 +1179,6 @@ impl FakeState {
                         repo: CI_REPO.into(),
                         ok: false,
                     },
-                    Event::CiRun {
-                        repo: CI_REPO.into(),
-                        ok: false,
-                        at: self.unix_now(),
-                    },
                     self.ci_runs(),
                 ]
             }
@@ -1213,14 +1208,7 @@ impl FakeState {
             FakeCmd::CiPass => {
                 self.ci_runs.insert(0, CiStatus::Success);
                 self.ci_runs.truncate(12);
-                vec![
-                    Event::CiRun {
-                        repo: CI_REPO.into(),
-                        ok: true,
-                        at: self.unix_now(),
-                    },
-                    self.ci_runs(),
-                ]
+                vec![self.ci_runs()]
             }
             FakeCmd::Thunder => {
                 self.weather_idx = 3; // WEATHER_CYCLE[3] is thunder
@@ -1726,14 +1714,8 @@ mod tests {
             .any(|e| matches!(e, Event::GithubRun { ok: false, .. })));
         assert!(evs
             .iter()
-            .any(|e| matches!(e, Event::CiRun { ok: false, .. })));
-        assert!(evs
-            .iter()
             .any(|e| matches!(e, Event::CiRuns(r) if r[0].status == CiStatus::Failure)));
         let evs = s.command(FakeCmd::CiPass);
-        assert!(evs
-            .iter()
-            .any(|e| matches!(e, Event::CiRun { ok: true, .. })));
         assert!(evs
             .iter()
             .any(|e| matches!(e, Event::CiRuns(r) if r[0].status == CiStatus::Success)));

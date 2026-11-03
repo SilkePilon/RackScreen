@@ -248,10 +248,22 @@ fn default_cycle() -> u64 {
 
 impl ScreenCfg {
     /// Every configured role, in cycling order. At least one.
+    /// The removed `face` role is dropped from old configs with a warning.
     pub fn roles(&self) -> Result<Vec<Role>> {
         anyhow::ensure!(!self.roles.is_empty(), "screen has no roles");
-        self.roles
+        let kept: Vec<&String> = self
+            .roles
             .iter()
+            .filter(|r| !r.eq_ignore_ascii_case("face"))
+            .collect();
+        if kept.len() < self.roles.len() {
+            tracing::warn!("face role was removed; ignoring");
+        }
+        anyhow::ensure!(
+            !kept.is_empty(),
+            "screen has no roles left after dropping the removed face role"
+        );
+        kept.into_iter()
             .map(|r| Role::parse(r).with_context(|| format!("unknown screen role '{r}'")))
             .collect()
     }
@@ -794,6 +806,24 @@ mod tests {
                 .unwrap();
         let err = format!("{:#}", c.validate().unwrap_err());
         assert!(err.contains("nope"), "{err}");
+    }
+
+    #[test]
+    fn a_face_role_is_dropped_from_a_roles_list() {
+        let c = Config::from_yaml(
+            "screens:\n  - { roles: [cpu, face, mem], spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
+        assert_eq!(c.screens[0].roles().unwrap(), vec![Role::Cpu, Role::Mem]);
+    }
+
+    #[test]
+    fn a_roles_list_with_only_face_is_an_error() {
+        let c =
+            Config::from_yaml("screens:\n  - { roles: [face], spi: 0, cs: 0, dc: 6, rst: 5 }\n")
+                .unwrap();
+        let e = c.screens[0].roles().unwrap_err().to_string();
+        assert!(e.contains("face"), "{e}");
     }
 
     #[test]
