@@ -149,7 +149,10 @@ in-memory, 30 days).
 * `POST /api/control/pattern` `{ "on": true }` → test pattern on all panels until turned off (or 10 min).
 * `POST /api/control/role` `{ "screen": 0, "role": "weather" }` → that screen jumps to that role now (must be in its list).
 * `POST /api/control/play` `{ "show": "freight" | "random" }`.
-* `POST /api/control/night` `{ "mode": "auto" | "on" | "off" }`.
+* `POST /api/control/night` `{ "mode": "auto" | "on" | "off" }`. The override
+  is kept by the hub (it survives monitor restarts, it does not survive a
+  process restart) and `/api/status` reports it right away; the answer's
+  `applied` says whether a running render loop took it already.
 * `POST /api/control/restart` → hot-restart the monitor.
 
 ### Live frames

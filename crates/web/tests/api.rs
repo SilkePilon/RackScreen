@@ -88,8 +88,21 @@ async fn non_get_without_the_header_is_forbidden() {
     .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
     assert!(body["error"].as_str().unwrap().contains("X-RackScreen"));
-    // with the header and no monitor running the control is unavailable, not forbidden
+    // with the header and no monitor running a control is unavailable, not forbidden
     let (st, _, _) = send(
+        &f.app,
+        post_json(
+            "POST",
+            "/api/control/pattern",
+            json!({"on": true}),
+            true,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
+    // the night override is kept for the next render loop and shows at once
+    let (st, _, body) = send(
         &f.app,
         post_json(
             "POST",
@@ -100,7 +113,10 @@ async fn non_get_without_the_header_is_forbidden() {
         ),
     )
     .await;
-    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body, json!({"ok": true, "applied": false}));
+    let (_, _, body) = send(&f.app, get("/api/status")).await;
+    assert_eq!(body["night"]["mode"], "on");
 }
 
 #[tokio::test]

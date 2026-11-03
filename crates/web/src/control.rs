@@ -7,7 +7,6 @@ use axum::extract::State;
 use axum::Json;
 use rackscreen_app::config::Config;
 use rackscreen_app::hub::{Control, ControlHandle, SupervisorCmd};
-use rackscreen_core::event::Event;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -129,11 +128,10 @@ pub async fn night(
             )))
         }
     };
-    handle(&state)?
-        .events
-        .send(Event::ForceNight(v))
-        .map_err(|_| ApiError::unavailable("the render loop is gone"))?;
-    Ok(Json(json!({ "ok": true })))
+    // kept in the hub, so a monitor restart (every config save) keeps it;
+    // without a running loop it applies once the monitor is back
+    let applied = state.hub.set_night_override(v);
+    Ok(Json(json!({ "ok": true, "applied": applied })))
 }
 
 pub async fn restart(State(state): State<Arc<AppState>>) -> ApiResult<Value> {

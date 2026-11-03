@@ -705,11 +705,7 @@ impl RenderLoop {
             .collect();
         StatusSnapshot {
             night: NightStatus {
-                mode: match model.night_override() {
-                    None => "auto",
-                    Some(true) => "on",
-                    Some(false) => "off",
-                },
+                mode: crate::hub::night_mode_name(model.night_override()),
                 active: phase != NightPhase::Day,
             },
             screens,

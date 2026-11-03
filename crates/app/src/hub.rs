@@ -292,6 +292,15 @@ pub struct NightStatus {
     pub active: bool,
 }
 
+/// `auto`, `on` or `off` for a night override.
+pub fn night_mode_name(v: Option<bool>) -> &'static str {
+    match v {
+        None => "auto",
+        Some(true) => "on",
+        Some(false) => "off",
+    }
+}
+
 impl Default for NightStatus {
     fn default() -> Self {
         NightStatus {
@@ -361,6 +370,9 @@ pub struct Hub {
     status: Mutex<StatusSnapshot>,
     monitor: Mutex<MonitorState>,
     control: Mutex<Option<ControlHandle>>,
+    /// The night override from the web UI (`None` = auto). It outlives the
+    /// render loop: every new loop gets it again.
+    night_override: Mutex<Option<bool>>,
     supervisor_tx: Mutex<Option<mpsc::Sender<SupervisorCmd>>>,
 }
 
@@ -382,12 +394,33 @@ impl Hub {
             status: Mutex::new(StatusSnapshot::default()),
             monitor: Mutex::new(MonitorState::default()),
             control: Mutex::new(None),
+            night_override: Mutex::new(None),
             supervisor_tx: Mutex::new(None),
         }
     }
 
+    /// The latest snapshot, with the night mode the web UI asked for (the
+    /// render loop may not have published since).
     pub fn status(&self) -> StatusSnapshot {
-        self.status.lock().unwrap().clone()
+        let mut s = self.status.lock().unwrap().clone();
+        s.night.mode = night_mode_name(*self.night_override.lock().unwrap());
+        s
+    }
+
+    pub fn night_override(&self) -> Option<bool> {
+        *self.night_override.lock().unwrap()
+    }
+
+    /// Remember the night override and hand it to the current render loop.
+    /// Returns whether a render loop took it (it is kept either way and
+    /// sent to the next loop).
+    pub fn set_night_override(&self, v: Option<bool>) -> bool {
+        let mut cur = self.night_override.lock().unwrap();
+        *cur = v;
+        let control = self.control.lock().unwrap();
+        control
+            .as_ref()
+            .is_some_and(|h| h.events.send(Event::ForceNight(v)).is_ok())
     }
 
     pub fn publish_status(&self, s: StatusSnapshot) {
@@ -411,8 +444,16 @@ impl Hub {
     }
 
     pub fn set_control(&self, handle: Option<ControlHandle>) {
-        *self.control.lock().unwrap() = handle;
-        if self.control.lock().unwrap().is_none() {
+        let night = self.night_override.lock().unwrap();
+        if let (Some(h), Some(v)) = (&handle, *night) {
+            // a fresh render loop starts in auto: give it the override again
+            let _ = h.events.send(Event::ForceNight(Some(v)));
+        }
+        let mut control = self.control.lock().unwrap();
+        *control = handle;
+        drop(night);
+        if control.is_none() {
+            drop(control);
             // the render loop is gone: its last snapshot is stale
             let mut s = self.status.lock().unwrap();
             s.screens.clear();
@@ -515,6 +556,41 @@ mod tests {
         assert!(tap.seq(3) > old, "a refilled slot gets a new number");
         tap.set_active(99);
         assert_eq!(tap.active(), 4, "capped at the slots");
+    }
+
+    #[test]
+    fn night_override_survives_a_new_render_loop() {
+        let hub = Hub::new("/tmp/x.yaml".into(), true, "0.0.0", LogSink::new(5), 1);
+        assert!(!hub.set_night_override(Some(true)), "no loop yet, but kept");
+        assert_eq!(hub.status().night.mode, "on");
+        let handle = || {
+            let (etx, erx) = mpsc::channel();
+            let (ctx, _crx) = mpsc::channel();
+            (
+                ControlHandle {
+                    events: etx,
+                    control: ctx,
+                },
+                erx,
+            )
+        };
+        let (h1, rx1) = handle();
+        hub.set_control(Some(h1));
+        assert!(matches!(rx1.try_recv(), Ok(Event::ForceNight(Some(true)))));
+        assert!(hub.set_night_override(Some(false)));
+        assert!(matches!(rx1.try_recv(), Ok(Event::ForceNight(Some(false)))));
+        // the monitor restarts: the new loop gets the override again
+        hub.set_control(None);
+        let (h2, rx2) = handle();
+        hub.set_control(Some(h2));
+        assert!(matches!(rx2.try_recv(), Ok(Event::ForceNight(Some(false)))));
+        assert_eq!(hub.status().night.mode, "off");
+        // back to auto: a new loop is left alone
+        assert!(hub.set_night_override(None));
+        let (h3, rx3) = handle();
+        hub.set_control(Some(h3));
+        assert!(rx3.try_recv().is_err());
+        assert_eq!(hub.status().night.mode, "auto");
     }
 
     #[test]
