@@ -2,8 +2,13 @@
 //! panels as one wide world. Each show is a pure function of the 12 fps
 //! frame index `f` and the quantised local time `t`.
 
+mod alpine;
+mod birds;
+mod caravan;
 mod day;
 mod deep_sea;
+mod desert_night;
+mod fireworks;
 mod freight;
 mod paper_plane;
 pub mod schedule;
@@ -63,6 +68,36 @@ pub const SHOWS: &[ShowDef] = &[
         secs: space::SECS,
         draw: space::draw,
     },
+    ShowDef {
+        id: "birds",
+        name: "Birds at sunset",
+        secs: birds::SECS,
+        draw: birds::draw,
+    },
+    ShowDef {
+        id: "fireworks",
+        name: "Fireworks",
+        secs: fireworks::SECS,
+        draw: fireworks::draw,
+    },
+    ShowDef {
+        id: "alpine",
+        name: "Mountains: alpine dawn",
+        secs: alpine::SECS,
+        draw: alpine::draw,
+    },
+    ShowDef {
+        id: "caravan",
+        name: "Desert: caravan",
+        secs: caravan::SECS,
+        draw: caravan::draw,
+    },
+    ShowDef {
+        id: "desert-night",
+        name: "Desert: night tumbleweed",
+        secs: desert_night::SECS,
+        draw: desert_night::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -102,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn round_one_shows_are_registered() {
+    fn every_show_is_registered_in_spec_order() {
         let got: Vec<_> = SHOWS[1..].iter().map(|d| (d.id, d.name, d.secs)).collect();
         assert_eq!(
             got,
@@ -112,6 +147,11 @@ mod tests {
                 ("storm", "Thunderstorm", 8.0),
                 ("day", "Day in a minute", 12.0),
                 ("space", "Space cruise", 8.0),
+                ("birds", "Birds at sunset", 9.0),
+                ("fireworks", "Fireworks", 8.0),
+                ("alpine", "Mountains: alpine dawn", 10.0),
+                ("caravan", "Desert: caravan", 10.0),
+                ("desert-night", "Desert: night tumbleweed", 9.0),
             ]
         );
     }

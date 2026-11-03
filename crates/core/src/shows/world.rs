@@ -39,6 +39,16 @@ pub fn rnd(i: f64) -> f64 {
     x - x.floor()
 }
 
+/// The mockup's `ease`: cubic in-out on `x` clamped to `0..=1`.
+pub fn ease(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    if x < 0.5 {
+        4.0 * x * x * x
+    } else {
+        1.0 - (-2.0 * x + 2.0).powi(3) / 2.0
+    }
+}
+
 /// JavaScript `Math.round`: halves round towards +∞.
 pub fn js_round(v: f64) -> i32 {
     (v + 0.5).floor() as i32
@@ -250,6 +260,16 @@ mod tests {
             rnd(1.0)
         );
         assert!((0.0..1.0).contains(&rnd(-7.0)));
+    }
+
+    #[test]
+    fn ease_is_cubic_in_out_and_clamped() {
+        assert_eq!(
+            (ease(-1.0), ease(0.0), ease(0.5), ease(1.0), ease(2.0)),
+            (0.0, 0.0, 0.5, 1.0, 1.0)
+        );
+        assert!((ease(0.25) - 0.0625).abs() < 1e-12);
+        assert!((ease(0.75) - 0.9375).abs() < 1e-12);
     }
 
     #[test]

@@ -1161,3 +1161,21 @@ fn show_round_one() {
         check(name, &show_strip(def, t));
     }
 }
+
+#[test]
+fn show_round_two() {
+    for (id, t, name) in [
+        ("birds", 4.0, "show_birds"),
+        ("fireworks", 5.6, "show_fireworks_finale"),
+        ("alpine", 7.0, "show_alpine"),
+        // At 25 mm gaps the camels are behind the bezel at t 5 and the
+        // shooting star at t 5.2; the extra frames show them on screen 3.
+        ("caravan", 5.0, "show_caravan"),
+        ("caravan", 6.0, "show_caravan_camels"),
+        ("desert-night", 5.2, "show_desert_night"),
+        ("desert-night", 5.5, "show_desert_night_star"),
+    ] {
+        let def = rackscreen_core::shows::by_id(id).unwrap();
+        check(name, &show_strip(def, t));
+    }
+}
