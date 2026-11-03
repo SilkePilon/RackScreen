@@ -188,7 +188,8 @@ pub fn decode(bytes: &[u8]) -> Result<GifFrames> {
     opts.set_color_output(gif::ColorOutput::RGBA);
     let mut dec = opts.read_info(Cursor::new(bytes)).context("read GIF")?;
     let mut canvas = vec![0u8; (w * h * 4) as usize];
-    let mut saved: Option<Vec<u8>> = None;
+    // what a `Previous` frame covered, to put back once it is shown
+    let mut saved: Vec<u8> = Vec::new();
     let mut prev: Option<(Rect, gif::DisposalMethod)> = None;
     let mut out: Vec<Vec<u8>> = Vec::with_capacity(kept_delays.len());
     for keep_this in keep.iter().copied() {
@@ -199,11 +200,7 @@ pub fn decode(bytes: &[u8]) -> Result<GifFrames> {
         if let Some((r, d)) = prev.take() {
             match d {
                 gif::DisposalMethod::Background => clear(&mut canvas, w, h, r),
-                gif::DisposalMethod::Previous => {
-                    if let Some(s) = saved.take() {
-                        canvas = s;
-                    }
-                }
+                gif::DisposalMethod::Previous => restore_region(&mut canvas, w, h, r, &saved),
                 _ => {}
             }
         }
@@ -214,7 +211,7 @@ pub fn decode(bytes: &[u8]) -> Result<GifFrames> {
             h: f.height as u32,
         };
         if f.dispose == gif::DisposalMethod::Previous {
-            saved = Some(canvas.clone());
+            saved = save_region(&canvas, w, h, rect);
         }
         draw(&mut canvas, w, h, rect, &f.buffer);
         prev = Some((rect, f.dispose));
@@ -241,6 +238,34 @@ fn clear(canvas: &mut [u8], cw: u32, ch: u32, r: Rect) {
             let o = ((y * cw + x) * 4) as usize;
             canvas[o..o + 4].fill(0);
         }
+    }
+}
+
+/// The rows of `r` inside the canvas, as `(canvas byte range)` each.
+fn region_rows(cw: u32, ch: u32, r: Rect) -> impl Iterator<Item = std::ops::Range<usize>> {
+    let (x0, x1) = (r.x.min(cw), r.x.saturating_add(r.w).min(cw));
+    let (y0, y1) = (r.y.min(ch), r.y.saturating_add(r.h).min(ch));
+    (y0..y1).map(move |y| ((y * cw + x0) * 4) as usize..((y * cw + x1) * 4) as usize)
+}
+
+/// A copy of the canvas under `r` (clipped to the canvas), for a frame
+/// disposed with "restore to previous": only its rect, as the spec allows.
+fn save_region(canvas: &[u8], cw: u32, ch: u32, r: Rect) -> Vec<u8> {
+    region_rows(cw, ch, r)
+        .flat_map(|row| canvas[row].iter().copied())
+        .collect()
+}
+
+/// Put back what `save_region` took for the same rect.
+fn restore_region(canvas: &mut [u8], cw: u32, ch: u32, r: Rect, saved: &[u8]) {
+    let mut at = 0;
+    for row in region_rows(cw, ch, r) {
+        let n = row.len();
+        let Some(src) = saved.get(at..at + n) else {
+            return;
+        };
+        canvas[row].copy_from_slice(src);
+        at += n;
     }
 }
 
@@ -711,6 +736,127 @@ mod tests {
         );
         assert!(near(at(3, tl), [255, 255, 255]));
         assert!(near(at(3, tr), [255, 0, 0]));
+    }
+
+    #[test]
+    fn a_region_saves_and_restores_only_its_clipped_rect() {
+        let (cw, ch) = (4u32, 3u32);
+        let mut canvas: Vec<u8> = (0..cw * ch * 4).map(|i| i as u8).collect();
+        let orig = canvas.clone();
+        let r = Rect {
+            x: 2,
+            y: 1,
+            w: 5,
+            h: 9,
+        };
+        let saved = save_region(&canvas, cw, ch, r);
+        assert_eq!(saved.len(), 2 * 2 * 4, "clipped to the canvas");
+        canvas.fill(7);
+        restore_region(&mut canvas, cw, ch, r, &saved);
+        for y in 0..ch {
+            for x in 0..cw {
+                let o = ((y * cw + x) * 4) as usize;
+                let want = if x >= 2 && y >= 1 {
+                    &orig[o..o + 4]
+                } else {
+                    &[7u8; 4][..]
+                };
+                assert_eq!(&canvas[o..o + 4], want, "({x},{y})");
+            }
+        }
+        let outside = Rect {
+            x: 9,
+            y: 0,
+            w: 3,
+            h: 3,
+        };
+        assert!(save_region(&canvas, cw, ch, outside).is_empty());
+        restore_region(&mut canvas, cw, ch, outside, &[]);
+    }
+
+    #[test]
+    fn previous_on_the_first_frame_restores_the_empty_canvas() {
+        use gif::DisposalMethod::{Keep, Previous};
+        let bytes = encode(
+            4,
+            4,
+            &[
+                (0, 0, 2, 2, [255, 0, 0], 10, Previous),
+                (2, 2, 2, 2, [0, 255, 0], 10, Keep),
+            ],
+        );
+        let g = decode(&bytes).unwrap();
+        assert!(near(px(&g, 0, 10, 10), [255, 0, 0]));
+        assert!(
+            near(px(&g, 1, 10, 10), [0, 0, 0]),
+            "the red is undone: transparent, so black"
+        );
+        assert!(near(px(&g, 1, 230, 230), [0, 255, 0]));
+    }
+
+    #[test]
+    fn frames_partly_or_wholly_outside_the_canvas_are_cut_off() {
+        use gif::DisposalMethod::{Background, Keep, Previous};
+        let bytes = encode(
+            4,
+            4,
+            &[
+                (0, 0, 4, 4, [255, 0, 0], 10, Keep),
+                (3, 3, 4, 4, [0, 0, 255], 10, Previous),
+                (40, 40, 2, 2, [0, 255, 0], 10, Background),
+                (0, 0, 1, 1, [255, 255, 255], 10, Keep),
+            ],
+        );
+        let g = decode(&bytes).unwrap();
+        assert_eq!(g.len(), 4);
+        assert!(near(px(&g, 1, 230, 230), [0, 0, 255]), "the part inside");
+        assert!(near(px(&g, 1, 10, 10), [255, 0, 0]));
+        assert!(near(px(&g, 2, 230, 230), [255, 0, 0]), "Previous undoes it");
+        assert!(near(px(&g, 2, 10, 10), [255, 0, 0]), "nothing drawn");
+        assert!(near(px(&g, 3, 10, 10), [255, 255, 255]));
+        assert!(near(px(&g, 3, 230, 230), [255, 0, 0]));
+    }
+
+    #[test]
+    fn hostile_tenor_html_does_not_panic_or_match() {
+        let unclosed = [
+            r#"<meta property="og:image" content="https://media.tenor.com/x.gif"#,
+            r#"<meta property="og:image" content=""#,
+            r#"<meta property="og:image" content="#,
+            r#""contentUrl": "https://media.tenor.com/x.gif"#,
+            r#""contentUrl":"#,
+            r#""contentUrl""#,
+            "<<<<meta",
+        ];
+        for html in unclosed {
+            assert_eq!(tenor_gif_url(html), None, "{html}");
+        }
+        // a huge attribute, and many tags, in a page-sized input
+        let huge = format!(
+            r#"<meta property="og:image" content="https://{}.gif">"#,
+            "a".repeat(MAX_PAGE_BYTES)
+        );
+        assert!(tenor_gif_url(&huge).is_some_and(|u| u.len() > MAX_PAGE_BYTES));
+        let many = r#"<meta property="og:image" content="x"#.repeat(MAX_PAGE_BYTES / 40);
+        assert_eq!(tenor_gif_url(&many), None);
+        let many_ld = r#""contentUrl":""#.repeat(MAX_PAGE_BYTES / 16);
+        assert_eq!(tenor_gif_url(&many_ld), None);
+        // not UTF-8: read lossily, the URL around it still found
+        let mut bytes =
+            b"\xff\xfe<meta property=\"og:image\" content=\"https://media.tenor.com/A/b.gif\">\xc3"
+                .to_vec();
+        bytes.extend_from_slice(&[0xe2, 0x82]);
+        let html = String::from_utf8_lossy(&bytes);
+        assert_eq!(
+            tenor_gif_url(&html).as_deref(),
+            Some("https://media.tenor.com/A/b.gif")
+        );
+        // multi-byte text right before a quote
+        assert_eq!(
+            tenor_gif_url(r#"<meta property="og:image" content="https://é.example/ü.gif">"#)
+                .as_deref(),
+            Some("https://é.example/ü.gif")
+        );
     }
 
     #[test]
