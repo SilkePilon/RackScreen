@@ -4,7 +4,7 @@
 //! up to 2 min on a 429 from the player or the token endpoint).
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -489,16 +489,71 @@ async fn access_token(cfg: &SpotifyConfig, force: bool) -> Result<String> {
     }
 }
 
+/// Polls failing this long show a playing track as paused: the screen
+/// ticks the progress on its own between polls and would otherwise run on
+/// to 0:00 while offline.
+pub const OFFLINE_FREEZE: Duration = Duration::from_secs(30);
+
+/// Since when the polls fail, and whether the track was frozen for it.
+#[derive(Debug)]
+pub struct Offline {
+    last_ok: Instant,
+    frozen: bool,
+}
+
+impl Offline {
+    pub fn new(now: Instant) -> Self {
+        Offline {
+            last_ok: now,
+            frozen: false,
+        }
+    }
+
+    /// A poll answered at `now`.
+    pub fn ok(&mut self, now: Instant) {
+        self.last_ok = now;
+        self.frozen = false;
+    }
+
+    /// When `prev` (the last track polled) is to be frozen: a playing track
+    /// not yet frozen, `OFFLINE_FREEZE` after the last good poll.
+    pub fn freeze_at(&self, prev: Option<&Track>) -> Option<Instant> {
+        prev.filter(|t| t.playing && !self.frozen)
+            .map(|_| self.last_ok + OFFLINE_FREEZE)
+    }
+
+    /// The track to show at `now` once the polls failed for too long: `prev`
+    /// paused, its progress where the screen got to; `None` before then or
+    /// when it was frozen already.
+    pub fn freeze(&mut self, prev: Option<&Track>, now: Instant, unix_now: i64) -> Option<Track> {
+        let at = self.freeze_at(prev)?;
+        if now < at {
+            return None;
+        }
+        self.frozen = true;
+        let t = prev?;
+        let ran = now.saturating_duration_since(self.last_ok).as_secs_f64();
+        Some(Track {
+            playing: false,
+            position_secs: (t.position_secs + ran).min(t.duration_secs.max(0.0)),
+            since: unix_now,
+            ..t.clone()
+        })
+    }
+}
+
 pub async fn run_spotify(cfg: SpotifyConfig, ctx: SourceCtx) {
     let mut covers = CoverCache::default();
     let mut prev: Option<Track> = None;
     let mut last_err: Option<String> = None;
+    let mut offline = Offline::new(Instant::now());
     loop {
         if ctx.shutdown.is_cancelled() {
             return;
         }
         let wait = match poll_once(&cfg, &mut covers, &mut prev).await {
             Ok((track, wait)) => {
+                offline.ok(Instant::now());
                 if last_err.take().is_some() {
                     tracing::info!("spotify: polling again");
                 }
@@ -522,13 +577,33 @@ pub async fn run_spotify(cfg: SpotifyConfig, ctx: SourceCtx) {
                     });
                 }
                 // a network blip or a rate limit keeps the last track on
-                // screen (it shows paused once polls fail for long)
+                // screen; it shows paused once the polls fail for long
                 wait_after_error(&e)
             }
         };
-        tokio::select! {
-            _ = ctx.shutdown.cancelled() => return,
-            _ = tokio::time::sleep(wait) => {}
+        let next = Instant::now() + wait;
+        loop {
+            // wake for the freeze too when it falls before the next poll
+            let until = offline
+                .freeze_at(prev.as_ref())
+                .map_or(next, |f| f.min(next));
+            tokio::select! {
+                _ = ctx.shutdown.cancelled() => return,
+                _ = tokio::time::sleep_until(until.into()) => {}
+            }
+            let now = Instant::now();
+            if let Some(t) = offline.freeze(prev.as_ref(), now, unix_now()) {
+                tracing::info!(
+                    "spotify: no answer for {OFFLINE_FREEZE:?}; showing the track paused"
+                );
+                ctx.emit(Event::Music {
+                    source: MusicSource::Spotify,
+                    track: Some(t),
+                });
+            }
+            if now >= next {
+                break;
+            }
         }
     }
 }
@@ -894,6 +969,51 @@ mod tests {
         assert!(is_login_error(&LoginError("not logged in".into()).into()));
         let net = anyhow::anyhow!("dns").context("player");
         assert!(!is_login_error(&net));
+    }
+
+    fn playing(position: f64) -> Track {
+        Track {
+            source: MusicSource::Spotify,
+            title: "Holocene".into(),
+            artist: "Bon Iver".into(),
+            device: "Kitchen".into(),
+            duration_secs: 337.0,
+            position_secs: position,
+            playing: true,
+            since: 5,
+            cover: None,
+        }
+    }
+
+    #[test]
+    fn failing_polls_freeze_a_playing_track_as_paused_after_30_s() {
+        let t0 = std::time::Instant::now();
+        let s = |n: u64| Duration::from_secs(n);
+        let mut off = Offline::new(t0);
+        let prev = Some(playing(100.0));
+        assert_eq!(off.freeze_at(prev.as_ref()), Some(t0 + OFFLINE_FREEZE));
+        assert_eq!(OFFLINE_FREEZE, s(30));
+        assert_eq!(off.freeze(prev.as_ref(), t0 + s(29), 1000), None, "not yet");
+        let t = off.freeze(prev.as_ref(), t0 + s(31), 1000).unwrap();
+        assert!(!t.playing, "shown paused");
+        assert_eq!(t.position_secs, 131.0, "frozen where the screen got to");
+        assert_eq!((t.title.as_str(), t.since), ("Holocene", 1000));
+        assert_eq!(off.freeze_at(prev.as_ref()), None, "once");
+        assert_eq!(off.freeze(prev.as_ref(), t0 + s(60), 1000), None);
+        // a good poll starts the clock again
+        off.ok(t0 + s(90));
+        assert_eq!(off.freeze_at(prev.as_ref()), Some(t0 + s(120)));
+        // never past the end, and nothing to freeze when not playing
+        let mut off = Offline::new(t0);
+        let t = off.freeze(Some(&playing(330.0)), t0 + s(40), 0).unwrap();
+        assert_eq!(t.position_secs, 337.0);
+        let paused = Track {
+            playing: false,
+            ..playing(10.0)
+        };
+        let off = Offline::new(t0);
+        assert_eq!(off.freeze_at(Some(&paused)), None);
+        assert_eq!(off.freeze_at(None), None);
     }
 
     #[test]
