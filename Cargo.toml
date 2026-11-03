@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/core", "crates/render", "crates/display", "crates/sources", "crates/app", "crates/setup"]
+members = ["crates/core", "crates/render", "crates/display", "crates/sources", "crates/app", "crates/ops", "crates/web"]
 resolver = "2"
 
 [workspace.package]
-version = "0.12.1"
+version = "0.13.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/silkepilon/RackScreen"
@@ -32,7 +32,8 @@ path = "src/main.rs"
 
 [dependencies]
 rackscreen-app = { path = "crates/app" }
-rackscreen-setup = { path = "crates/setup", default-features = false }
+rackscreen-ops = { path = "crates/ops", default-features = false }
+rackscreen-web = { path = "crates/web" }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -41,8 +42,8 @@ nix = { version = "0.31", features = ["user"] }
 
 [features]
 default = ["sim", "pi"]
-sim = ["rackscreen-app/sim", "rackscreen-setup/sim"]
-pi = ["rackscreen-app/pi", "rackscreen-setup/pi"]
+sim = ["rackscreen-app/sim", "rackscreen-ops/sim"]
+pi = ["rackscreen-app/pi", "rackscreen-ops/pi"]
 
 [profile.release]
 opt-level = 3
