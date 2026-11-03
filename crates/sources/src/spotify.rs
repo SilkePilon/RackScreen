@@ -390,6 +390,17 @@ impl SpotifyItem {
 
 // ---------------------------------------------------------------- service
 
+/// No usable login: the screen drops the track and the source waits for
+/// setup to write a new token file. Anything else is a network problem and
+/// the last track stays.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct LoginError(pub String);
+
+pub fn is_login_error(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<LoginError>().is_some()
+}
+
 #[derive(Clone, Debug)]
 pub struct SpotifyConfig {
     pub client_id: String,
@@ -407,10 +418,13 @@ fn unix_now() -> i64 {
 /// is about to run out. `Err` when there is no login or it was refused.
 async fn access_token(cfg: &SpotifyConfig, force: bool) -> Result<String> {
     let Some(tok) = read_token(&cfg.token_path) else {
-        bail!("not logged in ({})", cfg.token_path.display());
+        return Err(LoginError(format!("not logged in ({})", cfg.token_path.display())).into());
     };
     if let Some(e) = &tok.error {
-        bail!("login refused earlier ({e}); log in again in setup");
+        return Err(LoginError(format!(
+            "login refused earlier ({e}); log in again in setup"
+        ))
+        .into());
     }
     let now = unix_now();
     if !force && !tok.needs_refresh(now) {
@@ -429,14 +443,13 @@ async fn access_token(cfg: &SpotifyConfig, force: bool) -> Result<String> {
             write_token(&cfg.token_path, &next, None)?;
             Ok(next.access_token)
         }
-        Err(code) => {
-            if code == "invalid_grant" || code == "invalid_client" {
-                let mut bad = tok.clone();
-                bad.error = Some(code.clone());
-                write_token(&cfg.token_path, &bad, None)?;
-            }
-            bail!("token refresh refused: {code}")
+        Err(code) if code == "invalid_grant" || code == "invalid_client" => {
+            let mut bad = tok.clone();
+            bad.error = Some(code.clone());
+            write_token(&cfg.token_path, &bad, None)?;
+            Err(LoginError(format!("token refresh refused: {code}")).into())
         }
+        Err(code) => bail!("token refresh failed: {code}"),
     }
 }
 
@@ -465,12 +478,17 @@ pub async fn run_spotify(cfg: SpotifyConfig, ctx: SourceCtx) {
                     tracing::warn!("spotify: {msg}");
                     last_err = Some(msg);
                 }
-                prev = None;
-                ctx.emit(Event::Music {
-                    source: MusicSource::Spotify,
-                    track: None,
-                });
-                LOGIN_RETRY
+                if is_login_error(&e) {
+                    prev = None;
+                    ctx.emit(Event::Music {
+                        source: MusicSource::Spotify,
+                        track: None,
+                    });
+                    LOGIN_RETRY
+                } else {
+                    // a network blip: keep the last track on screen
+                    POLL_IDLE
+                }
             }
         };
         tokio::select! {
@@ -763,6 +781,13 @@ mod tests {
             serde_json::from_str(r#"[{"url":"c","width":64},{"url":"d","width":120}]"#).unwrap();
         assert_eq!(cover_url(&small).as_deref(), Some("d"), "else the largest");
         assert_eq!(cover_url(&Value::Null), None);
+    }
+
+    #[test]
+    fn only_login_problems_count_as_login_errors() {
+        assert!(is_login_error(&LoginError("not logged in".into()).into()));
+        let net = anyhow::anyhow!("dns").context("player");
+        assert!(!is_login_error(&net));
     }
 
     #[test]
