@@ -1038,7 +1038,7 @@ fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
     let mut bad = Vec::new();
     for d in &s.items {
         let (what, color, alpha, min) = match d {
-            D::Clear(_) | D::World { .. } => continue,
+            D::Clear(_) | D::World { .. } | D::Image { .. } => continue,
             D::Arc { color, alpha, .. } => ("arc", *color, *alpha, 0x2A),
             D::RoundRect { color, alpha, .. } => ("rect", *color, *alpha, 0x2A),
             D::Polygon { color, alpha, .. } => ("polygon", *color, *alpha, 0x2A),

@@ -1,6 +1,7 @@
 //! `Model::scene`: which scene a physical screen shows at one instant.
 
 use crate::anim::Secs;
+use crate::gif::GifState;
 use crate::p2::screen::compose;
 use crate::p2::status::{connecting_scene, no_data_screen, NoData};
 use crate::p2::ui::ScreenUi;
@@ -39,6 +40,7 @@ impl crate::model::Model {
             Role::Media => !(link.prom && self.media().have),
             Role::Ci => !(link.github && self.ci().have),
             Role::Jellyfin => !self.jellyfin().have,
+            Role::Gif(i) => !matches!(self.gif(i), GifState::Ready(_)),
         }
     }
 
@@ -87,8 +89,32 @@ impl crate::model::Model {
         self.scene_for_role(role, now, ui)
     }
 
+    /// A GIF role: the current frame over the whole screen once decoded, the
+    /// status screen before that and after a failure. The frame clock starts
+    /// when the GIF first shows.
+    pub(crate) fn gif_scene(&self, index: u16, now: Secs, ui: &mut ScreenUi) -> Scene {
+        let role = Role::Gif(index);
+        ui.for_role(role);
+        match self.gif(index) {
+            GifState::Ready(frames) => {
+                let t0 = ui.since(("gif", 0), now);
+                let mut s = Scene::new();
+                s.push(Drawable::Image {
+                    frame: frames.0.frame_at(now - t0) as u16,
+                    frames: frames.clone(),
+                });
+                s
+            }
+            GifState::Loading => compose(&no_data_screen(role, NoData::Loading), ui, now),
+            GifState::Failed => compose(&no_data_screen(role, NoData::GifFailed), ui, now),
+        }
+    }
+
     /// Role scene without a transition (tests, goldens, calibrate).
     pub fn scene_for_role(&self, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
+        if let Role::Gif(index) = role {
+            return self.gif_scene(index, now, ui);
+        }
         if self.wants_connecting(role) {
             return connecting_scene(role.icon(), ui, now);
         }
@@ -561,5 +587,116 @@ mod tests {
             let (_, x0) = world_of(&m.scene(screen, 1.0, &mut ScreenUi::new())).unwrap();
             assert_eq!(x0, layout.x0(screen as u32));
         }
+    }
+
+    fn gif(frames: usize) -> crate::gif::GifRef {
+        use crate::gif::{GifFrames, GifRef, FRAME_BYTES};
+        GifRef(std::sync::Arc::new(
+            GifFrames::new(
+                (0..frames)
+                    .map(|i| (vec![i as u8; FRAME_BYTES], 100))
+                    .collect(),
+            )
+            .unwrap(),
+        ))
+    }
+
+    fn image_of(s: &Scene) -> Option<(crate::gif::GifRef, u16)> {
+        s.items.iter().find_map(|d| match d {
+            Drawable::Image { frames, frame } => Some((frames.clone(), *frame)),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn gif_loading_and_failed_use_the_status_screen() {
+        let mut m = Model::new(Thresholds::default());
+        let s = for_role(&m, Role::Gif(1), 0.0);
+        assert_eq!(icon_of(&s), Some("ms-gif_box"));
+        assert_eq!(pill_of(&s).as_deref(), Some("Loading"));
+        assert!(image_of(&s).is_none());
+        m.apply(
+            Event::GifFailed {
+                index: 1,
+                reason: "404".into(),
+            },
+            0.0,
+        );
+        let s = for_role(&m, Role::Gif(1), 0.0);
+        assert_eq!(icon_of(&s), Some("ms-gif_box"));
+        assert_eq!(pill_of(&s).as_deref(), Some("GIF failed"));
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Gif(0), 0.0)).as_deref(),
+            Some("Loading"),
+            "other GIFs are untouched"
+        );
+    }
+
+    #[test]
+    fn a_ready_gif_fills_the_screen_without_ring_or_icon() {
+        let mut m = Model::new(Thresholds::default());
+        let g = gif(3);
+        m.apply(
+            Event::Gif {
+                index: 0,
+                frames: g.clone(),
+            },
+            0.0,
+        );
+        let s = for_role(&m, Role::Gif(0), 5.0);
+        assert_eq!(s.items.len(), 2, "{:?}", s.items);
+        assert!(matches!(s.items[0], Drawable::Clear(_)));
+        assert_eq!(image_of(&s), Some((g, 0)));
+        assert_eq!(icon_of(&s), None);
+        assert_eq!(arcs(&s), 0);
+    }
+
+    #[test]
+    fn gif_frames_follow_the_time_on_screen_and_loop() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Gif {
+                index: 0,
+                frames: gif(3),
+            },
+            0.0,
+        );
+        let mut ui = ScreenUi::new();
+        let at = |m: &Model, ui: &mut ScreenUi, t: f64| {
+            image_of(&m.scene_for_role(Role::Gif(0), t, ui)).unwrap().1
+        };
+        assert_eq!(at(&m, &mut ui, 50.0), 0, "starts at the first frame");
+        assert_eq!(at(&m, &mut ui, 50.15), 1);
+        assert_eq!(at(&m, &mut ui, 50.25), 2);
+        assert_eq!(at(&m, &mut ui, 50.35), 0, "loops");
+        assert_eq!(
+            m.scene_for_role(Role::Gif(0), 50.36, &mut ui),
+            m.scene_for_role(Role::Gif(0), 50.37, &mut ui),
+            "same frame, equal scenes: the render worker skips it"
+        );
+        // another role and back: starts over
+        m.scene_for_role(Role::Cpu, 51.0, &mut ui);
+        assert_eq!(at(&m, &mut ui, 52.15), 0);
+    }
+
+    #[test]
+    fn a_gif_screen_crossfades_like_any_role() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Gif {
+                index: 0,
+                frames: gif(2),
+            },
+            0.0,
+        );
+        m.set_screens(vec![vec![Role::Gif(0), Role::Cpu]], vec![5.0]);
+        let mut ui = ScreenUi::new();
+        let s = m.scene(0, 1.0, &mut ui);
+        assert!(image_of(&s).is_some());
+        assert_eq!(s.fade, 1.0);
+        m.tick(5.1);
+        let s = m.scene(0, 5.15, &mut ui);
+        assert!(image_of(&s).is_some(), "fading out");
+        assert!(s.fade < 1.0);
     }
 }

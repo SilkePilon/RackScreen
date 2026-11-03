@@ -3,6 +3,7 @@ pub mod anim;
 pub mod electricity;
 pub mod event;
 pub mod format;
+pub mod gif;
 pub mod history;
 pub mod model;
 pub mod night;

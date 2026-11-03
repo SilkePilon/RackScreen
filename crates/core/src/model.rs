@@ -377,6 +377,8 @@ pub struct Model {
     /// The current world frame, keyed by (show id, 12 fps frame index): one
     /// `Arc` per frame for every screen and tick, so equal scenes stay equal.
     show_frame: Option<(&'static str, u32, Arc<WorldFrame>)>,
+    /// Decoded GIFs by index into the config's `gifs:` list.
+    gifs: Vec<crate::gif::GifState>,
 }
 
 /// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
@@ -453,9 +455,22 @@ impl Model {
             show_request: None,
             night_day: true,
             show_frame: None,
+            gifs: Vec::new(),
         }
     }
 
+    /// The GIF at `index` of the config's `gifs:` list.
+    pub fn gif(&self, index: u16) -> &crate::gif::GifState {
+        static LOADING: crate::gif::GifState = crate::gif::GifState::Loading;
+        self.gifs.get(index as usize).unwrap_or(&LOADING)
+    }
+    fn gif_slot(&mut self, index: u16) -> &mut crate::gif::GifState {
+        let i = index as usize;
+        if self.gifs.len() <= i {
+            self.gifs.resize(i + 1, crate::gif::GifState::Loading);
+        }
+        &mut self.gifs[i]
+    }
     pub fn state(&self) -> &ClusterState {
         &self.state
     }
@@ -1050,6 +1065,16 @@ impl Model {
                 }
             }
             Event::ForceNight(v) => self.night_override = v,
+            Event::Gif { index, frames } => {
+                *self.gif_slot(index) = crate::gif::GifState::Ready(frames);
+            }
+            Event::GifFailed { index, .. } => {
+                let slot = self.gif_slot(index);
+                // A GIF that plays keeps playing.
+                if !matches!(slot, crate::gif::GifState::Ready(_)) {
+                    *slot = crate::gif::GifState::Failed;
+                }
+            }
             Event::Weather {
                 temp_c,
                 code,

@@ -44,7 +44,7 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Media => media::media(model, now),
         Role::Ci => github::ci(model, now),
         Role::Jellyfin => media::jellyfin(model, now),
-        Role::PowerMix => return None,
+        Role::PowerMix | Role::Gif(_) => return None,
     };
     screen.icon = role.icon();
     Some(screen)

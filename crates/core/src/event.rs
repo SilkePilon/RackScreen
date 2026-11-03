@@ -446,4 +446,15 @@ pub enum Event {
     },
     /// Simulator override: Some(true) forces night, Some(false) forces day, None back to clock.
     ForceNight(Option<bool>),
+    /// The GIF at `index` of the config's `gifs:` list is decoded.
+    Gif {
+        index: u16,
+        frames: crate::gif::GifRef,
+    },
+    /// The GIF at `index` could not be fetched or decoded (the reason is
+    /// logged by the source); it retries later.
+    GifFailed {
+        index: u16,
+        reason: String,
+    },
 }
