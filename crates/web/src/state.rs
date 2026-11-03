@@ -1,6 +1,6 @@
 //! State shared by every handler.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,10 @@ use crate::update::UpdateState;
 
 /// How long a session cookie is good for.
 pub const SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
+/// Failed logins allowed per `LOGIN_WINDOW` (for everyone together) before
+/// the login answers 429.
+pub const LOGIN_MAX_FAILURES: usize = 5;
+pub const LOGIN_WINDOW: Duration = Duration::from_secs(60);
 /// How long a started Spotify login (its PKCE verifier) is kept.
 pub const SPOTIFY_LOGIN_TTL: Duration = Duration::from_secs(600);
 
@@ -27,6 +31,8 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     /// Session id (hex) to expiry.
     sessions: Mutex<HashMap<String, Instant>>,
+    /// When the recent failed logins happened (at most `LOGIN_MAX_FAILURES`).
+    login_failures: Mutex<VecDeque<Instant>>,
     /// The current `web.password`; empty means no login.
     password: RwLock<String>,
     pub spotify: Mutex<Option<PendingLogin>>,
@@ -46,6 +52,7 @@ impl AppState {
         AppState {
             hub,
             sessions: Mutex::new(HashMap::new()),
+            login_failures: Mutex::new(VecDeque::new()),
             password: RwLock::new(password),
             spotify: Mutex::new(None),
             update: Mutex::new(UpdateState::default()),
@@ -67,12 +74,43 @@ impl AppState {
         self.password.read().unwrap().clone()
     }
 
-    pub fn set_password(&self, p: &str) {
+    /// Change the password. Every session was made under the old one and
+    /// ends, except `keep` (the session that made the change).
+    pub fn set_password(&self, p: &str, keep: Option<&str>) {
         let mut cur = self.password.write().unwrap();
         if *cur != p {
             *cur = p.to_string();
-            // every session was made under the old password
-            self.sessions.lock().unwrap().clear();
+            let mut s = self.sessions.lock().unwrap();
+            let now = Instant::now();
+            s.retain(|id, exp| *exp > now && keep == Some(id.as_str()));
+        }
+    }
+
+    /// `Some(wait)` while too many logins failed in the last `LOGIN_WINDOW`.
+    pub fn login_blocked(&self) -> Option<Duration> {
+        self.login_blocked_at(Instant::now())
+    }
+
+    fn login_blocked_at(&self, now: Instant) -> Option<Duration> {
+        let mut f = self.login_failures.lock().unwrap();
+        while f
+            .front()
+            .is_some_and(|t| now.duration_since(*t) >= LOGIN_WINDOW)
+        {
+            f.pop_front();
+        }
+        if f.len() < LOGIN_MAX_FAILURES {
+            return None;
+        }
+        let oldest = *f.front()?;
+        Some(LOGIN_WINDOW.saturating_sub(now.duration_since(oldest)))
+    }
+
+    pub fn login_failed(&self) {
+        let mut f = self.login_failures.lock().unwrap();
+        f.push_back(Instant::now());
+        while f.len() > LOGIN_MAX_FAILURES {
+            f.pop_front();
         }
     }
 
@@ -104,5 +142,53 @@ impl AppState {
     /// Live sessions (for tests).
     pub fn session_count_for_test(&self) -> usize {
         self.sessions.lock().unwrap().len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rackscreen_app::logs::LogSink;
+
+    fn state(pw: &str) -> AppState {
+        let hub = Arc::new(Hub::new(
+            "/nonexistent".into(),
+            true,
+            "0",
+            LogSink::new(5),
+            2,
+        ));
+        AppState::new(hub, pw.into(), 0)
+    }
+
+    #[test]
+    fn five_failures_block_logins_for_a_minute() {
+        let s = state("pw");
+        for _ in 0..LOGIN_MAX_FAILURES - 1 {
+            s.login_failed();
+            assert!(s.login_blocked().is_none());
+        }
+        s.login_failed();
+        let wait = s.login_blocked().unwrap();
+        assert!(
+            wait <= LOGIN_WINDOW && wait > Duration::from_secs(55),
+            "{wait:?}"
+        );
+        let later = Instant::now() + LOGIN_WINDOW + Duration::from_secs(1);
+        assert!(s.login_blocked_at(later).is_none(), "the window passed");
+    }
+
+    #[test]
+    fn a_password_change_keeps_only_the_changing_session() {
+        let s = state("old");
+        let mine = s.new_session();
+        let other = s.new_session();
+        s.set_password("old", None);
+        assert_eq!(s.session_count_for_test(), 2, "no change, no logout");
+        s.set_password("new", Some(&mine));
+        assert!(s.session_valid(&mine));
+        assert!(!s.session_valid(&other));
+        s.set_password("newer", None);
+        assert_eq!(s.session_count_for_test(), 0);
     }
 }

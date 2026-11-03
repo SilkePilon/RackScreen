@@ -277,7 +277,7 @@ async fn config_round_trip_masks_merges_and_asks_for_a_restart() {
         ),
     )
     .await;
-    assert_eq!(body, json!({"ok": true}));
+    assert_eq!(body["ok"], true, "{body}");
     // the web block: a process restart, and the password takes effect
     let mut web = cfg.clone();
     web["web"]["password"] = json!("newpw");
@@ -484,4 +484,190 @@ async fn control_endpoints_validate_before_reaching_the_loop() {
     )
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "no login started");
+}
+
+#[tokio::test]
+async fn a_foreign_origin_cannot_watch_or_write() {
+    let f = fixture("");
+    let with = |method: &str, path: &str, origin: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "pi:8740")
+            .header(header::ORIGIN, origin)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("X-RackScreen", "1")
+            .body(Body::from("{}"))
+            .unwrap()
+    };
+    // the stream endpoints refuse a foreign Origin before anything else
+    for path in ["/api/live", "/api/logs/stream"] {
+        let (st, _, body) = send(&f.app, with("GET", path, "http://evil.example")).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{path}");
+        assert!(body["error"].as_str().unwrap().contains("cross-origin"));
+    }
+    // the stream never ends: look at the status only
+    let resp = f
+        .app
+        .clone()
+        .oneshot(with("GET", "/api/logs/stream", "http://pi:8740"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "same origin streams");
+    // any write with a foreign Origin, even with the X-RackScreen header
+    let (st, _, _) = send(
+        &f.app,
+        with("POST", "/api/control/restart", "http://pi:9999"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    let (st, _, _) = send(&f.app, with("POST", "/api/auth/logout", "http://pi:8740")).await;
+    assert_eq!(st, StatusCode::OK);
+    // plain GETs from elsewhere are left to CORS (no Access-Control headers)
+    let (st, _, _) = send(&f.app, with("GET", "/api/info", "http://evil.example")).await;
+    assert_eq!(st, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn repeated_wrong_passwords_get_429_with_retry_after() {
+    let f = fixture("hunter2");
+    let login = |pw: &str| {
+        post_json(
+            "POST",
+            "/api/auth/login",
+            json!({"password": pw}),
+            true,
+            None,
+        )
+    };
+    for _ in 0..5 {
+        let (st, _, _) = send(&f.app, login("nope")).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+    }
+    let (st, headers, _) = send(&f.app, login("hunter2")).await;
+    assert_eq!(
+        st,
+        StatusCode::TOO_MANY_REQUESTS,
+        "even the right one waits"
+    );
+    let secs: u64 = headers[header::RETRY_AFTER]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&secs), "{secs}");
+}
+
+#[tokio::test]
+async fn changing_the_password_keeps_the_session_that_did_it() {
+    let f = fixture("old");
+    let _rx = f.hub.supervisor_mailbox();
+    let mine = f.state.new_session();
+    let other = f.state.new_session();
+    let (_, _, body) = send(
+        &f.app,
+        Request::get("/api/config")
+            .header(header::COOKIE, format!("rs_session={mine}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let mut config = body["config"].clone();
+    config["web"]["password"] = json!("new");
+    let (st, _, body) = send(
+        &f.app,
+        post_json(
+            "PUT",
+            "/api/config",
+            json!({"config": config}),
+            true,
+            Some(&mine),
+        ),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert!(f.state.session_valid(&mine));
+    assert!(!f.state.session_valid(&other));
+}
+
+#[tokio::test]
+async fn setting_the_first_password_logs_the_setter_in() {
+    let f = fixture("");
+    let _rx = f.hub.supervisor_mailbox();
+    let (_, _, body) = send(&f.app, get("/api/config")).await;
+    let mut config = body["config"].clone();
+    config["web"]["password"] = json!("pw");
+    let (st, headers, _) = send(
+        &f.app,
+        post_json("PUT", "/api/config", json!({"config": config}), true, None),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let cookie = headers[header::SET_COOKIE].to_str().unwrap();
+    let id = cookie
+        .split(';')
+        .next()
+        .unwrap()
+        .strip_prefix("rs_session=")
+        .unwrap();
+    assert!(f.state.session_valid(id));
+}
+
+#[tokio::test]
+async fn yaml_goes_through_the_same_checks_as_the_form() {
+    let f = fixture("");
+    let held = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+    let busy = held.local_addr().unwrap().port();
+    let (_, _, body) = send(&f.app, get("/api/config/yaml")).await;
+    let yaml = body["yaml"]
+        .as_str()
+        .unwrap()
+        .replace("port: 8740", &format!("port: {busy}"));
+    assert!(yaml.contains(&format!("port: {busy}")));
+    let (st, _, body) = send(
+        &f.app,
+        post_json(
+            "POST",
+            "/api/config/validate",
+            json!({"yaml": yaml}),
+            true,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["error"], format!("port {busy} is in use"));
+    let (st, _, body) = send(
+        &f.app,
+        post_json("PUT", "/api/config/yaml", json!({"yaml": yaml}), true, None),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], format!("port {busy} is in use"));
+    let (_, _, body) = send(
+        &f.app,
+        post_json(
+            "POST",
+            "/api/config/validate",
+            json!({"yaml": "screens: []\n"}),
+            true,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(body["ok"], false, "{body}");
+    let (_, _, body) = send(&f.app, get("/api/config/yaml")).await;
+    let (_, _, body) = send(
+        &f.app,
+        post_json(
+            "POST",
+            "/api/config/validate",
+            json!({"yaml": body["yaml"]}),
+            true,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(body, json!({"ok": true, "restart": "none"}));
 }

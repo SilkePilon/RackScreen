@@ -5,6 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::header::SET_COOKIE;
+use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use rackscreen_app::config::Config;
 use rackscreen_app::hub::SupervisorCmd;
@@ -121,7 +124,46 @@ pub struct ConfigBody {
     pub config: Value,
 }
 
-/// The incoming JSON merged with the stored secrets, normalised and validated.
+/// Whether `bind:port` can be bound right now. Only asked when the address
+/// changes; a port this server already listens on counts as free (only the
+/// bind address moves, and the restart releases it first).
+pub fn check_bind(old: &Config, new: &Config, listening_port: u16) -> Result<(), ApiError> {
+    let (ob, nb) = (old.web.bind.trim(), new.web.bind.trim());
+    if ob == nb && old.web.port == new.web.port {
+        return Ok(());
+    }
+    if new.web.port == listening_port {
+        return Ok(());
+    }
+    let ip: std::net::IpAddr = nb
+        .parse()
+        .map_err(|_| ApiError::bad_request(format!("web.bind must be an IP address (got {nb})")))?;
+    let addr = std::net::SocketAddr::new(ip, new.web.port);
+    match std::net::TcpListener::bind(addr) {
+        Ok(l) => {
+            drop(l);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Err(ApiError::bad_request(format!(
+            "port {} is in use",
+            new.web.port
+        ))),
+        Err(e) => Err(ApiError::bad_request(format!(
+            "cannot listen on {addr}: {e}"
+        ))),
+    }
+}
+
+/// Every candidate config, from the form or the YAML editor, goes through
+/// here before it is called valid or saved: validation plus the bind check.
+/// Returns the restart a save would need.
+fn check(state: &AppState, stored: &Config, cfg: &Config) -> Result<&'static str, ApiError> {
+    cfg.validate()?;
+    check_bind(stored, cfg, state.port)?;
+    Ok(restart_kind(stored, cfg))
+}
+
+/// The incoming JSON merged with the stored secrets, normalised and checked.
 fn parse_incoming(state: &AppState, mut incoming: Value) -> Result<(Config, Config), ApiError> {
     let stored = load_stored(state)?;
     let stored_json =
@@ -130,17 +172,38 @@ fn parse_incoming(state: &AppState, mut incoming: Value) -> Result<(Config, Conf
     let mut cfg: Config = serde_json::from_value(incoming)
         .map_err(|e| ApiError::bad_request(format!("config: {e}")))?;
     cfg.normalize()?;
-    cfg.validate()?;
+    check(state, &stored, &cfg)?;
     Ok((stored, cfg))
 }
 
-/// Save `cfg`, update the password, ask the supervisor, answer.
-async fn save_and_restart(state: &Arc<AppState>, stored: Config, cfg: Config) -> ApiResult<Value> {
+/// Raw YAML parsed (and normalised) the way the config file is, then checked.
+fn parse_yaml(state: &AppState, yaml: &str) -> Result<(Config, Config), ApiError> {
+    let stored = load_stored(state)?;
+    let cfg = Config::from_yaml(yaml)?;
+    check(state, &stored, &cfg)?;
+    Ok((stored, cfg))
+}
+
+/// Save `cfg`, update the password, ask the supervisor, answer. A password
+/// change keeps the session that made it (or starts one when the request
+/// had none, e.g. the first password set) and ends every other.
+async fn save_and_restart(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    stored: Config,
+    cfg: Config,
+) -> Result<Response, ApiError> {
     let kind = restart_kind(&stored, &cfg);
+    let mut new_cookie = None;
     if kind != "none" {
         cfg.save(&state.hub.config_path)
             .map_err(|e| ApiError::internal(format!("{e:#}; {}", crate::host::FIX_HINT)))?;
-        state.set_password(&cfg.web.password);
+        let current = crate::auth::session_from(headers).filter(|s| state.session_valid(s));
+        let changed = state.password() != cfg.web.password;
+        state.set_password(&cfg.web.password, current.as_deref());
+        if changed && current.is_none() && !cfg.web.password.is_empty() {
+            new_cookie = Some(state.new_session());
+        }
     }
     let (config, secrets) = masked(&cfg)?;
     match kind {
@@ -161,28 +224,51 @@ async fn save_and_restart(state: &Arc<AppState>, stored: Config, cfg: Config) ->
         }
         _ => {}
     }
-    Ok(Json(serde_json::json!({
+    let mut resp = Json(serde_json::json!({
         "config": config,
         "secrets": secrets,
         "restart": kind,
-    })))
+    }))
+    .into_response();
+    if let Some(id) = new_cookie {
+        resp.headers_mut().insert(
+            SET_COOKIE,
+            crate::auth::cookie(&id, crate::state::SESSION_TTL.as_secs()),
+        );
+    }
+    Ok(resp)
 }
 
 pub async fn put_config(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<ConfigBody>,
-) -> ApiResult<Value> {
+) -> Result<Response, ApiError> {
     let _lock = state.config_lock.lock().await;
     let (stored, cfg) = parse_incoming(&state, body.config)?;
-    save_and_restart(&state, stored, cfg).await
+    save_and_restart(&state, &headers, stored, cfg).await
+}
+
+/// `{"config": ...}` or `{"yaml": "..."}`: the same checks as the save.
+#[derive(Deserialize)]
+pub struct ValidateBody {
+    pub config: Option<Value>,
+    pub yaml: Option<String>,
 }
 
 pub async fn validate(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<ConfigBody>,
+    Json(body): Json<ValidateBody>,
 ) -> ApiResult<Value> {
-    Ok(Json(match parse_incoming(&state, body.config) {
-        Ok(_) => serde_json::json!({ "ok": true }),
+    let r = match (body.config, body.yaml) {
+        (Some(c), _) => parse_incoming(&state, c),
+        (None, Some(y)) => parse_yaml(&state, &y),
+        (None, None) => Err(ApiError::bad_request("send config or yaml")),
+    };
+    Ok(Json(match r {
+        Ok((stored, cfg)) => {
+            serde_json::json!({ "ok": true, "restart": restart_kind(&stored, &cfg) })
+        }
         Err(e) => serde_json::json!({ "ok": false, "error": e.1 }),
     }))
 }
@@ -207,13 +293,12 @@ pub struct YamlBody {
 
 pub async fn put_yaml(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<YamlBody>,
-) -> ApiResult<Value> {
+) -> Result<Response, ApiError> {
     let _lock = state.config_lock.lock().await;
-    let stored = load_stored(&state)?;
-    let cfg = Config::from_yaml(&body.yaml)?;
-    cfg.validate()?;
-    save_and_restart(&state, stored, cfg).await
+    let (stored, cfg) = parse_yaml(&state, &body.yaml)?;
+    save_and_restart(&state, &headers, stored, cfg).await
 }
 
 #[cfg(test)]
@@ -259,6 +344,30 @@ mod tests {
         assert_eq!(cfg.github.token, "old");
         assert_eq!(cfg.web.password, "pw");
         assert_eq!(cfg.web.port, 8740, "the rest of the block is the default");
+    }
+
+    #[test]
+    fn bind_check_only_probes_a_changed_address() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let busy = held.local_addr().unwrap().port();
+        let mut old = Config::default();
+        old.web.bind = "127.0.0.1".into();
+        old.web.port = 1;
+        assert!(check_bind(&old, &old, 0).is_ok(), "unchanged: no probe");
+        let mut new = old.clone();
+        new.web.port = busy;
+        let e = check_bind(&old, &new, 0).unwrap_err();
+        assert_eq!(e.0, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(e.1, format!("port {busy} is in use"));
+        assert!(
+            check_bind(&old, &new, busy).is_ok(),
+            "the port this server listens on is ours"
+        );
+        drop(held);
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        new.web.port = free.local_addr().unwrap().port();
+        drop(free);
+        assert!(check_bind(&old, &new, 0).is_ok());
     }
 
     #[test]
