@@ -57,6 +57,7 @@ icons!(
     "ms-build",
     "ms-movie",
     "ms-sync",
+    "ms-bedtime",
 );
 
 #[cfg(test)]

@@ -72,5 +72,10 @@ pub fn chart_rect(pill_cy: f32) -> (f32, f32, f32, f32) {
     )
 }
 
+/// The moon on every screen at night: size and alpha at full fade-in
+/// (`TEXT2` × 0.5 lands at about 0x47, above the 0x2A floor).
+pub const NIGHT_ICON_PX: f32 = 64.0;
+pub const NIGHT_ICON_ALPHA: f32 = 0.5;
+
 /// The screen centre, for callers that only import this module.
 pub const CENTRE: (f32, f32) = (CX, CY);

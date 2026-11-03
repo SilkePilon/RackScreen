@@ -9,7 +9,7 @@ use crate::p2::screen::P2Screen;
 use crate::p2::text::{marquee_run, middle_baseline, top_icon};
 use crate::p2::ui::ScreenUi;
 use crate::scene::{Drawable, Scene};
-use crate::theme::layout::CX;
+use crate::theme::layout::{CX, CY};
 use crate::theme::p2::{TEXT2, TEXT3, TRACK, WARN};
 use crate::theme::Role;
 
@@ -38,6 +38,23 @@ pub fn no_data_screen(role: Role, why: NoData) -> P2Screen {
         NoData::Location => ("Location needed".into(), WARN),
         NoData::Exporter => ("No exporter".into(), WARN),
         NoData::Config => ("Check config".into(), WARN),
+    });
+    s
+}
+
+/// Night: black with a dim, still moon in the middle. `alpha` is the fade-in
+/// (0..=1); the caller quantises it so equal frames are skipped.
+pub fn night_scene(alpha: f32) -> Scene {
+    let mut s = Scene::new();
+    s.push(Drawable::Icon {
+        name: "ms-bedtime",
+        cx: CX,
+        cy: CY,
+        size: NIGHT_ICON_PX,
+        color: TEXT2,
+        alpha: NIGHT_ICON_ALPHA * alpha,
+        scale: 1.0,
+        dy: 0.0,
     });
     s
 }
@@ -97,6 +114,38 @@ mod tests {
     use crate::scene::Drawable;
     use crate::theme::p2::{TEXT2, TEXT3, WARN};
     use crate::theme::Role;
+
+    #[test]
+    fn night_scene_is_black_with_a_dim_centred_moon() {
+        let s = night_scene(1.0);
+        assert!(matches!(s.items[0], Drawable::Clear(c) if c == crate::theme::BLACK));
+        assert_eq!(s.items.len(), 2);
+        match &s.items[1] {
+            Drawable::Icon {
+                name,
+                cx,
+                cy,
+                size,
+                color,
+                alpha,
+                scale,
+                dy,
+            } => {
+                assert_eq!(*name, "ms-bedtime");
+                assert_eq!((*cx, *cy), (CX, crate::theme::layout::CY));
+                assert_eq!(*size, NIGHT_ICON_PX);
+                assert_eq!(*color, TEXT2);
+                assert_eq!(*alpha, NIGHT_ICON_ALPHA);
+                assert_eq!((*scale, *dy), (1.0, 0.0));
+            }
+            d => panic!("{d:?}"),
+        }
+        match night_scene(0.5).items[1] {
+            Drawable::Icon { alpha, .. } => assert_eq!(alpha, NIGHT_ICON_ALPHA * 0.5),
+            ref d => panic!("{d:?}"),
+        }
+        assert_eq!(night_scene(0.25), night_scene(0.25));
+    }
 
     #[test]
     fn no_data_screens_show_a_dash_and_a_pill() {

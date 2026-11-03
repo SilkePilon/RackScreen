@@ -715,6 +715,25 @@ fn no_data_token_location_and_connecting() {
 }
 
 #[test]
+fn night_icon() {
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&rackscreen_core::p2::status::night_scene(1.0), &mut px);
+    assert_eq!(pixel(&px, 4, 4), (0, 0, 0));
+    // a dim grey moon: some pixels lit, none brighter than TEXT2 at half alpha
+    let lit: Vec<u8> = px
+        .data()
+        .chunks(4)
+        .map(|p| p[0].max(p[1]).max(p[2]))
+        .collect();
+    let brightest = *lit.iter().max().unwrap();
+    assert!((0x40..=0x4A).contains(&brightest), "{brightest:#04x}");
+    let on = lit.iter().filter(|v| **v > 0x20).count();
+    assert!(on > 500, "{on} lit pixels");
+    check("night_icon", &px);
+}
+
+#[test]
 fn fade_mid_transition() {
     let mut m = full_model();
     m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
@@ -1066,6 +1085,9 @@ fn contrast_floor_on_every_role() {
                 problems.push(format!("{} ({label}): {p}", role.name()));
             }
         }
+    }
+    for p in floor_violations(&rackscreen_core::p2::status::night_scene(1.0)) {
+        problems.push(format!("night: {p}"));
     }
     assert!(
         problems.is_empty(),
