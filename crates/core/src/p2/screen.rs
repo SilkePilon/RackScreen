@@ -79,7 +79,6 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
     let mut scene = Scene::new();
     let ring = glided_ring(&s.ring, ui, now);
     scene.items.extend(ring.track());
-    scene.push(curved_title(&s.title));
     let pill_cy = if s.unit_below {
         PILL_CY_UNIT_BELOW
     } else {
@@ -96,8 +95,15 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
             alpha: 1.0,
         });
     }
+    // The base is a prefix of the original paint order (fill, title, ends,
+    // hero, unit, pill, card background): a drawable joins it only when
+    // nothing drawn before it overlaps it. The card background sits inside
+    // the ring and below the pill, clear of the fill, title, ends, hero and
+    // unit, so moving it up is pixel-neutral. The title was drawn after the
+    // fill and may overlap it, so it stays out of the base, after the fill.
     scene.base_len = scene.items.len();
     scene.items.extend(ring.overlay());
+    scene.push(curved_title(&s.title));
     if let Some((a, b)) = &s.ends {
         scene.items.extend(ring_ends(a, b));
     }
@@ -197,15 +203,18 @@ mod tests {
             matches!(items[1], Drawable::Arc { color, .. } if color == TRACK),
             "track first"
         );
-        assert!(matches!(&items[2], Drawable::CurvedText { text, .. } if text == "CPU"));
         assert!(
-            matches!(items[3], Drawable::RoundRect { color, .. } if color == CARD),
+            matches!(items[2], Drawable::RoundRect { color, .. } if color == CARD),
             "card background in the base"
         );
-        assert_eq!(scene.base_len, 4);
+        assert_eq!(scene.base_len, 3);
         assert!(
-            matches!(items[4], Drawable::Arc { sweep_deg, .. } if (sweep_deg - 300.0 * 0.42).abs() < 1e-3),
+            matches!(items[3], Drawable::Arc { sweep_deg, .. } if (sweep_deg - 300.0 * 0.42).abs() < 1e-3),
             "fill right after the base"
+        );
+        assert!(
+            matches!(&items[4], Drawable::CurvedText { text, .. } if text == "CPU"),
+            "title after the fill, outside the base"
         );
         let runs: Vec<&String> = items
             .iter()
