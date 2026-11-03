@@ -11,6 +11,7 @@ import type { Config, LogLine, NightMode, SecretPath, Showing, Status, UpdateSta
 import { SECRET_PATHS } from "@/lib/types"
 import { defaultConfig, makeLog, rolesFor, ROLE_DEFS, SHOWS } from "@/mock/data"
 import { drawFrame } from "@/mock/frames"
+import "@/mock/show-cards"
 
 const params = new URLSearchParams(location.search)
 
