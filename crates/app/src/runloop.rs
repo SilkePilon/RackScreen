@@ -62,6 +62,17 @@ pub struct NightWindow {
     pub end_min: u32,
 }
 
+/// The next frame deadline: one tick after the last, or `now` when the loop
+/// fell more than a tick behind it (no burst of catch-up frames).
+pub fn advance(deadline: Instant, tick: Duration, now: Instant) -> Instant {
+    let next = deadline + tick;
+    if next + tick < now {
+        now
+    } else {
+        next
+    }
+}
+
 /// Sleepy around the night window; never when night is disabled or forced.
 pub fn face_bedtime(night: &NightWindow, minutes: u32, override_: Option<bool>) -> bool {
     night.enabled && override_.is_none() && bedtime_near(minutes, night.start_min, night.end_min)
@@ -198,9 +209,9 @@ impl RenderLoop {
         let mut asleep = false;
         let mut fade_started: Option<Secs> = None;
         let mut stats = crate::stats::FrameStats::new(self.screens.len(), 60.0, 0.0);
+        let mut deadline = Instant::now();
 
         while !self.stop.load(Ordering::Relaxed) {
-            let t0 = Instant::now();
             let now = start.elapsed().as_secs_f64();
             // the clock first: events bucketed by local day and hour read it
             let (minutes, unix, offset) = clock();
@@ -232,6 +243,8 @@ impl RenderLoop {
                 }
                 asleep = false;
                 force_full = true;
+                // the first frame after waking is not late
+                deadline = Instant::now();
                 model.tick(now);
             }
             let fade = if night {
@@ -282,9 +295,9 @@ impl RenderLoop {
                 continue;
             }
 
-            let spent = t0.elapsed();
-            if spent < tick {
-                std::thread::sleep(tick - spent);
+            deadline = advance(deadline, tick, Instant::now());
+            if let Some(d) = deadline.checked_duration_since(Instant::now()) {
+                std::thread::sleep(d);
             }
         }
         // `_guard` sends Quit to every mailbox and sets `stop` on drop.
@@ -295,6 +308,18 @@ impl RenderLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advance_keeps_cadence_and_resyncs_when_far_behind() {
+        let t0 = Instant::now();
+        let tick = Duration::from_millis(16);
+        assert_eq!(advance(t0, tick, t0 + Duration::from_millis(5)), t0 + tick);
+        // one tick late: keep the cadence, the next sleep is short
+        assert_eq!(advance(t0, tick, t0 + Duration::from_millis(20)), t0 + tick);
+        // more than a tick behind the next deadline: start over from now
+        let late = t0 + Duration::from_millis(50);
+        assert_eq!(advance(t0, tick, late), late);
+    }
 
     #[test]
     fn darken_scales_channels() {

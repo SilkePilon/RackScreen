@@ -288,7 +288,7 @@ jellyfin:
 
 display:
   brightness: 1.0
-  fps: 30
+  fps: 60
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
   one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
 
@@ -296,11 +296,13 @@ display:
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
 #        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, face,
 #        media, traffic, restarts, uptime, fans, mains, load, ci, jellyfin
+# hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
+# are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:
-  - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 40000000 }
-  - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 40000000 }
-  - { roles: [pods],   cycle_secs: 15, spi: 1, cs: 0, dc: 23, rst: 22, rotate: 270, hflip: true,  hz: 16000000 }
-  - { roles: [health], cycle_secs: 15, spi: 1, cs: 1, dc: 4,  rst: 27, rotate: 270, hflip: true,  hz: 16000000 }
+  - { roles: [cpu],    cycle_secs: 15, spi: 0, cs: 0, dc: 6,  rst: 5,  rotate: 270, hflip: false, hz: 50000000 }
+  - { roles: [mem],    cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true,  hz: 50000000 }
+  - { roles: [pods],   cycle_secs: 15, spi: 1, cs: 0, dc: 23, rst: 22, rotate: 270, hflip: true,  hz: 50000000 }
+  - { roles: [health], cycle_secs: 15, spi: 1, cs: 1, dc: 4,  rst: 27, rotate: 270, hflip: true,  hz: 50000000 }
 ```
 
 </details>
@@ -331,6 +333,8 @@ BCM numbers, from the config:
 | HEALTH | 1 | 1 | 4 | 27 |
 
 If a screen is rotated or mirrored, change `rotate` (0/90/180/270) and `hflip` for that screen in the config; **Calibrate screens** in the setup TUI writes those values for you.
+
+RackScreen renders each screen on its own thread at up to 60 fps, skips frames that did not change and sends only the changed regions over SPI. At 50 MHz a full 240×240 frame takes about 18 ms, so a fully changing screen (a transition) runs at roughly 50 fps while its bus partner is idle.
 
 ## Development
 

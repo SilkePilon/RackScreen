@@ -1,6 +1,7 @@
 //! Scene + render time per role. Ignored by default: run in release with
 //!     cargo test --release -p rackscreen-render --test bench -- --ignored --nocapture
-//! The Pi 3B+ budget is 4 ms per screen; the desktop must stay under 1 ms (4 × margin).
+//! The Pi 3B+ budget is 4 ms per screen at 60 fps with four render threads;
+//! the desktop must stay under 1 ms (4 × margin).
 
 use std::time::Instant;
 

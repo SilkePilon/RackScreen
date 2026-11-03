@@ -239,7 +239,7 @@ pub struct ScreenCfg {
 }
 
 fn default_hz() -> u32 {
-    40_000_000
+    50_000_000
 }
 
 fn default_cycle() -> u64 {
@@ -415,7 +415,7 @@ impl Default for DisplayCfg {
     fn default() -> Self {
         Self {
             brightness: 1.0,
-            fps: 30,
+            fps: 60,
             spi_chunk: 4096,
             one_at_a_time: true,
         }
@@ -651,7 +651,7 @@ mod tests {
         assert_eq!(c.screens.len(), 4);
         assert_eq!(c.screens[3].first_role().unwrap(), Role::Health);
         assert_eq!(c.screens[0].cycle_secs, 15);
-        assert_eq!(c.screens[2].hz, 16_000_000);
+        assert_eq!(c.screens[2].hz, 50_000_000);
         assert_eq!(c.prometheus.port, 9090);
         assert_eq!(
             c.prometheus.ignore_alerts,
@@ -671,9 +671,9 @@ mod tests {
         .unwrap();
         assert!(!c.night.enabled);
         assert_eq!(c.night.start, "23:00");
-        assert_eq!(c.screens[0].hz, 40_000_000);
+        assert_eq!(c.screens[0].hz, 50_000_000);
         assert_eq!(c.screens[0].rotate, 0);
-        assert_eq!(c.display.fps, 30);
+        assert_eq!(c.display.fps, 60);
         assert!(c.display.one_at_a_time, "on unless the file says otherwise");
     }
 
