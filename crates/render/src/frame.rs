@@ -206,7 +206,8 @@ pub fn pack_rgb565(px: &Pixmap, rect: Rect, brightness: f32) -> Vec<u8> {
 }
 
 pub const MAX_RECTS: usize = 4;
-/// Changed rows closer than this many rows end up in one rect.
+/// Changed rows within this many rows of each other (8 rows apart still
+/// counts) end up in one rect.
 const BAND_GAP_ROWS: u32 = 8;
 /// Above this share of the frame, one full window write is cheaper.
 const FULL_FRACTION: f64 = 0.70;
