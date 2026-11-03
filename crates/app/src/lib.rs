@@ -6,3 +6,4 @@ pub mod panels;
 pub mod run;
 pub mod runloop;
 pub mod stats;
+pub mod worker;

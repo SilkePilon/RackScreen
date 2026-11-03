@@ -15,11 +15,10 @@ use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::{bedtime_near, is_night};
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
-use rackscreen_render::frame::{
-    brightness_lut, dirty_rects, new_pixmap, pack_oriented, Orient, Rect,
-};
-use rackscreen_render::renderer::Renderer;
+use rackscreen_render::frame::Orient;
 use tiny_skia::Pixmap;
+
+use crate::worker::{Job, ScreenWorker};
 
 const NIGHT_FADE_SECS: Secs = 1.0;
 
@@ -33,13 +32,8 @@ pub struct ScreenSlot {
     pub mailbox: Mailbox,
     /// Rolls, glides and marquees of whatever role this panel is showing.
     pub ui: ScreenUi,
-    /// Brightness applied while packing.
-    lut: [u8; 256],
-    /// The frame being rendered, unrotated.
-    cur: Pixmap,
-    /// The last pushed frame, unrotated.
-    prev: Pixmap,
-    first: bool,
+    /// Brightness applied while packing (by the screen's render worker).
+    pub brightness: f32,
 }
 
 impl ScreenSlot {
@@ -56,31 +50,8 @@ impl ScreenSlot {
             orient,
             mailbox,
             ui: ScreenUi::new(),
-            lut: brightness_lut(brightness),
-            cur: new_pixmap(),
-            prev: new_pixmap(),
-            first: true,
+            brightness,
         }
-    }
-
-    /// Diff the fresh frame against the last pushed one (both unrotated), pack
-    /// the changed panel rects, push. Returns the panel rects pushed.
-    fn flush(&mut self) -> Option<Vec<Rect>> {
-        let src = if self.first {
-            vec![Rect::full()]
-        } else {
-            dirty_rects(&self.prev, &self.cur)
-        };
-        self.first = false;
-        if src.is_empty() {
-            return None;
-        }
-        let panel: Vec<Rect> = src.iter().map(|r| self.orient.map_rect(*r)).collect();
-        let (cur, orient, lut) = (&self.cur, &self.orient, &self.lut);
-        self.mailbox
-            .put_frame(&panel, |rs| pack_oriented(cur, orient, rs, lut));
-        std::mem::swap(&mut self.prev, &mut self.cur);
-        Some(panel)
     }
 }
 
@@ -195,7 +166,16 @@ impl RenderLoop {
             self.screens.iter().map(|s| s.mailbox.clone()).collect(),
             self.stop.clone(),
         );
-        let mut renderer = Renderer::new()?;
+        // Declared after `_guard`, so the render threads are joined before the
+        // guard sends `Quit` to the display threads.
+        let workers: Vec<ScreenWorker> = self
+            .screens
+            .iter()
+            .map(|s| {
+                ScreenWorker::spawn(s.index, s.orient.clone(), s.mailbox.clone(), s.brightness)
+            })
+            .collect::<Result<_>>()?;
+        let mut force_full = true;
         let start = Instant::now();
         let mut model = Model::new(self.thresholds);
         model.set_screens(self.screens_roles.clone(), self.cycle_secs.clone());
@@ -251,9 +231,7 @@ impl RenderLoop {
                     s.mailbox.put(DisplayCmd::Wake);
                 }
                 asleep = false;
-                for s in &mut self.screens {
-                    s.first = true;
-                }
+                force_full = true;
                 model.tick(now);
             }
             let fade = if night {
@@ -267,20 +245,26 @@ impl RenderLoop {
             for (i, s) in self.screens.iter_mut().enumerate() {
                 let t = Instant::now();
                 let scene = model.scene(s.index, now, &mut s.ui);
-                let t_build = t.elapsed();
-                let t = Instant::now();
-                renderer.render(&scene, &mut s.cur);
-                if let Some(f) = fade {
-                    darken(&mut s.cur, 1.0 - f);
-                }
-                let t_render = t.elapsed();
-                let t = Instant::now();
-                s.flush();
-                let t_flush = t.elapsed();
+                stats
+                    .screen(i)
+                    .build
+                    .push(t.elapsed().as_secs_f32() * 1000.0);
+                workers[i].send(Job {
+                    scene,
+                    fade,
+                    force_full,
+                })?;
+            }
+            force_full = false;
+            for (i, w) in workers.iter().enumerate() {
+                let d = w.wait()?;
                 let st = stats.screen(i);
-                st.build.push(t_build.as_secs_f32() * 1000.0);
-                st.render.push(t_render.as_secs_f32() * 1000.0);
-                st.flush.push(t_flush.as_secs_f32() * 1000.0);
+                if d.skipped {
+                    st.skipped += 1;
+                } else {
+                    st.render.push(d.render_ms);
+                    st.flush.push(d.flush_ms);
+                }
             }
             if stats.due(now) {
                 for (i, s) in self.screens.iter().enumerate() {
@@ -333,25 +317,5 @@ mod tests {
         assert!(stop.load(Ordering::Relaxed));
         assert!(matches!(a.take(), DisplayCmd::Quit));
         assert!(matches!(b.take(), DisplayCmd::Quit));
-    }
-
-    #[test]
-    fn first_flush_is_full_then_dirty_only_in_panel_space() {
-        let mb = Mailbox::new();
-        let mut slot = ScreenSlot::new(0, Role::Cpu, Orient::new(90, false), mb.clone(), 1.0);
-        assert_eq!(slot.flush(), Some(vec![Rect::full()]));
-        assert!(matches!(mb.take(), DisplayCmd::Frame(f) if f.rects == vec![Rect::full()]));
-        assert_eq!(slot.flush(), None, "identical frame pushes nothing");
-        // source pixel (10, 20) lands at panel (219, 10) for a 90° turn
-        slot.cur.data_mut()[(20 * 240 + 10) * 4] = 200;
-        assert_eq!(
-            slot.flush(),
-            Some(vec![Rect {
-                x: 219,
-                y: 10,
-                w: 1,
-                h: 1
-            }])
-        );
     }
 }
