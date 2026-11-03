@@ -145,6 +145,11 @@ fn clips() -> Vec<Clip> {
                     (3.0, Step::Cmd(FakeCmd::JellyfinToggle)),
                     (6.0, Step::Cmd(FakeCmd::JellyfinToggle)),
                 ],
+                Role::Music => vec![
+                    (2.5, Step::Cmd(FakeCmd::MusicToggle)),
+                    (4.5, Step::Cmd(FakeCmd::MusicToggle)),
+                    (6.5, Step::Cmd(FakeCmd::MusicToggle)),
+                ],
                 _ => Vec::new(),
             };
             Clip::role(role, script)
@@ -199,6 +204,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     model.set_location_present(true);
     model.set_github_token_present(true);
     model.set_jellyfin_configured(true);
+    model.set_music_configured(true);
     model.set_arr_configured(true);
     model.set_utc_offset_secs(UTC_OFFSET);
     // the clock before the first events: day-bucketed data (deploys per hour) needs it

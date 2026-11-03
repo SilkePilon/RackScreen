@@ -132,6 +132,9 @@ pub struct RenderLoop {
     pub arr_configured: bool,
     /// `jellyfin.url` is set; without it the role says "Check config".
     pub jellyfin_configured: bool,
+    /// A Spotify login or a Jellyfin URL; without either the music role
+    /// says "Check config".
+    pub music_configured: bool,
     /// Only one screen may transition at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
     /// The four-screen show schedule, the world layout and the screen order.
@@ -203,6 +206,7 @@ impl RenderLoop {
         model.set_github_token_present(self.github_token_present);
         model.set_arr_configured(self.arr_configured);
         model.set_jellyfin_configured(self.jellyfin_configured);
+        model.set_music_configured(self.music_configured);
         let shows = std::mem::replace(&mut self.shows, ShowScheduler::new(false, 15, Vec::new()));
         model.set_shows(
             shows,

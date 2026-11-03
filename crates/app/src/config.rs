@@ -39,6 +39,8 @@ pub struct Config {
     #[serde(default)]
     pub jellyfin: JellyfinCfg,
     #[serde(default)]
+    pub spotify: SpotifyCfg,
+    #[serde(default)]
     pub shows: ShowsCfg,
     #[serde(default)]
     pub screens: Vec<ScreenCfg>,
@@ -261,6 +263,16 @@ pub struct JellyfinCfg {
     pub url: String,
     pub api_key: String,
     pub poll_secs: u64,
+}
+
+/// Spotify now playing for the music role. The login itself (tokens) lives
+/// in the service user's state dir, not here; `rackscreen setup` writes it.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct SpotifyCfg {
+    pub enabled: bool,
+    /// Client ID of your own Spotify developer app.
+    pub client_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -718,6 +730,11 @@ impl Config {
             url.is_empty() || url.starts_with("http://") || url.starts_with("https://"),
             "jellyfin.url must start with http:// or https:// (got {url})"
         );
+        let id = self.spotify.client_id.trim();
+        anyhow::ensure!(
+            id.chars().all(|c| c.is_ascii_alphanumeric()),
+            "spotify.client_id must be letters and digits only (got {id})"
+        );
         Ok(())
     }
 }
@@ -1145,6 +1162,27 @@ mod tests {
             "partial arr block keeps the defaults"
         );
         assert_eq!(c.media.radarr.api_key, "r");
+        assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+    }
+
+    #[test]
+    fn spotify_defaults_and_validation() {
+        let c = Config::default();
+        assert!(!c.spotify.enabled && c.spotify.client_id.is_empty());
+        let mut c = c;
+        c.spotify.enabled = true;
+        c.validate().unwrap();
+        c.spotify.client_id = "not a client id!".into();
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("spotify.client_id"));
+        c.spotify.client_id = "0123456789abcdef0123456789ABCDEF".into();
+        c.validate().unwrap();
+        let yaml = "spotify: { enabled: true, client_id: abc123 }\n";
+        let c = Config::from_yaml(yaml).unwrap();
+        assert!(c.spotify.enabled && c.spotify.client_id == "abc123");
         assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
     }
 
