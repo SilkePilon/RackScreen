@@ -9,6 +9,7 @@ pub mod host;
 pub mod live;
 pub mod logs;
 pub mod roles;
+pub mod show_cards;
 pub mod spotify;
 pub mod state;
 pub mod static_files;
@@ -72,6 +73,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/status", get(status::status))
         .route("/roles", get(roles::roles))
         .route("/shows", get(roles::shows))
+        .route("/shows/{id}/card.png", get(show_cards::card))
         .route(
             "/config",
             get(config_api::get_config).put(config_api::put_config),
