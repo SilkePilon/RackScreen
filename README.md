@@ -33,7 +33,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 |  |  |
 |:--:|:--:|
 | <img src=".github/media/screens/cpu.gif" alt="CPU role" width="200"> | <img src=".github/media/screens/mem.gif" alt="MEM role" width="200"> |
-| **`cpu`** — cluster CPU load with the last minute as a sparkline; amber when the load is over the threshold | **`mem`** — cluster memory use, GB used of total, the last 90 s as a sparkline |
+| **`cpu`** — cluster CPU load with the last minute as a sparkline; amber when the load is over the threshold | **`mem`** — cluster memory use, GB used of total, the last 90 s as a sparkline; amber when use is over the threshold |
 | <img src=".github/media/screens/pods.gif" alt="PODS role" width="200"> | <img src=".github/media/screens/health.gif" alt="HEALTH role" width="200"> |
 | **`pods`** — running pods; the ring split into running, pending and failed | **`health`** — one segment per node, alerts and not-ready counts; a live dot while the link is up |
 | <img src=".github/media/screens/thermal.gif" alt="THERMAL role" width="200"> | <img src=".github/media/screens/storage.gif" alt="STORAGE role" width="200"> |
@@ -113,7 +113,7 @@ Every screen shows one or more **roles** and cycles through them. Thirty roles e
 | Role | Data source | Tile |
 |---|---|---|
 | `cpu` | Prometheus | ring the load, pill the node count or "High load", card the last minute |
-| `mem` | Prometheus | ring memory use, pill GB used of total, card the last 90 s |
+| `mem` | Prometheus | ring memory use, pill GB used of total or "High memory", card the last 90 s |
 | `pods` | Kubernetes API | ring running, pending and failed, card pending and failed counts |
 | `health` | Kubernetes API + Prometheus | a segment per node, pill the first node not ready, card alerts and not-ready; the top download in download mode |
 | `thermal` | Prometheus | ring the hottest node (amber from `hot node temp °C` − 5, red from + 5), card a bar per node |
@@ -304,7 +304,7 @@ screens:
 - **`prometheus`** — where the metrics come from; `service: auto` picks the first service whose name contains "prometheus" and exposes `port`, and `ignore_alerts` keeps the always-on ones out of the health role.
 - **`qbittorrent`** — the client behind the download monitor; turn it off and HEALTH stays a health ring.
 - **`night`** — the window in which the panels dim, on the Pi's local clock.
-- **`thresholds`** — when a node counts as hot: the CPU and memory percentages that turn `cpu` amber, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
+- **`thresholds`** — when a node counts as hot: the CPU and memory percentages at which `cpu` and `mem` turn amber, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
 - **`electricity`** and **`price`** — see [Electricity mode](#electricity-mode).
 - **`location`**, **`weather`**, **`rain`**, **`iss`** — see [Sky roles](#sky-roles).
 - **`github`** — see [GitHub role](#github-role) and [CI role](#ci-role).

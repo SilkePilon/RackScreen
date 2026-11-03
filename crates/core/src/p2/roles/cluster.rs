@@ -40,14 +40,20 @@ pub fn cpu(model: &Model, now: Secs) -> P2Screen {
 
 pub fn mem(model: &Model, now: Secs) -> P2Screen {
     let st = model.state();
+    let hot = st.mem_pct >= model.thresholds().hot_mem;
+    let color = if hot { WARN } else { VIOLET };
     let hist = model.mem_history();
     let mut s = P2Screen::new("MEMORY", format!("{:.0}", st.mem_pct));
     s.unit = Some("%".into());
-    s.ring = RingSpec::fill(st.mem_pct / 100.0, VIOLET);
-    s.pill = Some((
-        format!("{:.1} of {:.0} GB", st.mem_used_gb, st.mem_total_gb),
-        TEXT2,
-    ));
+    s.ring = RingSpec::fill(st.mem_pct / 100.0, color);
+    s.pill = Some(if hot {
+        ("High memory".into(), WARN)
+    } else {
+        (
+            format!("{:.1} of {:.0} GB", st.mem_used_gb, st.mem_total_gb),
+            TEXT2,
+        )
+    });
     s.card = Some(Card::Spark {
         series: hist.series(),
         prev: hist.prev(),
@@ -55,7 +61,7 @@ pub fn mem(model: &Model, now: Secs) -> P2Screen {
         min: 50.0,
         max: 80.0,
         now_idx: None,
-        color: VIOLET,
+        color,
         caption: "last 90 s".into(),
     });
     s
@@ -327,8 +333,29 @@ mod tests {
         assert_eq!(pill(&s), ("10.7 of 16 GB".into(), TEXT2));
         assert!(matches!(s.ring.kind, RingKind::Fill { color, .. } if color == VIOLET));
         assert!(
-            matches!(&s.card, Some(Card::Spark { min, max, caption, .. }) if *min == 50.0 && *max == 80.0 && caption == "last 90 s")
+            matches!(&s.card, Some(Card::Spark { min, max, caption, color, .. }) if *min == 50.0 && *max == 80.0 && caption == "last 90 s" && *color == VIOLET)
         );
+    }
+
+    #[test]
+    fn mem_turns_amber_at_hot_mem() {
+        let mut hot = base();
+        let at = hot.thresholds().hot_mem;
+        hot.apply(
+            Event::Metrics {
+                cpu_pct: 42.4,
+                mem_pct: at,
+                mem_used_gb: 14.4,
+                mem_total_gb: 16.0,
+                hot_cpu: None,
+                hot_mem: None,
+            },
+            1.0,
+        );
+        let s = mem(&hot, 1.0);
+        assert_eq!(pill(&s), ("High memory".into(), WARN));
+        assert!(matches!(s.ring.kind, RingKind::Fill { color, .. } if color == WARN));
+        assert!(matches!(&s.card, Some(Card::Spark { color, .. }) if *color == WARN));
     }
 
     #[test]
