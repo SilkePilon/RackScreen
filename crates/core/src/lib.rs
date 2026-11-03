@@ -5,6 +5,7 @@ pub mod event;
 pub mod format;
 pub mod history;
 pub mod model;
+pub mod music;
 pub mod night;
 pub mod p2;
 pub mod scene;

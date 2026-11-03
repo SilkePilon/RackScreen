@@ -1,9 +1,10 @@
 //! Turns a `Scene` into pixels.
 
 use anyhow::Result;
+use rackscreen_core::event::CoverRef;
 use rackscreen_core::scene::{Drawable, Scene};
 use rackscreen_core::shows::world::{WorldFrame, SCALE, WORLD_H};
-use tiny_skia::Pixmap;
+use tiny_skia::{FillRule, FilterQuality, Paint, Pattern, Pixmap, SpreadMode, Transform};
 
 use crate::icons::IconCache;
 use crate::prims::{
@@ -23,6 +24,7 @@ impl Renderer {
             painter: Painter {
                 icons: IconCache::new()?,
                 text: TextRenderer::new()?,
+                images: Vec::new(),
             },
             base: None,
         })
@@ -64,14 +66,93 @@ impl Renderer {
 struct Painter {
     icons: IconCache,
     text: TextRenderer,
+    /// Premultiplied pixmaps of the last few covers, newest last.
+    images: Vec<(CoverRef, Pixmap)>,
 }
 
+/// Covers kept as pixmaps: one per music source plus the last played.
+const IMAGE_CACHE: usize = 4;
+
 impl Painter {
+    /// The cover's premultiplied pixmap, built once per key.
+    fn image(&mut self, cover: &CoverRef) -> Option<&Pixmap> {
+        if let Some(i) = self.images.iter().position(|(c, _)| c == cover) {
+            let hit = self.images.remove(i);
+            self.images.push(hit);
+        } else {
+            let c = &cover.0;
+            let mut pm = Pixmap::new(c.size, c.size)?;
+            if c.rgba.len() != pm.data().len() {
+                return None;
+            }
+            for (dst, src) in pm
+                .data_mut()
+                .chunks_exact_mut(4)
+                .zip(c.rgba.chunks_exact(4))
+            {
+                let a = src[3] as u32;
+                let pre = |v: u8| ((v as u32 * a + 127) / 255) as u8;
+                dst.copy_from_slice(&[pre(src[0]), pre(src[1]), pre(src[2]), src[3]]);
+            }
+            if self.images.len() >= IMAGE_CACHE {
+                self.images.remove(0);
+            }
+            self.images.push((cover.clone(), pm));
+        }
+        self.images.last().map(|(_, p)| p)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_image(
+        &mut self,
+        px: &mut Pixmap,
+        cover: &CoverRef,
+        x: f32,
+        y: f32,
+        size: f32,
+        r: f32,
+        alpha: f32,
+    ) {
+        if alpha <= 0.0 || size <= 0.0 {
+            return;
+        }
+        let Some(img) = self.image(cover) else {
+            return;
+        };
+        let k = size / img.width() as f32;
+        let paint = Paint {
+            anti_alias: true,
+            shader: Pattern::new(
+                img.as_ref(),
+                SpreadMode::Pad,
+                FilterQuality::Bilinear,
+                alpha.clamp(0.0, 1.0),
+                Transform::from_row(k, 0.0, 0.0, k, x, y),
+            ),
+            ..Paint::default()
+        };
+        px.fill_path(
+            &rounded_rect(x, y, size, size, r),
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+
     /// Draw one item.
     fn draw_item(&mut self, px: &mut Pixmap, d: &Drawable) {
         match d {
             Drawable::Clear(c) => px.fill(skia_color(*c, 1.0)),
             Drawable::World { frame, x0 } => blit_world(px, &frame.0, *x0),
+            Drawable::Image {
+                cover,
+                x,
+                y,
+                size,
+                r,
+                alpha,
+            } => self.draw_image(px, cover, *x, *y, *size, *r, *alpha),
             Drawable::Icon {
                 name,
                 cx,
@@ -332,6 +413,63 @@ mod tests {
         }
         assert!(red.data().chunks(4).all(|p| p == [255, 0, 0, 255]));
         assert!(blue.data().chunks(4).all(|p| p == [0, 0, 255, 255]));
+    }
+
+    fn cover(key: &str, rgb: (u8, u8, u8), size: u32) -> rackscreen_core::event::CoverRef {
+        let rgba = (0..size * size)
+            .flat_map(|_| [rgb.0, rgb.1, rgb.2, 255])
+            .collect();
+        rackscreen_core::event::CoverRef::new(rackscreen_core::event::Cover {
+            key: key.into(),
+            size,
+            rgba,
+        })
+    }
+
+    #[test]
+    fn image_fills_a_rounded_square_scaled_to_size() {
+        let full = render_one(Drawable::Image {
+            cover: cover("red", (250, 0, 0), 40),
+            x: 78.0,
+            y: 36.0,
+            size: 84.0,
+            r: 14.0,
+            alpha: 1.0,
+        });
+        assert_eq!(pixel(&full, 120, 78), (250, 0, 0), "centre");
+        assert_eq!(pixel(&full, 158, 78), (250, 0, 0), "scaled up past 40 px");
+        assert_eq!(pixel(&full, 78, 36), (0, 0, 0), "rounded corner");
+        assert_eq!(pixel(&full, 120, 125), (0, 0, 0), "below the square");
+        let dim = render_one(Drawable::Image {
+            cover: cover("red", (250, 0, 0), 84),
+            x: 78.0,
+            y: 36.0,
+            size: 84.0,
+            r: 14.0,
+            alpha: 0.5,
+        });
+        let r = pixel(&dim, 120, 78).0;
+        assert!((120..=130).contains(&r), "half alpha: {r}");
+    }
+
+    #[test]
+    fn image_pixmaps_are_cached_by_key() {
+        let mut r = Renderer::new().unwrap();
+        let mut px = new_pixmap();
+        for (key, rgb) in [("a", (200, 0, 0)), ("b", (0, 200, 0)), ("a", (200, 0, 0))] {
+            let mut s = Scene::new();
+            s.push(Drawable::Image {
+                cover: cover(key, rgb, 8),
+                x: 0.0,
+                y: 0.0,
+                size: 8.0,
+                r: 0.0,
+                alpha: 1.0,
+            });
+            r.render(&s, &mut px);
+            assert_eq!(pixel(&px, 4, 4), rgb);
+        }
+        assert_eq!(r.painter.images.len(), 2);
     }
 
     #[test]

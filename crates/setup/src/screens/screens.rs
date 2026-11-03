@@ -838,7 +838,7 @@ mod tests {
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
         assert!(
-            text.contains("▸ ○  jellyfin"),
+            text.contains("▸ ○  music"),
             "scrolled to the cursor: {text}"
         );
     }
