@@ -48,8 +48,19 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(hub: Arc<Hub>, password: String, port: u16) -> AppState {
+        AppState::with_update_file(hub, password, port, crate::update::job_path())
+    }
+
+    /// `new` with the self-update job kept in `update_file` (tests point it
+    /// at a temp dir, or `None`, instead of the user's state dir).
+    pub fn with_update_file(
+        hub: Arc<Hub>,
+        password: String,
+        port: u16,
+        update_file: Option<std::path::PathBuf>,
+    ) -> AppState {
         let screens = hub.frames.screens();
-        let update = UpdateState::load(crate::update::job_path(), hub.version);
+        let update = UpdateState::load(update_file, hub.version);
         AppState {
             hub,
             sessions: Mutex::new(HashMap::new()),
@@ -159,7 +170,7 @@ mod tests {
             LogSink::new(5),
             2,
         ));
-        AppState::new(hub, pw.into(), 0)
+        AppState::with_update_file(hub, pw.into(), 0, None)
     }
 
     #[test]

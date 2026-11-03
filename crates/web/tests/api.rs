@@ -29,7 +29,13 @@ fn fixture(password: &str) -> Fixture {
     cfg.github.token = "ghp_stored".into();
     cfg.save(&path).unwrap();
     let hub = Arc::new(Hub::new(path, true, "9.9.9", LogSink::new(50), 8));
-    let state = Arc::new(AppState::new(hub.clone(), password.into(), 8740));
+    // the update job lives in the temp dir, not ~/.local/state
+    let state = Arc::new(AppState::with_update_file(
+        hub.clone(),
+        password.into(),
+        8740,
+        Some(dir.path().join("state").join("update.json")),
+    ));
     let app = router(state.clone());
     Fixture {
         _dir: dir,
