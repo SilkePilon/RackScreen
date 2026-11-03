@@ -120,7 +120,7 @@ Every screen shows one or more **roles** and cycles through them. Thirty roles e
 | `storage` | Prometheus (Longhorn) | ring the used share per volume, pill used of total or the degraded volume, card a stacked bar and free space |
 | `power-mix` | Electricity Maps | twenty 5 % segments by source, the leader at the top, a capsule per source worth two segments |
 | `price` | Energy-Charts | five bands with a marker, pill the band, card today's hours as bars |
-| `carbon` | Electricity Maps | five bands over 0 to 500 gCO₂/kWh, pill against the last 24 h, card a 24 h sparkline |
+| `carbon` | Electricity Maps | five bands over 0 to 500 gCO2/kWh, pill against the last 24 h, card a 24 h sparkline |
 | `renewable` | Electricity Maps | ring the renewable share, pill the fossil-free share, card today |
 | `gh-activity` | GitHub | ring today against the month's best, pill best day and streak, card this week |
 | `weather` | Open-Meteo | the condition as title, ring the day's low to high, pill rain ahead, card the next 12 h |
@@ -358,7 +358,7 @@ The design notes are in [`docs/superpowers/specs/2026-09-05-rackscreen-design.md
 
 ## Licence
 
-Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`. Font: Inter (OFL), `assets/fonts/Inter-LICENSE.txt`.
+Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`. Font: [Outfit](https://github.com/Outfitio/Outfit-Fonts) (OFL), `assets/fonts/Outfit-LICENSE.txt`.
 
 The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps belongs to that service and is subject to its terms. Day-ahead prices come from [Energy-Charts](https://www.energy-charts.info) by Fraunhofer ISE under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 

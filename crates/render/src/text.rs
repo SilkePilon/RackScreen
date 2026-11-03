@@ -10,7 +10,7 @@ use rackscreen_core::theme::Color;
 use tiny_skia::{BlendMode, FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
 
 pub struct TextRenderer {
-    /// Inter Medium, SemiBold, Bold in `FontId` order.
+    /// Outfit Medium, SemiBold, Bold in `FontId` order.
     inter: [Font; 3],
     /// Glyphs keyed by face, character and size in half pixels.
     run_cache: HashMap<(FontId, char, u32), (Metrics, Vec<u8>)>,

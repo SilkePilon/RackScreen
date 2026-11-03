@@ -83,7 +83,7 @@ pub fn price(model: &Model, _now: Secs) -> P2Screen {
     s
 }
 
-/// Carbon intensity bands over 0..500 gCO₂/kWh, green to red.
+/// Carbon intensity bands over 0..500 gCO2/kWh, green to red.
 pub const CARBON_BANDS: [u32; 5] = [0x45D6A4, 0x9BD07A, 0xE8C860, 0xF2A65A, 0xF0605D];
 
 pub fn carbon(model: &Model, _now: Secs) -> P2Screen {
@@ -93,7 +93,7 @@ pub fn carbon(model: &Model, _now: Secs) -> P2Screen {
     let colors: Vec<Color> = CARBON_BANDS.iter().map(|c| Color::hex(*c)).collect();
     let band = ((g / 500.0).clamp(0.0, 0.999) * 5.0) as usize;
     let mut s = P2Screen::new("CARBON", format!("{g:.0}"));
-    s.unit = Some("gCO₂/kWh".into());
+    s.unit = Some("gCO2/kWh".into());
     s.unit_below = true;
     s.ring = RingSpec::bands(colors.clone(), g / 500.0);
     s.pill = Some(match hist.mean() {
@@ -248,7 +248,7 @@ mod tests {
                 s.unit.as_deref(),
                 s.unit_below
             ),
-            ("CARBON", "200", Some("gCO₂/kWh"), true)
+            ("CARBON", "200", Some("gCO2/kWh"), true)
         );
         assert!(
             matches!(&s.ring.kind, RingKind::Bands { colors, frac } if colors.len() == 5 && (frac - 0.4).abs() < 1e-5)

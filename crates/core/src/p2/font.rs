@@ -1,4 +1,4 @@
-//! The three embedded Inter instances and read-only metrics, so core can lay
+//! The three embedded Outfit instances and read-only metrics, so core can lay
 //! text out (centre, pill width, marquee overflow, roll cells) without drawing.
 
 use std::sync::OnceLock;
@@ -24,16 +24,16 @@ impl FontId {
     }
 }
 
-pub const INTER_MEDIUM: &[u8] = include_bytes!("../../../../assets/fonts/Inter-Medium.ttf");
-pub const INTER_SEMIBOLD: &[u8] = include_bytes!("../../../../assets/fonts/Inter-SemiBold.ttf");
-pub const INTER_BOLD: &[u8] = include_bytes!("../../../../assets/fonts/Inter-Bold.ttf");
+pub const OUTFIT_MEDIUM: &[u8] = include_bytes!("../../../../assets/fonts/Outfit-Medium.ttf");
+pub const OUTFIT_SEMIBOLD: &[u8] = include_bytes!("../../../../assets/fonts/Outfit-SemiBold.ttf");
+pub const OUTFIT_BOLD: &[u8] = include_bytes!("../../../../assets/fonts/Outfit-Bold.ttf");
 
 /// The TTF bytes for a face; `render` rasterises from these, nothing is embedded twice.
 pub fn bytes(id: FontId) -> &'static [u8] {
     match id {
-        FontId::Medium => INTER_MEDIUM,
-        FontId::SemiBold => INTER_SEMIBOLD,
-        FontId::Bold => INTER_BOLD,
+        FontId::Medium => OUTFIT_MEDIUM,
+        FontId::SemiBold => OUTFIT_SEMIBOLD,
+        FontId::Bold => OUTFIT_BOLD,
     }
 }
 
@@ -41,9 +41,13 @@ fn fonts() -> &'static [Font; 3] {
     static FONTS: OnceLock<[Font; 3]> = OnceLock::new();
     FONTS.get_or_init(|| {
         let load = |b: &'static [u8]| {
-            Font::from_bytes(b, FontSettings::default()).expect("embedded Inter parses")
+            Font::from_bytes(b, FontSettings::default()).expect("embedded Outfit parses")
         };
-        [load(INTER_MEDIUM), load(INTER_SEMIBOLD), load(INTER_BOLD)]
+        [
+            load(OUTFIT_MEDIUM),
+            load(OUTFIT_SEMIBOLD),
+            load(OUTFIT_BOLD),
+        ]
     })
 }
 
@@ -67,7 +71,7 @@ pub fn measure(id: FontId, px: f32, text: &str, letter_spacing: f32) -> f32 {
     adv + letter_spacing * (n as f32 - 1.0)
 }
 
-/// The tabular digit cell: as wide as `0`.
+/// The tabular digit cell: as wide as `0`, Outfit's widest digit.
 pub fn digit_width(id: FontId, px: f32) -> f32 {
     advance(id, px, '0')
 }
@@ -83,7 +87,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inter_metrics_are_sane() {
+    fn outfit_metrics_are_sane() {
         assert!((digit_width(FontId::Bold, 64.0) - advance(FontId::Bold, 64.0, '0')).abs() < 1e-6);
         let w = measure(FontId::Bold, 64.0, "42", 0.0);
         assert!(w > 60.0 && w < 90.0, "{w}");
@@ -93,15 +97,29 @@ mod tests {
         let cap = cap_height(FontId::Bold, 64.0);
         assert!(
             cap > 40.0 && cap < 50.0,
-            "Inter cap height is 0.727 em: {cap}"
+            "Outfit cap height is 0.7 em: {cap}"
         );
         assert!(advance(FontId::Bold, 20.0, 'M') > advance(FontId::Medium, 20.0, 'M'));
         assert_eq!(measure(FontId::Medium, 10.0, "", 1.0), 0.0);
         for id in FontId::ALL {
-            for ch in ['€', '°', '↓', '↑', '·', '—', '₂', '%', '/'] {
+            for ch in ['€', '°', '↓', '↑', '·', '—', '%', '/'] {
                 assert!(font(id).has_glyph(ch), "{id:?} lacks {ch}");
             }
             assert!(!bytes(id).is_empty());
+        }
+    }
+
+    #[test]
+    fn outfit_digits_share_one_width_per_size() {
+        for id in FontId::ALL {
+            let w0 = digit_width(id, 64.0);
+            for d in '0'..='9' {
+                let w = measure(id, 64.0, &d.to_string(), 0.0);
+                assert!(
+                    w <= w0 + 0.5,
+                    "{id:?} digit {d} ({w}) wider than the cell ({w0})"
+                );
+            }
         }
     }
 }
