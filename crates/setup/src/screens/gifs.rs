@@ -24,7 +24,7 @@ pub fn screens_using(cfg: &Config, name: &str) -> Vec<usize> {
 }
 
 /// Add (`index` None) or replace the GIF at `index`. The name must be valid
-/// and unused, the link one the role accepts. A rename rewrites `gif:<old>`
+/// and unused, the link one the role accepts and no other GIF's. A rename rewrites `gif:<old>`
 /// in every screen's roles.
 pub fn save_gif(
     cfg: &mut Config,
@@ -45,6 +45,15 @@ pub fn save_gif(
         return Err(format!("there is already a GIF called {name}"));
     }
     classify_link(url)?;
+    if let Some(o) = cfg
+        .gifs
+        .iter()
+        .enumerate()
+        .find(|(i, g)| Some(*i) != index && g.url.trim() == url)
+        .map(|(_, g)| g)
+    {
+        return Err(format!("{} already has this link", o.name));
+    }
     let gif = GifCfg {
         name: name.to_string(),
         url: url.to_string(),
@@ -445,8 +454,14 @@ mod tests {
             .contains("already"));
         assert!(save_gif(&mut c, None, "x", "https://example.com/x.png").is_err());
         assert!(
-            save_gif(&mut c, Some(1), "nod", PARTY).is_ok(),
+            save_gif(&mut c, Some(1), "nod", NOD).is_ok(),
             "same name, same slot"
+        );
+        let e = save_gif(&mut c, Some(1), "nod", &format!(" {PARTY}")).unwrap_err();
+        assert!(e.contains("party"), "the same link as another GIF: {e}");
+        assert!(
+            save_gif(&mut c, Some(0), "party", PARTY).is_ok(),
+            "its own link"
         );
         c.validate().unwrap();
     }

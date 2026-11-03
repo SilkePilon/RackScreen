@@ -737,6 +737,14 @@ impl Config {
             if let Err(e) = rackscreen_core::gif::classify_link(&g.url) {
                 anyhow::bail!("gifs: '{}': {e} (got {})", g.name, g.url.trim());
             }
+            if let Some(o) = self.gifs[..i].iter().find(|o| o.url.trim() == g.url.trim()) {
+                anyhow::bail!(
+                    "gifs: '{}' and '{}' have the same link ({}); keep one",
+                    o.name,
+                    g.name,
+                    g.url.trim()
+                );
+            }
         }
         for s in &self.screens {
             let roles = self.screen_roles(s)?;
@@ -1385,6 +1393,17 @@ mod tests {
         c.screens[1].roles = vec!["cpu".into()];
         c.validate().unwrap();
         assert_eq!(c.used_gifs().len(), 1);
+    }
+
+    #[test]
+    fn two_gifs_with_the_same_link_are_refused_naming_both() {
+        let mut c = Config::from_yaml(GIF_YAML).unwrap();
+        c.gifs[1].url = format!(" {} ", c.gifs[0].url);
+        let e = format!("{:#}", c.validate().unwrap_err());
+        assert!(
+            e.contains("'party'") && e.contains("'nod'") && e.contains("same link"),
+            "{e}"
+        );
     }
 
     #[test]
