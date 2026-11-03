@@ -132,6 +132,12 @@ pub struct RenderLoop {
     pub arr_configured: bool,
     /// `jellyfin.url` is set; without it the role says "Check config".
     pub jellyfin_configured: bool,
+    /// A Jellyfin URL (or the fake source); with a Spotify login (checked
+    /// every few seconds in `spotify_token`) the music role is configured
+    /// too, otherwise it says "Check config".
+    pub music_configured: bool,
+    /// The Spotify token file while Spotify is on with a client id.
+    pub spotify_token: Option<PathBuf>,
     /// Only one screen may transition at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
     /// The four-screen show schedule, the world layout and the screen order.
@@ -140,6 +146,15 @@ pub struct RenderLoop {
     pub show_order: Vec<usize>,
     /// The play-now request file; `None` when there is no home directory.
     pub play_path: Option<PathBuf>,
+}
+
+/// How often the Spotify token file is looked for, so a login made in
+/// setup shows without a restart.
+const LOGIN_POLL: Duration = Duration::from_secs(5);
+
+/// The music role has a source: the configured ones, or a Spotify login.
+pub fn music_ready(configured: bool, spotify_token: Option<&Path>) -> bool {
+    configured || spotify_token.is_some_and(crate::spotify::logged_in)
 }
 
 /// How often the play-now request file is checked.
@@ -205,6 +220,11 @@ impl RenderLoop {
         model.set_github_token_present(self.github_token_present);
         model.set_arr_configured(self.arr_configured);
         model.set_jellyfin_configured(self.jellyfin_configured);
+        model.set_music_configured(music_ready(
+            self.music_configured,
+            self.spotify_token.as_deref(),
+        ));
+        let mut next_login_poll = Instant::now() + LOGIN_POLL;
         let shows = std::mem::replace(&mut self.shows, ShowScheduler::new(false, 15, Vec::new()));
         model.set_shows(
             shows,
@@ -240,6 +260,13 @@ impl RenderLoop {
             phase = phase.step(night, now);
             if phase != prev {
                 tracing::info!("night mode: {prev:?} -> {phase:?}");
+            }
+            if self.spotify_token.is_some() && Instant::now() >= next_login_poll {
+                next_login_poll = Instant::now() + LOGIN_POLL;
+                model.set_music_configured(music_ready(
+                    self.music_configured,
+                    self.spotify_token.as_deref(),
+                ));
             }
             if let Some(path) = &self.play_path {
                 if Instant::now() >= next_play_poll {
@@ -350,6 +377,25 @@ impl RenderLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn music_is_ready_with_jellyfin_or_a_spotify_login() {
+        use rackscreen_sources::spotify::{write_token, TokenFile};
+        let dir = tempfile::tempdir().unwrap();
+        let path = crate::spotify::token_path_in(dir.path());
+        assert!(music_ready(true, None));
+        assert!(!music_ready(false, None));
+        assert!(!music_ready(false, Some(&path)), "no login yet");
+        let tok = TokenFile {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_at: 1,
+            display_name: None,
+            error: None,
+        };
+        write_token(&path, &tok, None).unwrap();
+        assert!(music_ready(false, Some(&path)), "picked up once written");
+    }
 
     #[test]
     fn advance_keeps_cadence_and_resyncs_when_far_behind() {

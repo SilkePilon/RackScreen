@@ -82,6 +82,15 @@ pub enum Drawable {
         alpha: f32,
         clip: Option<ClipRect>,
     },
+    /// Album art scaled into a `size` square at `(x, y)` with corner radius `r`.
+    Cover {
+        cover: crate::event::CoverRef,
+        x: f32,
+        y: f32,
+        size: f32,
+        r: f32,
+        alpha: f32,
+    },
     /// A pixel-show world: columns `x0..x0 + 60` of `frame`, scaled ×4.
     World {
         frame: WorldRef,
@@ -150,6 +159,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Sc
     ui.for_role(role);
     match role {
         Role::PowerMix => crate::p2::roles::power_mix::power_mix_scene(model, now, ui),
+        Role::Music => crate::p2::roles::music::music_scene(model, now, ui),
         Role::Gif(index) => model.gif_scene(index, now, ui),
         _ => {
             let screen = crate::p2::roles::screen(model, role, now)

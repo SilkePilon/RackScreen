@@ -56,6 +56,7 @@ icons!(
     "ms-speed",
     "ms-build",
     "ms-movie",
+    "ms-music_note",
     "ms-sync",
     "ms-bedtime",
     "ms-gif_box",

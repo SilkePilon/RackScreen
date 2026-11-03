@@ -305,6 +305,11 @@ impl Screens {
             Role::Jellyfin => {
                 (!c.jellyfin.enabled || c.jellyfin.url.trim().is_empty()).then_some("no url")
             }
+            Role::Music => {
+                let jellyfin = c.jellyfin.enabled && !c.jellyfin.url.trim().is_empty();
+                let spotify = c.spotify.enabled && !c.spotify.client_id.trim().is_empty();
+                (!jellyfin && !spotify).then_some("no source")
+            }
             _ => None,
         }
     }
@@ -846,6 +851,18 @@ mod tests {
         }
         assert_eq!(s.role_hint(Role::Ci), Some("no token"));
         assert_eq!(s.role_hint(Role::Jellyfin), None);
+        assert_eq!(s.role_hint(Role::Music), None, "jellyfin feeds it");
+        {
+            let cfg = s.cfg.as_mut().unwrap();
+            cfg.jellyfin.enabled = false;
+        }
+        assert_eq!(s.role_hint(Role::Music), Some("no source"));
+        {
+            let cfg = s.cfg.as_mut().unwrap();
+            cfg.spotify.enabled = true;
+            cfg.spotify.client_id = "abc".into();
+        }
+        assert_eq!(s.role_hint(Role::Music), None, "spotify feeds it");
     }
 
     #[test]
@@ -872,7 +889,7 @@ mod tests {
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
         assert!(
-            text.contains("▸ ○  jellyfin"),
+            text.contains("▸ ○  music"),
             "scrolled to the cursor: {text}"
         );
     }

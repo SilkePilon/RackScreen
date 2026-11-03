@@ -8,6 +8,7 @@ pub mod argocd;
 pub mod arr;
 pub mod astro;
 pub mod buienradar;
+pub mod cover;
 pub mod electricity;
 pub mod fake;
 pub mod gif;
@@ -20,6 +21,7 @@ pub mod open_meteo;
 pub mod owned_fs;
 pub mod prometheus;
 pub mod qbittorrent;
+pub mod spotify;
 pub mod tunnel;
 
 pub type EventTx = std::sync::mpsc::Sender<Event>;

@@ -1,0 +1,9 @@
+{
+  "device": {
+    "name": "Phone"
+  },
+  "progress_ms": 1000,
+  "is_playing": true,
+  "currently_playing_type": "ad",
+  "item": null
+}

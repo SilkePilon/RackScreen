@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, CiRun, CiStatus, Download, Event, IssPass, JfKind, JfSession,
-    JfStatus, LinkTarget, NodeLoad, Robustness, Torrent,
+    App, AppHealth, AppSync, CiRun, CiStatus, CoverRef, Download, Event, IssPass, JfKind,
+    JfSession, JfStatus, LinkTarget, MusicSource, NodeLoad, Robustness, Torrent, Track,
 };
+use rackscreen_core::music::demo_cover;
+use rackscreen_core::theme::Color;
 
 use crate::astro::sky_event;
 use crate::SourceCtx;
@@ -159,6 +161,8 @@ pub enum FakeCmd {
     Brownout,
     JellyfinToggle,
     CiPass,
+    /// Music: Spotify playing, paused, Jellyfin playing, idle, round again.
+    MusicToggle,
 }
 
 impl FakeCmd {
@@ -190,6 +194,7 @@ impl FakeCmd {
             'b' => FakeCmd::Brownout,
             'j' => FakeCmd::JellyfinToggle,
             'c' => FakeCmd::CiPass,
+            's' => FakeCmd::MusicToggle,
             _ => return None,
         })
     }
@@ -247,6 +252,12 @@ pub struct FakeState {
     /// 0 playing, 1 paused, 2 idle.
     jf_state: u8,
     jf_pos: f64,
+    /// 0 Spotify playing, 1 Spotify paused, 2 Jellyfin playing, 3 idle.
+    music_state: u8,
+    music_pos: f64,
+    /// When the music state last changed (unix seconds).
+    music_since: i64,
+    covers: [CoverRef; 2],
 }
 
 impl FakeState {
@@ -316,6 +327,21 @@ impl FakeState {
                 .collect(),
             jf_state: 0,
             jf_pos: 3720.0,
+            music_state: 0,
+            music_pos: 134.0,
+            music_since: now.timestamp() - 134,
+            covers: [
+                CoverRef::new(demo_cover(
+                    "fake-sp",
+                    Color::hex(0x2B3A67),
+                    Color::hex(0xE8A15A),
+                )),
+                CoverRef::new(demo_cover(
+                    "fake-jf",
+                    Color::hex(0x5B3F8C),
+                    Color::hex(0x3FA7A0),
+                )),
+            ],
         };
         s.iss_start = s.unix_start + ISS_PASS_IN_SECS;
         s
@@ -323,6 +349,7 @@ impl FakeState {
 
     /// Pin the clock (the GIF generator and tests want reproducible skies).
     pub fn set_clock(&mut self, unix: i64, utc_offset_secs: i32) {
+        self.music_since = unix - 134;
         self.unix_start = unix;
         self.utc_offset = utc_offset_secs;
         self.iss_start = unix + ISS_PASS_IN_SECS;
@@ -738,6 +765,44 @@ impl FakeState {
         }
     }
 
+    /// One poll of both music sources; no random draws.
+    fn music(&self) -> Vec<Event> {
+        let (title, artist, device, duration, source) = match self.music_state {
+            0 | 1 => (
+                "Holocene",
+                "Bon Iver",
+                "Kitchen speaker",
+                337.0,
+                MusicSource::Spotify,
+            ),
+            _ => (
+                "Teardrop",
+                "Massive Attack",
+                "silke · Living room",
+                331.0,
+                MusicSource::Jellyfin,
+            ),
+        };
+        let track = (self.music_state < 3).then(|| Track {
+            source,
+            title: title.into(),
+            artist: artist.into(),
+            device: device.into(),
+            duration_secs: duration,
+            position_secs: self.music_pos.min(duration),
+            playing: self.music_state != 1,
+            since: self.music_since,
+            cover: Some(self.covers[source.index()].clone()),
+        });
+        [MusicSource::Spotify, MusicSource::Jellyfin]
+            .into_iter()
+            .map(|s| Event::Music {
+                source: s,
+                track: track.clone().filter(|t| t.source == s),
+            })
+            .collect()
+    }
+
     pub fn initial(&self) -> Vec<Event> {
         vec![
             Event::Link {
@@ -810,6 +875,9 @@ impl FakeState {
             self.ci_runs(),
             self.jellyfin(),
         ]
+        .into_iter()
+        .chain(self.music())
+        .collect()
     }
 
     /// One second of simulated time.
@@ -858,8 +926,12 @@ impl FakeState {
         if self.jf_state == 0 {
             self.jf_pos = (self.jf_pos + 1.0).min(9839.0);
         }
+        if matches!(self.music_state, 0 | 2) {
+            self.music_pos = (self.music_pos + 1.0) % 337.0;
+        }
         if self.ticks.is_multiple_of(2) {
             out.push(self.jellyfin());
+            out.extend(self.music());
         }
         if self.pending > 0 && self.rng.f32() < 0.5 {
             self.pending -= 1;
@@ -1157,6 +1229,14 @@ impl FakeState {
             FakeCmd::JellyfinToggle => {
                 self.jf_state = (self.jf_state + 1) % 3;
                 vec![self.jellyfin()]
+            }
+            FakeCmd::MusicToggle => {
+                self.music_state = (self.music_state + 1) % 4;
+                self.music_since = self.unix_now();
+                if self.music_state == 2 {
+                    self.music_pos = 40.0;
+                }
+                self.music()
             }
             FakeCmd::CiPass => {
                 self.ci_runs.insert(0, CiStatus::Success);
@@ -1503,6 +1583,55 @@ mod tests {
             assert_eq!(a.tick(), b.tick());
         }
         assert!(matches!(a.tick()[0], Event::Metrics { .. }));
+    }
+
+    /// The seeded stream other roles (and the README gifs) are built from:
+    /// music must not add or remove draws. Pinned before the music role.
+    #[test]
+    fn rng_draws_per_tick_are_unchanged() {
+        let mut s = FakeState::new(7);
+        s.set_clock(1_788_782_400, 7200);
+        for _ in 0..120 {
+            s.tick();
+        }
+        assert_eq!(s.rng.u64(..), 14_678_636_064_419_734_158);
+    }
+
+    fn music(evs: &[Event]) -> Vec<(MusicSource, Option<Track>)> {
+        evs.iter()
+            .filter_map(|e| match e {
+                Event::Music { source, track } => Some((*source, track.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn music_cycles_spotify_paused_jellyfin_and_idle() {
+        let mut s = FakeState::new(7);
+        s.set_clock(1_788_782_400, 7200);
+        let first = music(&s.initial());
+        assert_eq!(first.len(), 2, "both sources report");
+        let sp = first[0].1.as_ref().unwrap();
+        assert_eq!(first[0].0, MusicSource::Spotify);
+        assert!(sp.playing && sp.cover.is_some() && sp.title == "Holocene");
+        assert!(first[1].1.is_none(), "jellyfin quiet at first");
+        let t1 = music(&s.tick());
+        let t2 = music(&s.tick());
+        assert!(t1.is_empty(), "every second tick");
+        let pos = |m: &[(MusicSource, Option<Track>)]| m[0].1.as_ref().unwrap().position_secs;
+        assert!(pos(&t2) > pos(&first), "the position moves while playing");
+        let paused = music(&s.command(FakeCmd::MusicToggle));
+        assert!(!paused[0].1.as_ref().unwrap().playing, "spotify paused");
+        let jf = music(&s.command(FakeCmd::MusicToggle));
+        assert!(jf[0].1.is_none(), "spotify gone");
+        let t = jf[1].1.as_ref().unwrap();
+        assert!(t.playing && t.source == MusicSource::Jellyfin && t.cover.is_some());
+        let idle = music(&s.command(FakeCmd::MusicToggle));
+        assert!(idle.iter().all(|(_, t)| t.is_none()));
+        let back = music(&s.command(FakeCmd::MusicToggle));
+        assert!(back[0].1.as_ref().unwrap().playing);
+        assert_eq!(FakeCmd::from_key('s'), Some(FakeCmd::MusicToggle));
     }
 
     #[test]

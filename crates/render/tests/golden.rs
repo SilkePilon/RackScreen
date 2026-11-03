@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, CiRun, CiStatus, Download, Event, IssPass, JfKind, JfSession,
-    JfStatus, LinkTarget, MoonPhase, NodeLoad, Robustness, Torrent,
+    App, AppHealth, AppSync, CiRun, CiStatus, CoverRef, Download, Event, IssPass, JfKind,
+    JfSession, JfStatus, LinkTarget, MoonPhase, MusicSource, NodeLoad, Robustness, Torrent, Track,
 };
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::p2::ui::ScreenUi;
@@ -136,6 +136,7 @@ fn full_model() -> Model {
     m.set_location_present(true);
     m.set_github_token_present(true);
     m.set_jellyfin_configured(true);
+    m.set_music_configured(true);
     for t in [
         LinkTarget::K8sApi,
         LinkTarget::Prometheus,
@@ -518,8 +519,47 @@ fn full_model() -> Model {
         },
         0.0,
     );
+    m.apply(
+        Event::Music {
+            source: MusicSource::Spotify,
+            track: Some(tune(MusicSource::Spotify, true)),
+        },
+        0.0,
+    );
     m.tick(0.0);
     m
+}
+
+/// A track with a made-up cover: Spotify's is dusk blue to amber, Jellyfin's
+/// violet to teal.
+fn tune(source: MusicSource, playing: bool) -> Track {
+    use rackscreen_core::music::demo_cover;
+    use rackscreen_core::theme::Color;
+    let (title, artist, device, cover) = match source {
+        MusicSource::Spotify => (
+            "Holocene",
+            "Bon Iver",
+            "Kitchen speaker",
+            demo_cover("sp-album", Color::hex(0x2B3A67), Color::hex(0xE8A15A)),
+        ),
+        MusicSource::Jellyfin => (
+            "Teardrop",
+            "Massive Attack",
+            "silke · Living room",
+            demo_cover("jf-album", Color::hex(0x5B3F8C), Color::hex(0x3FA7A0)),
+        ),
+    };
+    Track {
+        source,
+        title: title.into(),
+        artist: artist.into(),
+        device: device.into(),
+        duration_secs: 337.0,
+        position_secs: 134.0,
+        playing,
+        since: UNIX - 134,
+        cover: Some(CoverRef::new(cover)),
+    }
 }
 
 #[test]
@@ -1049,6 +1089,69 @@ fn jellyfin_alternate_states() {
     check("p2_jellyfin_config", &render(&c, Role::Jellyfin, 120.0));
 }
 
+#[test]
+fn music_alternate_states() {
+    let mut j = full_model();
+    j.apply(
+        Event::Music {
+            source: MusicSource::Spotify,
+            track: None,
+        },
+        0.0,
+    );
+    j.apply(
+        Event::Music {
+            source: MusicSource::Jellyfin,
+            track: Some(tune(MusicSource::Jellyfin, true)),
+        },
+        0.0,
+    );
+    check("p2_music_jellyfin", &render(&j, Role::Music, 120.0));
+    let mut p = full_model();
+    p.apply(
+        Event::Music {
+            source: MusicSource::Spotify,
+            track: Some(tune(MusicSource::Spotify, false)),
+        },
+        0.0,
+    );
+    check("p2_music_paused", &render(&p, Role::Music, 120.0));
+    let mut i = full_model();
+    i.set_unix_now(UNIX + 12 * 60);
+    i.apply(
+        Event::Music {
+            source: MusicSource::Spotify,
+            track: None,
+        },
+        0.0,
+    );
+    check("p2_music_idle", &render(&i, Role::Music, 120.0));
+    let mut n = Model::new(Thresholds::default());
+    n.set_music_configured(true);
+    n.apply(
+        Event::Music {
+            source: MusicSource::Spotify,
+            track: None,
+        },
+        0.0,
+    );
+    check("p2_music_nothing", &render(&n, Role::Music, 120.0));
+    let mut c = full_model();
+    c.set_music_configured(false);
+    check("p2_music_config", &render(&c, Role::Music, 120.0));
+    let mut a = full_model();
+    let mut bare = tune(MusicSource::Spotify, true);
+    bare.cover = None;
+    a.apply(
+        Event::Music {
+            source: MusicSource::Spotify,
+            track: Some(bare),
+        },
+        0.0,
+    );
+    check("p2_music_no_cover", &render(&a, Role::Music, 120.0));
+}
+
 /// Brightest channel of a colour as it lands on black.
 fn lit(c: rackscreen_core::theme::Color, alpha: f32) -> u8 {
     let k = (c.a as f32 / 255.0) * alpha.clamp(0.0, 1.0);
@@ -1069,7 +1172,7 @@ fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
     let mut bad = Vec::new();
     for d in &s.items {
         let (what, color, alpha, min) = match d {
-            D::Clear(_) | D::World { .. } | D::Image { .. } => continue,
+            D::Clear(_) | D::World { .. } | D::Image { .. } | D::Cover { .. } => continue,
             D::Arc { color, alpha, .. } => ("arc", *color, *alpha, 0x2A),
             D::RoundRect { color, alpha, .. } => ("rect", *color, *alpha, 0x2A),
             D::Polygon { color, alpha, .. } => ("polygon", *color, *alpha, 0x2A),
@@ -1106,6 +1209,7 @@ fn contrast_floor_on_every_role() {
     bare.set_location_present(true);
     bare.set_github_token_present(true);
     bare.set_jellyfin_configured(true);
+    bare.set_music_configured(true);
     link(&mut bare, LinkTarget::K8sApi);
     link(&mut bare, LinkTarget::Prometheus);
     let mut problems = Vec::new();

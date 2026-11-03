@@ -3,6 +3,7 @@
 pub mod cluster;
 pub mod github;
 pub mod media;
+pub mod music;
 pub mod power_mix;
 pub mod rack;
 pub mod sky;
@@ -14,7 +15,7 @@ use crate::p2::screen::P2Screen;
 use crate::theme::Role;
 
 /// The P2 screen for a role with live data. `None` for roles that still draw
-/// their legacy scene, and for power-mix, which draws itself.
+/// their legacy scene, and for power-mix and music, which draw themselves.
 pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
     let mut screen = match role {
         Role::Cpu => cluster::cpu(model, now),
@@ -44,7 +45,7 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Media => media::media(model, now),
         Role::Ci => github::ci(model, now),
         Role::Jellyfin => media::jellyfin(model, now),
-        Role::PowerMix | Role::Gif(_) => return None,
+        Role::PowerMix | Role::Music | Role::Gif(_) => return None,
     };
     screen.icon = role.icon();
     Some(screen)

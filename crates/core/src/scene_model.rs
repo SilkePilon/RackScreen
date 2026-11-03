@@ -40,6 +40,7 @@ impl crate::model::Model {
             Role::Media => !(link.prom && self.media().have),
             Role::Ci => !(link.github && self.ci().have),
             Role::Jellyfin => !self.jellyfin().have,
+            Role::Music => !self.music().have,
             Role::Gif(i) => !matches!(self.gif(i), GifState::Ready(_)),
         }
     }
@@ -119,6 +120,10 @@ impl crate::model::Model {
             return connecting_scene(role.icon(), ui, now);
         }
         if role == Role::Jellyfin && !self.jellyfin_configured() {
+            ui.for_role(role);
+            return compose(&no_data_screen(role, NoData::Config), ui, now);
+        }
+        if role == Role::Music && !self.music_configured() {
             ui.for_role(role);
             return compose(&no_data_screen(role, NoData::Config), ui, now);
         }
@@ -441,6 +446,30 @@ mod tests {
             connecting(&m.scene(0, t0 + 0.3, &mut ScreenUi::new())),
             "incoming cpu half is the connecting scene"
         );
+    }
+
+    #[test]
+    fn music_checks_config_then_waits_then_draws_itself() {
+        let mut m = ready_model();
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Music, 1.0)).as_deref(),
+            Some("Check config")
+        );
+        m.set_music_configured(true);
+        assert_eq!(
+            pill_of(&for_role(&m, Role::Music, 1.0)).as_deref(),
+            Some("Waiting for data")
+        );
+        m.apply(
+            Event::Music {
+                source: crate::event::MusicSource::Spotify,
+                track: None,
+            },
+            1.0,
+        );
+        let s = for_role(&m, Role::Music, 2.0);
+        assert_eq!(pill_of(&s).as_deref(), Some("nothing playing"));
+        assert_eq!(icon_of(&s), Some("ms-music_note"));
     }
 
     #[test]

@@ -263,6 +263,29 @@ impl Default for JellyfinState {
     }
 }
 
+/// The music sources' latest polls.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MusicState {
+    pub spotify: Option<crate::event::Track>,
+    pub jellyfin: Option<crate::event::Track>,
+    /// Monotonic time of each source's last poll, by `MusicSource::index`.
+    pub polled_at: [Secs; 2],
+    pub have: bool,
+    /// The last track heard and when (unix seconds): stamped on every poll
+    /// while it plays, kept while it is paused or gone.
+    pub last: Option<(crate::event::Track, i64)>,
+}
+
+impl MusicState {
+    /// The track the screen shows (`music::pick`).
+    pub fn current(&self) -> Option<&crate::event::Track> {
+        crate::music::pick(self.spotify.as_ref(), self.jellyfin.as_ref())
+    }
+    pub fn polled_at(&self, source: crate::event::MusicSource) -> Secs {
+        self.polled_at[source.index()]
+    }
+}
+
 /// Ring fill for a bit rate: 100 kbit/s is (almost) empty, 1 Gbit/s is full,
 /// four decades in between, and a floor so idle still shows a little.
 pub fn net_fill(bps: f64) -> f32 {
@@ -323,6 +346,7 @@ pub struct Model {
     load: LoadState,
     ci: CiState,
     jellyfin: JellyfinState,
+    music: MusicState,
     /// Entrypoint req/s every 3 s, 90 s.
     traffic_hist: History,
     /// Restarts and mean input voltage per unix hour, 24 h.
@@ -365,6 +389,9 @@ pub struct Model {
     arr_configured: bool,
     /// `jellyfin.url` is set; without it the role says "Check config".
     jellyfin_configured: bool,
+    /// A Spotify login or a Jellyfin URL exists; without either the music
+    /// role says "Check config".
+    music_configured: bool,
     /// When the four-screen shows play; off until `set_shows`.
     shows: ShowScheduler,
     show_layout: Layout,
@@ -427,6 +454,7 @@ impl Model {
             load: LoadState::default(),
             ci: CiState::default(),
             jellyfin: JellyfinState::default(),
+            music: MusicState::default(),
             traffic_hist: History::new(31, 3.0),
             restarts_hist: Hourly::new(),
             mains_hist: Hourly::new(),
@@ -451,6 +479,7 @@ impl Model {
             exporter_missing: Vec::new(),
             arr_configured: false,
             jellyfin_configured: false,
+            music_configured: false,
             shows: ShowScheduler::new(false, 15, Vec::new()),
             show_layout: Layout { panels: 4, gap: 46 },
             show_order: Vec::new(),
@@ -591,6 +620,15 @@ impl Model {
     }
     pub fn jellyfin(&self) -> &JellyfinState {
         &self.jellyfin
+    }
+    pub fn music(&self) -> &MusicState {
+        &self.music
+    }
+    pub fn set_music_configured(&mut self, on: bool) {
+        self.music_configured = on;
+    }
+    pub fn music_configured(&self) -> bool {
+        self.music_configured
     }
     pub fn set_token_present(&mut self, present: bool) {
         self.token_present = present;
@@ -1070,6 +1108,21 @@ impl Model {
                 self.jellyfin.sessions = sessions;
                 self.jellyfin.polled_at = now;
                 self.jellyfin.have = true;
+            }
+            Event::Music { source, track } => {
+                match source {
+                    crate::event::MusicSource::Spotify => self.music.spotify = track,
+                    crate::event::MusicSource::Jellyfin => self.music.jellyfin = track,
+                }
+                self.music.polled_at[source.index()] = now;
+                self.music.have = true;
+                if let Some(t) = self.music.current().cloned() {
+                    let at = match &self.music.last {
+                        Some((prev, at)) if !t.playing && prev.title == t.title => *at,
+                        _ => self.unix_now,
+                    };
+                    self.music.last = Some((t, at));
+                }
             }
             Event::NoExporter { role } => {
                 if !self.exporter_missing.contains(&role) {
@@ -1824,6 +1877,99 @@ mod tests {
             11.0,
         );
         assert_eq!(m.jellyfin().status, JfStatus::Offline);
+    }
+
+    fn tune(
+        source: crate::event::MusicSource,
+        title: &str,
+        playing: bool,
+        since: i64,
+    ) -> crate::event::Track {
+        crate::event::Track {
+            source,
+            title: title.into(),
+            artist: "Artist".into(),
+            device: "Desk".into(),
+            duration_secs: 240.0,
+            position_secs: 30.0,
+            playing,
+            since,
+            cover: None,
+        }
+    }
+
+    #[test]
+    fn music_polls_are_kept_per_source_and_remember_the_last_track() {
+        use crate::event::MusicSource::{Jellyfin, Spotify};
+        let mut m = Model::new(Thresholds::default());
+        m.set_unix_now(1_000);
+        assert!(!m.music().have && !m.music_configured());
+        m.set_music_configured(true);
+        assert!(m.music_configured());
+        m.apply(
+            Event::Music {
+                source: Spotify,
+                track: Some(tune(Spotify, "One", true, 900)),
+            },
+            5.0,
+        );
+        m.apply(
+            Event::Music {
+                source: Jellyfin,
+                track: Some(tune(Jellyfin, "Two", false, 950)),
+            },
+            6.0,
+        );
+        let mu = m.music();
+        assert!(mu.have);
+        assert_eq!(mu.spotify.as_ref().unwrap().title, "One");
+        assert_eq!(mu.jellyfin.as_ref().unwrap().title, "Two");
+        assert_eq!(mu.polled_at, [5.0, 6.0]);
+        assert_eq!(mu.current().unwrap().title, "One", "playing beats paused");
+        assert_eq!(
+            mu.last.as_ref().map(|(t, at)| (t.title.as_str(), *at)),
+            Some(("One", 1_000))
+        );
+        m.set_unix_now(1_300);
+        m.apply(
+            Event::Music {
+                source: Spotify,
+                track: Some(tune(Spotify, "One", false, 1_290)),
+            },
+            8.0,
+        );
+        assert_eq!(
+            m.music()
+                .last
+                .as_ref()
+                .map(|(t, at)| (t.title.as_str(), *at)),
+            Some(("One", 1_000)),
+            "paused keeps the time it was last heard"
+        );
+        m.set_unix_now(1_400);
+        m.apply(
+            Event::Music {
+                source: Jellyfin,
+                track: None,
+            },
+            9.0,
+        );
+        m.apply(
+            Event::Music {
+                source: Spotify,
+                track: None,
+            },
+            9.0,
+        );
+        assert!(m.music().current().is_none());
+        assert_eq!(
+            m.music()
+                .last
+                .as_ref()
+                .map(|(t, at)| (t.title.as_str(), *at)),
+            Some(("One", 1_000)),
+            "kept while idle"
+        );
     }
 
     fn cycling_show_model() -> Model {

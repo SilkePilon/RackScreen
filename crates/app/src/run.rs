@@ -157,6 +157,13 @@ impl Monitor {
             arr_configured: matches!(source, SourceKind::Fake) || cfg.media.keyed(),
             jellyfin_configured: matches!(source, SourceKind::Fake)
                 || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
+            music_configured: matches!(source, SourceKind::Fake)
+                || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
+            spotify_token: (!matches!(source, SourceKind::Fake)
+                && cfg.spotify.enabled
+                && !cfg.spotify.client_id.trim().is_empty())
+            .then(crate::spotify::token_path)
+            .flatten(),
             one_at_a_time: cfg.display.one_at_a_time,
             shows: ShowScheduler::new(cfg.shows.enabled, cfg.shows.every_mins, cfg.shows.defs()),
             show_layout: Layout {
@@ -264,6 +271,24 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
     }
 }
 
+/// The token file the Spotify source reads, when Spotify is on and has a
+/// client ID. The source starts even before a login exists and picks one
+/// up once `rackscreen setup` writes it.
+fn spotify_token_path(cfg: &Config) -> Option<std::path::PathBuf> {
+    if !cfg.spotify.enabled {
+        return None;
+    }
+    if cfg.spotify.client_id.trim().is_empty() {
+        tracing::warn!("spotify enabled but no client id set; log in with rackscreen setup");
+        return None;
+    }
+    let path = crate::spotify::token_path();
+    if path.is_none() {
+        tracing::warn!("spotify: no home directory for the token file");
+    }
+    path
+}
+
 /// Sky and GitHub sources: public APIs and local maths, independent of the cluster.
 fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
     if cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty() {
@@ -277,6 +302,15 @@ fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: 
         ));
     } else if cfg.jellyfin.enabled {
         tracing::warn!("jellyfin enabled but no url set; the role says Check config");
+    }
+    if let Some(token_path) = spotify_token_path(cfg) {
+        runtime.spawn(rackscreen_sources::spotify::run_spotify(
+            rackscreen_sources::spotify::SpotifyConfig {
+                client_id: cfg.spotify.client_id.trim().to_string(),
+                token_path,
+            },
+            ctx.clone(),
+        ));
     }
     let location = cfg.location();
     let needs_location = cfg.weather.enabled || cfg.rain.enabled || cfg.iss.enabled;

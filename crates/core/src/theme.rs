@@ -82,13 +82,14 @@ pub enum Role {
     Load,
     Ci,
     Jellyfin,
+    Music,
     /// `gif:<name>`: the GIF at this index of the config's `gifs:` list. Not
     /// in `ALL`; the config knows which exist and what they are called.
     Gif(u16),
 }
 
 impl Role {
-    pub const ALL: [Role; 28] = [
+    pub const ALL: [Role; 29] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -117,6 +118,7 @@ impl Role {
         Role::Load,
         Role::Ci,
         Role::Jellyfin,
+        Role::Music,
     ];
 
     /// Position in `ALL`; `Gif(i)` counts on after it, so indices stay unique.
@@ -164,6 +166,7 @@ impl Role {
             Role::Load => "LOAD",
             Role::Ci => "CI",
             Role::Jellyfin => "NOW PLAYING",
+            Role::Music => "MUSIC",
             Role::Gif(_) => "GIF",
         }
     }
@@ -200,6 +203,7 @@ impl Role {
             Role::Load => "ms-speed",
             Role::Ci => "ms-build",
             Role::Jellyfin => "ms-movie",
+            Role::Music => "ms-music_note",
             Role::Gif(_) => "ms-gif_box",
         }
     }
@@ -234,6 +238,7 @@ impl Role {
             Role::Load => "load",
             Role::Ci => "ci",
             Role::Jellyfin => "jellyfin",
+            Role::Music => "music",
             // `gif:<name>` comes from the config (`Config::role_name`).
             Role::Gif(_) => "gif",
         }
@@ -401,16 +406,16 @@ mod tests {
     }
 
     #[test]
-    fn twenty_eight_roles_with_unique_names() {
-        assert_eq!(Role::ALL.len(), 28);
+    fn twenty_nine_roles_with_unique_names() {
+        assert_eq!(Role::ALL.len(), 29);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 28);
+        assert_eq!(names.len(), 29);
         for gone in ["face", "price", "carbon"] {
             assert_eq!(Role::parse(gone), None);
         }
         assert_eq!(Role::ALL[18], Role::Deploys);
         assert_eq!(
-            &Role::ALL[19..],
+            &Role::ALL[19..28],
             &[
                 Role::Media,
                 Role::Traffic,
@@ -457,6 +462,15 @@ mod tests {
             ]
         );
         assert_eq!(p2::ORANGE, Color::hex(0xF2A65A));
+    }
+
+    #[test]
+    fn music_is_the_last_role() {
+        assert_eq!(Role::ALL[28], Role::Music);
+        assert_eq!(Role::parse("music"), Some(Role::Music));
+        assert_eq!(Role::Music.title(), "MUSIC");
+        assert_eq!(Role::Music.icon(), "ms-music_note");
+        assert!(!Role::Music.is_cluster() && !Role::Music.is_sky());
     }
 
     #[test]

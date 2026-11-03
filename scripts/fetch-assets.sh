@@ -13,6 +13,7 @@ curl -sSL "https://raw.githubusercontent.com/lucide-icons/lucide/main/LICENSE" -
 MATERIAL="https://unpkg.com/@material-symbols/svg-700@0.23.0/rounded"
 MS_ICONS="air aq battery_charging_full bolt build commit dark_mode deployed_code eco
   electrical_services hard_drive lan memory_alt memory mode_fan monitor_heart movie
+  music_note
   partly_cloudy_day rainy restart_alt rocket_launch satellite_alt speed swap_vert sync
   thermostat timer video_library wb_sunny bedtime gif_box"
 for i in $MS_ICONS; do

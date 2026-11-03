@@ -1,0 +1,6 @@
+{
+  "access_token": "BQ-refreshed",
+  "token_type": "Bearer",
+  "scope": "user-read-playback-state user-read-currently-playing",
+  "expires_in": 3600
+}

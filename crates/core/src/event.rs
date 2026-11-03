@@ -184,6 +184,72 @@ pub enum JfStatus {
     Unauthorized,
 }
 
+/// Where a `Track` comes from; also picks the music screen's colour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MusicSource {
+    Spotify,
+    Jellyfin,
+}
+
+impl MusicSource {
+    pub fn index(self) -> usize {
+        match self {
+            MusicSource::Spotify => 0,
+            MusicSource::Jellyfin => 1,
+        }
+    }
+}
+
+/// Album art, decoded and squared: `size × size` straight RGBA.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cover {
+    /// Stable id of the art (album id); equal keys mean equal pixels.
+    pub key: String,
+    pub size: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// A shared cover, compared by key and size, not by pixels or pointer, so
+/// scenes stay cheap to compare.
+#[derive(Clone)]
+pub struct CoverRef(pub std::sync::Arc<Cover>);
+
+impl CoverRef {
+    pub fn new(cover: Cover) -> Self {
+        CoverRef(std::sync::Arc::new(cover))
+    }
+}
+
+impl PartialEq for CoverRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.key == other.0.key && self.0.size == other.0.size
+    }
+}
+
+impl std::fmt::Debug for CoverRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CoverRef({} {}px)", self.0.key, self.0.size)
+    }
+}
+
+/// The one track a music source reports.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Track {
+    pub source: MusicSource,
+    pub title: String,
+    pub artist: String,
+    /// Spotify device name, or `user · device` for Jellyfin.
+    pub device: String,
+    pub duration_secs: f64,
+    /// Where playback was at the poll.
+    pub position_secs: f64,
+    pub playing: bool,
+    /// Unix seconds of the last start, pause or track change (see
+    /// `music::stamp_since`).
+    pub since: i64,
+    pub cover: Option<CoverRef>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -438,6 +504,12 @@ pub enum Event {
     Jellyfin {
         status: JfStatus,
         sessions: Vec<JfSession>,
+    },
+    /// One poll of a music source: its current track, `None` when nothing is
+    /// loaded (or the source is unreachable).
+    Music {
+        source: MusicSource,
+        track: Option<Track>,
     },
     /// Prometheus answered but has no series for the role (exporter not
     /// installed); the next data event for the role clears it.

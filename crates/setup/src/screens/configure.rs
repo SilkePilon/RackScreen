@@ -19,6 +19,7 @@ use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
 use crate::screens::gifs::GifPane;
+use crate::screens::spotify_login::{real_exchange, Exchange, LoginFlow, Target};
 use crate::widgets::{confirm_dialog, help_line, SidebarView, StatusTone};
 use crate::{Action, Screen, Shared};
 
@@ -30,6 +31,8 @@ pub enum FieldKind {
     Bool,
     /// Not stored in the config: ⏎ opens an editor and applying runs it.
     Run,
+    /// Not a config value: Enter runs something (the Spotify login).
+    Command,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +98,9 @@ pub enum Field {
     /// One checklist row per show, by index into `SHOWS`.
     Show(u8),
     ShowsPlay,
+    SpotifyEnabled,
+    SpotifyClientId,
+    SpotifyLogin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,10 +115,11 @@ pub enum Group {
     Shows,
     /// The `gifs:` list; a list pane rather than form fields.
     Gifs,
+    Spotify,
 }
 
 impl Group {
-    pub const ALL: [Group; 9] = [
+    pub const ALL: [Group; 10] = [
         Group::Cluster,
         Group::Services,
         Group::Energy,
@@ -122,6 +129,7 @@ impl Group {
         Group::Thresholds,
         Group::Shows,
         Group::Gifs,
+        Group::Spotify,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -134,6 +142,7 @@ impl Group {
             Group::Thresholds => "Thresholds",
             Group::Shows => "Shows",
             Group::Gifs => "GIFs",
+            Group::Spotify => "Spotify",
         }
     }
     pub fn index(self) -> usize {
@@ -174,8 +183,8 @@ const fn spec(
     }
 }
 
-use FieldKind::{Bool, Number, Run, Secret, Text};
-use Group::{Cluster, Display, Energy, Media, Services, Shows, Sky, Thresholds};
+use FieldKind::{Bool, Command, Number, Run, Secret, Text};
+use Group::{Cluster, Display, Energy, Media, Services, Shows, Sky, Spotify, Thresholds};
 
 /// Checklist row for show `i`, labelled with its id.
 const fn show(i: u8) -> FieldSpec {
@@ -189,7 +198,7 @@ const fn show(i: u8) -> FieldSpec {
     )
 }
 
-pub const FIELDS: [FieldSpec; 70] = [
+pub const FIELDS: [FieldSpec; 73] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -673,7 +682,42 @@ pub const FIELDS: [FieldSpec; 70] = [
         Run,
         "A show id or random; plays at once, not at night.",
     ),
+    spec(
+        Field::SpotifyEnabled,
+        Spotify,
+        "Spotify",
+        "enabled",
+        Bool,
+        "Now playing from Spotify on the music screen.",
+    ),
+    spec(
+        Field::SpotifyClientId,
+        Spotify,
+        "Spotify",
+        "client id",
+        Text,
+        "Your app at developer.spotify.com.",
+    ),
+    spec(
+        Field::SpotifyLogin,
+        Spotify,
+        "Spotify",
+        "log in",
+        Command,
+        "⏎ log in; redirect URI http://127.0.0.1:8888/callback",
+    ),
 ];
+
+/// The group a jump key opens: `1`-`9` are groups 1 to 9, `0` is group 10.
+pub fn group_for_digit(c: char) -> Option<Group> {
+    let n = c.to_digit(10)? as usize;
+    Group::ALL.get((n + 9) % 10).copied()
+}
+
+/// The jump key of a group, as the sidebar numbers it.
+fn digit_for_group(g: Group) -> usize {
+    (g.index() + 1) % 10
+}
 
 /// Indices into `FIELDS` for one group, in display order.
 pub fn group_indices(g: Group) -> Vec<usize> {
@@ -767,6 +811,9 @@ pub fn get(cfg: &Config, f: Field) -> String {
             cfg.shows.list.iter().any(|s| s == id).to_string()
         }
         Field::ShowsPlay => "random".into(),
+        Field::SpotifyEnabled => cfg.spotify.enabled.to_string(),
+        Field::SpotifyClientId => cfg.spotify.client_id.clone(),
+        Field::SpotifyLogin => String::new(),
     }
 }
 
@@ -914,6 +961,14 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         }
         // Runs from the editor (`Configure::play`); nothing to store.
         Field::ShowsPlay => {}
+        Field::SpotifyEnabled => cfg.spotify.enabled = t == "true",
+        Field::SpotifyClientId => {
+            if !t.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err("client id is letters and digits only".into());
+            }
+            cfg.spotify.client_id = t.into();
+        }
+        Field::SpotifyLogin => {}
     }
     Ok(())
 }
@@ -926,6 +981,8 @@ enum Mode {
     AskDiscard,
     /// `systemctl restart` is running on a worker thread; keys wait for its result.
     Restarting,
+    /// The Spotify login dialog.
+    Login(LoginFlow),
 }
 
 pub struct Configure {
@@ -945,9 +1002,37 @@ pub struct Configure {
     play_state: Option<PathBuf>,
     /// The GIFs group is open: its list pane has the focus, `row` waits.
     gifs: Option<GifPane>,
+    /// Where a Spotify login is written (the service user's state dir).
+    spotify_target: Option<Target>,
+    exchange: Exchange,
+    /// "logged in as …", "not logged in", "token expired, log in again".
+    login_status: String,
 }
 
 impl Configure {
+    fn refresh_login_status(&mut self) {
+        let tok = self
+            .spotify_target
+            .as_ref()
+            .and_then(|(p, _)| rackscreen_sources::spotify::read_token(p));
+        self.login_status = rackscreen_sources::spotify::login_status(tok.as_ref());
+    }
+
+    fn start_login(&mut self) {
+        let id = self.cfg.spotify.client_id.trim().to_string();
+        if id.is_empty() {
+            self.error = Some("set the client id first".into());
+            return;
+        }
+        match LoginFlow::start(&id) {
+            Ok(flow) => {
+                self.error = None;
+                self.mode = Mode::Login(flow);
+            }
+            Err(e) => self.error = Some(format!("{e:#}")),
+        }
+    }
+
     pub fn new(shared: &Shared) -> Configure {
         Configure::from_load(Config::load_or_default(&shared.ctx.config_path))
     }
@@ -962,7 +1047,7 @@ impl Configure {
                 true,
             ),
         };
-        Configure {
+        let mut c = Configure {
             cfg,
             row: 0,
             mode: Mode::Browse,
@@ -973,7 +1058,12 @@ impl Configure {
             restart_rx: None,
             play_state: None,
             gifs: None,
-        }
+            spotify_target: rackscreen_app::spotify::token_path_for_service_user().ok(),
+            exchange: real_exchange(),
+            login_status: String::new(),
+        };
+        c.refresh_login_status();
+        c
     }
 
     pub fn group(&self) -> Group {
@@ -1087,6 +1177,9 @@ impl Configure {
                 false,
             );
         }
+        if let Mode::Login(flow) = &self.mode {
+            flow.draw(f, area, th);
+        }
         if matches!(self.mode, Mode::AskDiscard) {
             confirm_dialog(
                 f,
@@ -1124,11 +1217,13 @@ impl Screen for Configure {
                 KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.move_group(-1),
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.move_group(1),
-                KeyCode::Char(c @ '1'..='9') if ((c as u8 - b'1') as usize) < Group::ALL.len() => {
-                    self.jump_to(Group::ALL[(c as u8 - b'1') as usize]);
+                KeyCode::Char(c) if group_for_digit(c).is_some() => {
+                    self.jump_to(group_for_digit(c).expect("checked"));
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    if kind == FieldKind::Bool {
+                    if kind == FieldKind::Command {
+                        self.start_login();
+                    } else if kind == FieldKind::Bool {
                         let cur = get(&self.cfg, field) == "true";
                         match set(&mut self.cfg, field, if cur { "false" } else { "true" }) {
                             Ok(()) => {
@@ -1201,11 +1296,35 @@ impl Screen for Configure {
                 }
                 self.mode = Mode::Restarting;
             }
+            Mode::Login(mut flow) => {
+                match key.code {
+                    KeyCode::Esc if !flow.busy() => return Action::None,
+                    KeyCode::Enter if !flow.busy() => match &self.spotify_target {
+                        Some(t) => flow.submit(self.exchange.clone(), t.clone()),
+                        None => flow.error = Some("no home directory for the token file".into()),
+                    },
+                    KeyCode::Backspace if !flow.busy() => {
+                        flow.buf.pop();
+                    }
+                    KeyCode::Char(c) if !flow.busy() => flow.buf.push(c),
+                    _ => {}
+                }
+                self.mode = Mode::Login(flow);
+            }
         }
         Action::None
     }
 
     fn tick(&mut self, shared: &mut Shared, _now: Secs) {
+        if let Mode::Login(flow) = &mut self.mode {
+            if let Some(Ok(_)) = flow.poll() {
+                self.mode = Mode::Browse;
+                self.refresh_login_status();
+                let msg = format!("Spotify: {}", self.login_status);
+                shared.banner = Some(msg.clone());
+                self.note = Some(msg);
+            }
+        }
         let Some(rx) = &self.restart_rx else { return };
         let msg = match rx.try_recv() {
             Ok(m) => m,
@@ -1323,6 +1442,7 @@ impl Screen for Configure {
                                 format!("{} off", g.pending)
                             }
                         }
+                        (_, _, FieldKind::Command) => self.login_status.clone(),
                         (_, _, FieldKind::Number) if s.label == "poll" => {
                             raw.parse::<u64>().map(humanise_poll).unwrap_or(raw)
                         }
@@ -1405,11 +1525,12 @@ impl Screen for Configure {
             return pane.keys();
         }
         match self.mode {
-            Mode::Browse => "↑↓ field  Tab/←→ group  1-9 jump  ⏎ edit  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  Tab/←→ group  1-9,0 jump  ⏎ edit  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
             Mode::AskDiscard => "y discard  Esc keep".into(),
             Mode::Restarting => "restarting...  Esc back".into(),
+            Mode::Login(_) => "paste the address  ⏎ log in  Esc cancel".into(),
         }
     }
     fn subtitle(&self) -> String {
@@ -1426,11 +1547,10 @@ impl Screen for Configure {
     fn sidebar(&self) -> Option<SidebarView> {
         Some(SidebarView {
             title: "Configure".into(),
-            // Numbered, so the `1-9` jump keys explain themselves.
+            // Numbered, so the `1-9,0` jump keys explain themselves.
             items: Group::ALL
                 .iter()
-                .enumerate()
-                .map(|(i, g)| format!("{} {}", i + 1, g.name()))
+                .map(|&g| format!("{} {}", digit_for_group(g), g.name()))
                 .collect(),
             selected: self.group().index(),
         })
@@ -1447,6 +1567,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::path::Path;
+    use std::sync::Arc;
 
     fn shared_at(path: &Path) -> Shared {
         Shared {
@@ -1589,7 +1710,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 70);
+        assert_eq!(FIELDS.len(), 73);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1597,7 +1718,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 70);
+        assert_eq!(FIELDS.len(), 73);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);
@@ -1650,10 +1771,10 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
         assert_eq!(
             screen.group(),
-            Group::Shows,
+            Group::Spotify,
             "up from the first field wraps to the end"
         );
-        assert_eq!(FIELDS[screen.row].field, Field::ShowsPlay);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyLogin);
         screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Cluster);
         for _ in 0..5 {
@@ -1676,12 +1797,17 @@ mod tests {
         );
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
-        assert_eq!(screen.group(), Group::Gifs, "groups wrap");
+        assert_eq!(screen.group(), Group::Spotify, "groups wrap");
+        screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Gifs);
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Shows);
         assert!(screen.consumes_left());
         assert_eq!(screen.sidebar().unwrap().selected, Group::Shows.index());
-        assert_eq!(screen.sidebar().unwrap().items.len(), 9);
+        let items = screen.sidebar().unwrap().items;
+        assert_eq!(items.len(), 10);
+        assert_eq!(items[8], "9 GIFs");
+        assert_eq!(items[9], "0 Spotify", "numbered by its jump key");
     }
 
     #[test]
@@ -1717,7 +1843,7 @@ mod tests {
         assert!(t.contains("+ add GIF") && t.contains("unused"), "{t}");
         assert!(t.contains("35 MB"), "the memory note: {t}");
         screen.handle(KeyEvent::from(KeyCode::Right), &mut sh, 0.0);
-        assert_eq!(screen.group(), Group::Cluster, "groups wrap past GIFs");
+        assert_eq!(screen.group(), Group::Spotify, "GIFs steps on to Spotify");
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Gifs);
         assert!(matches!(
@@ -1752,8 +1878,13 @@ mod tests {
         assert_eq!(screen.group(), Group::Thresholds);
         screen.handle(KeyEvent::from(KeyCode::Char('8')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Shows);
+        screen.handle(KeyEvent::from(KeyCode::Char('9')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Gifs);
+        screen.handle(KeyEvent::from(KeyCode::Char('0')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Spotify);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyEnabled);
         assert!(!screen.dirty, "navigation never dirties the form");
-        assert!(screen.keys().contains("1-9 jump"));
+        assert!(screen.keys().contains("1-9,0 jump"));
     }
 
     #[test]
@@ -1984,5 +2115,104 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
         assert_eq!(screen.note.as_deref(), Some("requested random"));
         assert_eq!(std::fs::read_to_string(&req).unwrap(), "random\n");
+    }
+
+    fn login_screen(dir: &Path) -> Configure {
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        screen.spotify_target = Some((dir.join("state/rackscreen/spotify.json"), None));
+        screen.exchange = Arc::new(|_: &str, code: &str, _: &str| {
+            anyhow::ensure!(code == "c0de", "bad code");
+            Ok(rackscreen_sources::spotify::TokenFile {
+                access_token: "a".into(),
+                refresh_token: "r".into(),
+                expires_at: 1,
+                display_name: Some("Silke".into()),
+                error: None,
+            })
+        });
+        screen.refresh_login_status();
+        screen
+    }
+
+    #[test]
+    fn spotify_fields_round_trip() {
+        let mut c = Config::default();
+        assert_eq!(Group::ALL[9], Group::Spotify);
+        assert_eq!(Group::Spotify.name(), "Spotify");
+        assert_eq!(group_indices(Group::Spotify).len(), 3);
+        assert_eq!(get(&c, Field::SpotifyEnabled), "false");
+        set(&mut c, Field::SpotifyEnabled, "true").unwrap();
+        set(&mut c, Field::SpotifyClientId, " abc123 ").unwrap();
+        assert!(c.spotify.enabled && c.spotify.client_id == "abc123");
+        assert!(set(&mut c, Field::SpotifyClientId, "no way")
+            .unwrap_err()
+            .contains("letters and digits"));
+        assert_eq!(get(&c, Field::SpotifyLogin), "");
+        assert_eq!(section_enabled(&c, "Spotify"), Some(true));
+    }
+
+    #[test]
+    fn spotify_login_needs_a_client_id_then_logs_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = login_screen(dir.path());
+        assert_eq!(screen.login_status, "not logged in");
+        screen.handle(KeyEvent::from(KeyCode::Char('0')), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyClientId);
+        screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyLogin);
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Browse));
+        assert!(screen.error.as_deref().unwrap().contains("client id"));
+        screen.cfg.spotify.client_id = "cid".into();
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        let state = match &screen.mode {
+            Mode::Login(f) => url::Url::parse(f.url())
+                .unwrap()
+                .query_pairs()
+                .find(|(k, _)| k == "state")
+                .unwrap()
+                .1
+                .into_owned(),
+            _ => panic!("login dialog"),
+        };
+        let mut term = Terminal::new(TestBackend::new(100, 60)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(
+            text.contains("Spotify login") && text.contains("▀"),
+            "{text}"
+        );
+        for c in format!("code=c0de&state={state}").chars() {
+            screen.handle(KeyEvent::from(KeyCode::Char(c)), &mut sh, 0.0);
+        }
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        for _ in 0..200 {
+            screen.tick(&mut sh, 0.0);
+            if matches!(screen.mode, Mode::Browse) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(screen.mode, Mode::Browse), "dialog closed");
+        assert_eq!(screen.login_status, "logged in as Silke");
+        assert_eq!(sh.banner.as_deref(), Some("Spotify: logged in as Silke"));
+        assert!(dir.path().join("state/rackscreen/spotify.json").exists());
+    }
+
+    #[test]
+    fn esc_closes_the_login_dialog() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = login_screen(dir.path());
+        screen.cfg.spotify.client_id = "cid".into();
+        screen.row = group_indices(Group::Spotify)[2];
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Login(_)));
+        screen.handle(KeyEvent::from(KeyCode::Char('x')), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Browse));
+        assert!(!screen.dirty, "logging in does not touch the form");
     }
 }

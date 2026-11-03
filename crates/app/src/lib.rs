@@ -7,5 +7,6 @@ pub mod panels;
 pub mod play;
 pub mod run;
 pub mod runloop;
+pub mod spotify;
 pub mod stats;
 pub mod worker;
