@@ -126,6 +126,9 @@ pub struct Scene {
     pub items: Vec<Drawable>,
     /// During a screen change: the two halves to draw instead of `items`.
     pub slide: Option<Box<Slide>>,
+    /// `items[..base_len]` rarely change (clear, ring track, title, card
+    /// background); the renderer may reuse a cached raster of them.
+    pub base_len: usize,
 }
 
 impl Default for Scene {
@@ -139,6 +142,7 @@ impl Scene {
         Self {
             items: vec![Drawable::Clear(BLACK)],
             slide: None,
+            base_len: 0,
         }
     }
     pub fn push(&mut self, d: Drawable) {

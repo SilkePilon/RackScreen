@@ -77,10 +77,27 @@ fn glided_ring(spec: &RingSpec, ui: &mut ScreenUi, now: Secs) -> RingSpec {
 
 pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
     let mut scene = Scene::new();
-    for d in glided_ring(&s.ring, ui, now).drawables() {
-        scene.push(d);
-    }
+    let ring = glided_ring(&s.ring, ui, now);
+    scene.items.extend(ring.track());
     scene.push(curved_title(&s.title));
+    let pill_cy = if s.unit_below {
+        PILL_CY_UNIT_BELOW
+    } else {
+        PILL_CY
+    };
+    if s.card.is_some() {
+        scene.push(Drawable::RoundRect {
+            x: CX - CARD_W / 2.0,
+            y: card_top(pill_cy),
+            w: CARD_W,
+            h: CARD_H,
+            r: CARD_R,
+            color: CARD,
+            alpha: 1.0,
+        });
+    }
+    scene.base_len = scene.items.len();
+    scene.items.extend(ring.overlay());
     if let Some((a, b)) = &s.ends {
         scene.items.extend(ring_ends(a, b));
     }
@@ -112,24 +129,10 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
             unit_superscript(&h, u)
         });
     }
-    let pill_cy = if s.unit_below {
-        PILL_CY_UNIT_BELOW
-    } else {
-        PILL_CY
-    };
     if let Some((text, color)) = &s.pill {
         scene.items.extend(pill(ui, text, *color, pill_cy, now));
     }
     if let Some(card) = &s.card {
-        scene.push(Drawable::RoundRect {
-            x: CX - CARD_W / 2.0,
-            y: card_top(pill_cy),
-            w: CARD_W,
-            h: CARD_H,
-            r: CARD_R,
-            color: CARD,
-            alpha: 1.0,
-        });
         scene
             .items
             .extend(card_drawables(card, ui, chart_rect(pill_cy), now));
@@ -164,7 +167,7 @@ mod tests {
     use crate::p2::chart::Card;
     use crate::p2::ring::RingSpec;
     use crate::p2::ui::ScreenUi;
-    use crate::theme::p2::{BLUE, CARD, OK, TEXT2};
+    use crate::theme::p2::{BLUE, CARD, OK, TEXT2, TRACK};
 
     fn sample() -> P2Screen {
         let mut s = P2Screen::new("cpu", "42");
@@ -190,11 +193,20 @@ mod tests {
         let scene = compose(&sample(), &mut ui, 0.0);
         let items = &scene.items;
         assert!(matches!(items[0], Drawable::Clear(_)));
-        assert!(matches!(items[1], Drawable::Arc { .. }), "track first");
         assert!(
-            matches!(items[2], Drawable::Arc { sweep_deg, .. } if (sweep_deg - 300.0 * 0.42).abs() < 1e-3)
+            matches!(items[1], Drawable::Arc { color, .. } if color == TRACK),
+            "track first"
         );
-        assert!(matches!(&items[3], Drawable::CurvedText { text, .. } if text == "CPU"));
+        assert!(matches!(&items[2], Drawable::CurvedText { text, .. } if text == "CPU"));
+        assert!(
+            matches!(items[3], Drawable::RoundRect { color, .. } if color == CARD),
+            "card background in the base"
+        );
+        assert_eq!(scene.base_len, 4);
+        assert!(
+            matches!(items[4], Drawable::Arc { sweep_deg, .. } if (sweep_deg - 300.0 * 0.42).abs() < 1e-3),
+            "fill right after the base"
+        );
         let runs: Vec<&String> = items
             .iter()
             .filter_map(|d| match d {

@@ -18,6 +18,8 @@ pub struct Renderer {
     scratch: Pixmap,
     /// The round panel: slide halves are clipped to it.
     round: Mask,
+    /// The last base layer (`scene.items[..base_len]`) and its raster.
+    base: Option<(Vec<Drawable>, Pixmap)>,
 }
 
 impl Renderer {
@@ -33,6 +35,7 @@ impl Renderer {
             },
             scratch: new_pixmap(),
             round,
+            base: None,
         })
     }
 
@@ -43,7 +46,28 @@ impl Renderer {
             self.draw_placed(&sl.inc, sl.inc_at, px);
             return;
         }
-        for d in &scene.items {
+        let n = scene.base_len.min(scene.items.len());
+        let cacheable = n > 0 && matches!(scene.items.first(), Some(Drawable::Clear(_)));
+        let start = if cacheable {
+            let base = &scene.items[..n];
+            match &self.base {
+                Some((d, raster))
+                    if d.as_slice() == base && raster.data().len() == px.data().len() =>
+                {
+                    px.data_mut().copy_from_slice(raster.data());
+                }
+                _ => {
+                    for d in base {
+                        self.painter.draw_item(px, d);
+                    }
+                    self.base = Some((base.to_vec(), px.clone()));
+                }
+            }
+            n
+        } else {
+            0
+        };
+        for d in &scene.items[start..] {
             self.painter.draw_item(px, d);
         }
     }
@@ -312,7 +336,68 @@ mod tests {
     }
 
     use rackscreen_core::p2::font::FontId;
+    use rackscreen_core::theme::Color;
     use rackscreen_core::theme::WHITE;
+
+    fn based_scene(hero_x: f32) -> Scene {
+        let mut s = Scene::new();
+        s.push(Drawable::Arc {
+            cx: 120.0,
+            cy: 120.0,
+            r: 106.0,
+            width: 9.0,
+            start_deg: 30.0,
+            sweep_deg: 300.0,
+            color: Color::hex(0x2C2C33),
+            alpha: 1.0,
+        });
+        s.push(Drawable::RoundRect {
+            x: 66.0,
+            y: 150.0,
+            w: 108.0,
+            h: 48.0,
+            r: 14.0,
+            color: Color::hex(0x24242A),
+            alpha: 1.0,
+        });
+        s.base_len = s.items.len();
+        s.push(Drawable::RoundRect {
+            x: hero_x,
+            y: 60.0,
+            w: 30.0,
+            h: 30.0,
+            r: 4.0,
+            color: Color::hex(0xEDEDEF),
+            alpha: 1.0,
+        });
+        s
+    }
+
+    #[test]
+    fn base_cache_draws_the_same_pixels_as_one_pass() {
+        let mut cached = Renderer::new().unwrap();
+        let mut plain = Renderer::new().unwrap();
+        for x in [50.0, 80.0, 80.0, 110.0] {
+            let s = based_scene(x);
+            let mut flat = s.clone();
+            flat.base_len = 0;
+            let (mut a, mut b) = (new_pixmap(), new_pixmap());
+            cached.render(&s, &mut a);
+            plain.render(&flat, &mut b);
+            assert_eq!(a.data(), b.data(), "hero at {x}");
+        }
+    }
+
+    #[test]
+    fn base_without_leading_clear_is_not_cached() {
+        let mut r = Renderer::new().unwrap();
+        let mut s = based_scene(50.0);
+        s.items.remove(0);
+        s.base_len -= 1;
+        let mut px = new_pixmap();
+        r.render(&s, &mut px);
+        assert!(r.base.is_none());
+    }
 
     fn render_one(d: Drawable) -> Pixmap {
         let mut r = Renderer::new().unwrap();

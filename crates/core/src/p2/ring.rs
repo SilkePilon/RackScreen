@@ -93,9 +93,14 @@ impl RingSpec {
         (CX + self.r * a.sin(), CY - self.r * a.cos())
     }
 
-    pub fn drawables(&self) -> Vec<Drawable> {
+    /// The full-length background track.
+    pub fn track(&self) -> Vec<Drawable> {
+        self.arc(0.0, 1.0, TRACK, 1.0).into_iter().collect()
+    }
+
+    /// Everything drawn over the track.
+    pub fn overlay(&self) -> Vec<Drawable> {
         let mut out = Vec::new();
-        out.extend(self.arc(0.0, 1.0, TRACK, 1.0));
         match &self.kind {
             RingKind::Empty => {}
             RingKind::Fill { frac, color } => {
@@ -165,6 +170,12 @@ impl RingSpec {
                 });
             }
         }
+        out
+    }
+
+    pub fn drawables(&self) -> Vec<Drawable> {
+        let mut out = self.track();
+        out.extend(self.overlay());
         out
     }
 }
