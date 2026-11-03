@@ -1166,7 +1166,7 @@ fn show_round_one() {
 fn show_round_two() {
     for (id, t, name) in [
         ("birds", 4.0, "show_birds"),
-        ("fireworks", 5.6, "show_fireworks_finale"),
+        ("fireworks", 6.4, "show_fireworks_finale"),
         ("alpine", 7.0, "show_alpine"),
         // At 25 mm gaps the camels are behind the bezel at t 5 and the
         // shooting star at t 5.2; the extra frames show them on screen 3.
