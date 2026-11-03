@@ -553,7 +553,7 @@ fn every_role_normal() {
 }
 
 /// The base cache hit path draws what one fresh pass draws, for every role,
-/// also with a slide frame in between.
+/// also with a fade frame in between.
 #[test]
 fn base_cache_hit_matches_a_fresh_render() {
     let m = full_model();
@@ -570,18 +570,11 @@ fn base_cache_hit_matches_a_fresh_render() {
         r.render(&scene, &mut px);
         assert!(px.data() == fresh.data(), "{role:?}: cache hit differs");
 
-        let other = m.scene_for_role(Role::Mem, 120.0, &mut ScreenUi::new());
-        let (out_at, inc_at) = rackscreen_core::screens::slide(0.5);
-        let mut slide = rackscreen_core::scene::Scene::new();
-        slide.slide = Some(Box::new(rackscreen_core::scene::Slide {
-            out: scene.clone(),
-            out_at,
-            inc: other,
-            inc_at,
-        }));
-        r.render(&slide, &mut px);
+        let mut faded = scene.clone();
+        faded.fade = 0.5;
+        r.render(&faded, &mut px);
         r.render(&scene, &mut px);
-        assert!(px.data() == fresh.data(), "{role:?}: differs after a slide");
+        assert!(px.data() == fresh.data(), "{role:?}: differs after a fade");
     }
     assert!(cached > 0, "some role has a base layer");
 }
@@ -830,21 +823,26 @@ fn face_moods() {
 }
 
 #[test]
-fn slide_mid_transition() {
+fn fade_mid_transition() {
     let mut m = full_model();
     m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
     let mut t = 0.0;
-    while t < 3.05 {
+    let t0 = loop {
         m.tick(t);
+        if let Some(t0) = m.screen(0).unwrap().transition_started() {
+            break t0;
+        }
         t += 1.0 / 30.0;
-    }
+        assert!(t < 10.0, "no transition");
+    };
     let mut ui = ScreenUi::new();
-    let s = m.scene(0, 3.4, &mut ui);
-    assert!(s.slide.is_some(), "mid slide");
+    // a quarter in: the outgoing cpu scene, part way to black
+    let s = m.scene(0, t0 + 0.1, &mut ui);
+    assert!(s.fade > 0.0 && s.fade < 1.0, "mid fade: {}", s.fade);
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
     r.render(&s, &mut px);
-    check("slide_mid", &px);
+    check("fade_mid", &px);
 }
 
 #[test]

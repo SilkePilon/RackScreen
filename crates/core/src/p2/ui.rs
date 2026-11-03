@@ -44,7 +44,7 @@ pub struct ScreenUi {
     rolls: HashMap<UiKey, Roll>,
     marquees: HashMap<UiKey, Marquee>,
     fades: HashMap<UiKey, ColorFade>,
-    /// The outgoing role's state while a slide runs.
+    /// The outgoing role's state while a transition runs.
     out: Option<Box<ScreenUi>>,
 }
 
@@ -64,7 +64,7 @@ impl ScreenUi {
         }
     }
 
-    /// State for the outgoing half of a slide away from `from`. The first call
+    /// State for the outgoing half of a transition away from `from`. The first call
     /// moves this screen's state (which belongs to `from`) into the slot, so
     /// the incoming role starts fresh here and the old one keeps animating.
     pub fn outgoing(&mut self, from: Role) -> &mut ScreenUi {
@@ -79,8 +79,8 @@ impl ScreenUi {
         self.out.as_mut().expect("set above")
     }
 
-    /// The slide is over: drop the outgoing state.
-    pub fn end_slide(&mut self) {
+    /// The transition is over: drop the outgoing state.
+    pub fn end_transition(&mut self) {
         self.out = None;
     }
 
@@ -252,11 +252,11 @@ mod tests {
             Some(Role::Cpu),
             "for_role leaves the slot alone"
         );
-        ui.end_slide();
+        ui.end_transition();
         assert_eq!(
             ui.outgoing(Role::Cpu).role(),
             None,
-            "after the slide the slot starts empty"
+            "after the transition the slot starts empty"
         );
     }
 }

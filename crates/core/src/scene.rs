@@ -95,37 +95,9 @@ pub enum Drawable {
     },
 }
 
-/// Where one half of a slide sits: vertical offset in px, scale about the
-/// centre, opacity.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Placement {
-    pub dy: f32,
-    pub scale: f32,
-    pub alpha: f32,
-}
-
-impl Placement {
-    pub const STILL: Placement = Placement {
-        dy: 0.0,
-        scale: 1.0,
-        alpha: 1.0,
-    };
-}
-
-/// A screen change in progress: both role scenes and where each sits.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Slide {
-    pub out: Scene,
-    pub out_at: Placement,
-    pub inc: Scene,
-    pub inc_at: Placement,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub items: Vec<Drawable>,
-    /// During a screen change: the two halves to draw instead of `items`.
-    pub slide: Option<Box<Slide>>,
     /// `items[..base_len]` rarely change (clear, ring track, title, card
     /// background); the renderer may reuse a cached raster of them.
     pub base_len: usize,
@@ -144,7 +116,6 @@ impl Scene {
     pub fn new() -> Self {
         Self {
             items: vec![Drawable::Clear(BLACK)],
-            slide: None,
             base_len: 0,
             fade: 1.0,
         }

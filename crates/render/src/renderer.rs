@@ -1,11 +1,10 @@
 //! Turns a `Scene` into pixels.
 
 use anyhow::Result;
-use rackscreen_core::scene::{Drawable, Placement, Scene};
-use rackscreen_core::theme::layout::{CX, CY, SIZE};
-use tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, PixmapPaint, Transform};
+use rackscreen_core::scene::{Drawable, Scene};
+use rackscreen_core::theme::layout::{CX, CY};
+use tiny_skia::Pixmap;
 
-use crate::frame::new_pixmap;
 use crate::icons::IconCache;
 use crate::prims::{
     arc_points, ellipse_path, fill, polygon_path, polyline_path, rounded_rect, skia_color, stroke,
@@ -14,38 +13,22 @@ use crate::text::TextRenderer;
 
 pub struct Renderer {
     painter: Painter,
-    /// One slide half is rendered here before being placed into the target.
-    scratch: Pixmap,
-    /// The round panel: slide halves are clipped to it.
-    round: Mask,
     /// The last base layer (`scene.items[..base_len]`) and its raster.
     base: Option<(Vec<Drawable>, Pixmap)>,
 }
 
 impl Renderer {
     pub fn new() -> Result<Self> {
-        let mut round = Mask::new(SIZE, SIZE).expect("mask");
-        if let Some(p) = PathBuilder::from_circle(CX, CY, CX) {
-            round.fill_path(&p, FillRule::Winding, true, Transform::identity());
-        }
         Ok(Self {
             painter: Painter {
                 icons: IconCache::new()?,
                 text: TextRenderer::new()?,
             },
-            scratch: new_pixmap(),
-            round,
             base: None,
         })
     }
 
     pub fn render(&mut self, scene: &Scene, px: &mut Pixmap) {
-        if let Some(sl) = &scene.slide {
-            px.fill(tiny_skia::Color::BLACK);
-            self.draw_placed(&sl.out, sl.out_at, px);
-            self.draw_placed(&sl.inc, sl.inc_at, px);
-            return;
-        }
         let n = scene.base_len.min(scene.items.len());
         let cacheable = n > 0 && matches!(scene.items.first(), Some(Drawable::Clear(_)));
         let start = if cacheable {
@@ -74,31 +57,10 @@ impl Renderer {
             crate::frame::darken(px, scene.fade);
         }
     }
-
-    /// One half of a slide: drawn without its `Clear` into the transparent
-    /// scratch, then composited moved, scaled about the centre, faded and
-    /// clipped to the round panel.
-    fn draw_placed(&mut self, s: &Scene, at: Placement, px: &mut Pixmap) {
-        if at.alpha <= 0.0 || at.scale <= 0.0 || at.dy.abs() >= SIZE as f32 {
-            return;
-        }
-        self.scratch.fill(tiny_skia::Color::TRANSPARENT);
-        for d in s.items.iter().filter(|d| !matches!(d, Drawable::Clear(_))) {
-            self.painter.draw_item(&mut self.scratch, d);
-        }
-        let ts = Transform::from_translate(CX, CY + at.dy)
-            .pre_scale(at.scale, at.scale)
-            .pre_translate(-CX, -CY);
-        let paint = PixmapPaint {
-            opacity: at.alpha.min(1.0),
-            ..PixmapPaint::default()
-        };
-        px.draw_pixmap(0, 0, self.scratch.as_ref(), &paint, ts, Some(&self.round));
-    }
 }
 
-/// The caches a single drawable needs; separate from `Renderer` so the scratch
-/// pixmap can be borrowed alongside them.
+/// The caches a single drawable needs; separate from `Renderer` so the base
+/// cache can be borrowed alongside them.
 struct Painter {
     icons: IconCache,
     text: TextRenderer,
@@ -235,107 +197,11 @@ impl Painter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackscreen_core::event::{Event, LinkTarget};
-    use rackscreen_core::model::{Model, Thresholds};
-    use rackscreen_core::p2::ui::ScreenUi;
-    use rackscreen_core::theme::Role;
+    use crate::frame::new_pixmap;
 
     fn pixel(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
         let i = ((y * p.width() + x) * 4) as usize;
         (p.data()[i], p.data()[i + 1], p.data()[i + 2])
-    }
-
-    fn cpu_model(pct: f32) -> Model {
-        let mut m = Model::new(Thresholds::default());
-        for target in [LinkTarget::K8sApi, LinkTarget::Prometheus] {
-            m.apply(Event::Link { target, up: true }, 0.0);
-        }
-        m.apply(
-            Event::Metrics {
-                cpu_pct: pct,
-                mem_pct: 50.0,
-                mem_used_gb: 1.0,
-                mem_total_gb: 8.0,
-                hot_cpu: None,
-                hot_mem: None,
-            },
-            0.0,
-        );
-        m
-    }
-
-    #[test]
-    fn slide_draws_each_half_moved_faded_and_round() {
-        use rackscreen_core::scene::{Placement, Slide};
-        let m = cpu_model(42.0);
-        let mut r = Renderer::new().unwrap();
-        let mut px = new_pixmap();
-        let cpu = m.scene_for_role(Role::Cpu, 5.0, &mut ScreenUi::new());
-        let count = |p: &Pixmap, y0: u32, y1: u32| {
-            (y0..y1)
-                .flat_map(|y| (0..240).map(move |x| (x, y)))
-                .filter(|&(x, y)| pixel(p, x, y) != (0, 0, 0))
-                .count()
-        };
-        let brightness = |p: &Pixmap| {
-            p.data()
-                .chunks_exact(4)
-                .map(|c| c[0] as u64 + c[1] as u64 + c[2] as u64)
-                .sum::<u64>()
-        };
-        let placed = |out_at: Placement| {
-            let mut s = Scene::new();
-            s.slide = Some(Box::new(Slide {
-                out: cpu.clone(),
-                out_at,
-                inc: Scene::new(),
-                inc_at: Placement::STILL,
-            }));
-            s
-        };
-        r.render(
-            &placed(Placement {
-                dy: -120.0,
-                scale: 1.0,
-                alpha: 1.0,
-            }),
-            &mut px,
-        );
-        assert!(count(&px, 0, 100) > 500, "the outgoing half moved up");
-        assert_eq!(
-            count(&px, 140, 240),
-            0,
-            "the empty incoming half's Clear does not paint over it"
-        );
-        assert_eq!(
-            pixel(&px, 2, 2),
-            (0, 0, 0),
-            "round mask keeps the corners black"
-        );
-        r.render(&placed(Placement::STILL), &mut px);
-        let full = brightness(&px);
-        r.render(
-            &placed(Placement {
-                dy: 0.0,
-                scale: 1.0,
-                alpha: 0.5,
-            }),
-            &mut px,
-        );
-        let half = brightness(&px) as f64 / full as f64;
-        assert!(
-            (0.4..0.6).contains(&half),
-            "alpha 0.5 halves the light: {half}"
-        );
-        r.render(
-            &placed(Placement {
-                dy: -240.0,
-                scale: 1.0,
-                alpha: 1.0,
-            }),
-            &mut px,
-        );
-        assert_eq!(count(&px, 0, 240), 0, "fully off-screen draws nothing");
     }
 
     use rackscreen_core::p2::font::FontId;

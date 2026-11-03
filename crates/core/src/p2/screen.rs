@@ -231,7 +231,7 @@ mod tests {
         assert!(items
             .iter()
             .any(|d| matches!(d, Drawable::Polyline { width, .. } if *width == 1.8)));
-        assert!(scene.slide.is_none());
+        assert_eq!(scene.fade, 1.0);
     }
 
     #[test]

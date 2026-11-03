@@ -86,24 +86,17 @@ fn every_role_under_a_millisecond() {
             worst = (role, ms);
         }
     }
-    let cpu = m.scene_for_role(Role::Cpu, 1.0, &mut ScreenUi::new());
-    let mem = m.scene_for_role(Role::Mem, 1.0, &mut ScreenUi::new());
-    let (out_at, inc_at) = rackscreen_core::screens::slide(0.5);
-    let mut s = rackscreen_core::scene::Scene::new();
-    s.slide = Some(Box::new(rackscreen_core::scene::Slide {
-        out: cpu,
-        out_at,
-        inc: mem,
-        inc_at,
-    }));
+    let mut ui = ScreenUi::new();
+    let mut s = m.scene_for_role(Role::Cpu, 0.0, &mut ui);
+    s.fade = 0.5;
     r.render(&s, &mut px);
     let t0 = Instant::now();
     for _ in 0..ITERATIONS {
         r.render(&s, &mut px);
     }
     let ms = t0.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;
-    println!("{:<12} {ms:.3} ms", "slide");
-    assert!(ms < 2.0 * BUDGET_MS, "mid-slide frame {ms:.3} ms");
+    println!("{:<12} {ms:.3} ms", "fade");
+    assert!(ms < 2.0 * BUDGET_MS, "mid-fade frame {ms:.3} ms");
     assert!(worst.1 < BUDGET_MS, "{:?} takes {:.3} ms", worst.0, worst.1);
 }
 

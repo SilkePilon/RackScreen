@@ -16,7 +16,6 @@ use rackscreen_core::night::{bedtime_near, is_night};
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
 use rackscreen_render::frame::Orient;
-use tiny_skia::Pixmap;
 
 use crate::worker::{Job, ScreenWorker};
 
@@ -100,16 +99,6 @@ mod bedtime_tests {
     }
 }
 
-/// Multiply every channel by `k` (0 = black, 1 = unchanged).
-pub fn darken(px: &mut Pixmap, k: f32) {
-    let k = k.clamp(0.0, 1.0);
-    for p in px.data_mut().as_chunks_mut::<4>().0 {
-        p[0] = (p[0] as f32 * k) as u8;
-        p[1] = (p[1] as f32 * k) as u8;
-        p[2] = (p[2] as f32 * k) as u8;
-    }
-}
-
 /// Local wall clock as `(minutes since midnight, unix seconds, seconds east of UTC)`;
 /// one clock read per tick.
 fn clock() -> (u32, i64, i32) {
@@ -167,7 +156,7 @@ pub struct RenderLoop {
     pub arr_configured: bool,
     /// `jellyfin.url` is set; without it the role says "Check config".
     pub jellyfin_configured: bool,
-    /// Only one screen may iris at a time: four at once stall the SPI bus.
+    /// Only one screen may transition at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
 }
 
@@ -326,16 +315,6 @@ mod tests {
         // more than a tick behind the next deadline: start over from now
         let late = t0 + Duration::from_millis(50);
         assert_eq!(advance(t0, tick, late), late);
-    }
-
-    #[test]
-    fn darken_scales_channels() {
-        let mut p = Pixmap::new(2, 1).unwrap();
-        p.fill(tiny_skia::Color::WHITE);
-        darken(&mut p, 0.5);
-        assert_eq!(p.data()[0], 127);
-        darken(&mut p, 0.0);
-        assert_eq!(p.data()[0], 0);
     }
 
     #[test]

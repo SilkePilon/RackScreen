@@ -1,10 +1,9 @@
-//! Per-physical-screen role list, cycling and the slide transition.
+//! Per-physical-screen role list, cycling and the crossfade transition.
 
 use crate::anim::{Easing, Secs};
-use crate::scene::Placement;
 use crate::theme::Role;
 
-pub const TRANSITION_SECS: Secs = 0.75;
+pub const TRANSITION_SECS: Secs = 0.4;
 /// Quiet time between two serialised transitions, so the SPI bus is idle for a
 /// moment before the next screen starts pushing full frames again.
 pub const TRANSITION_GAP_SECS: Secs = 0.5;
@@ -33,7 +32,7 @@ impl ScreenState {
     }
 
     /// Like `new`, but the first dwell lasts `offset` seconds longer, so screens
-    /// with equal dwells do not iris on the same frame. The offset is clamped to
+    /// with equal dwells do not transition on the same frame. The offset is clamped to
     /// one dwell, so no screen waits more than two dwells for its first change.
     pub fn new_with_offset(roles: Vec<Role>, cycle_secs: Secs, offset: Secs) -> ScreenState {
         let roles = if roles.is_empty() {
@@ -93,18 +92,23 @@ impl ScreenState {
     }
 
     /// The dwell has elapsed and nothing is in the way, so this screen would
-    /// iris now if it were allowed to.
+    /// transition now if it were allowed to.
     pub fn ready_to_transition(&self, now: Secs) -> bool {
         self.roles.len() >= 2
             && self.transition_started.is_none()
             && now - self.since >= self.cycle_secs
     }
 
-    /// Begin the iris. Ignored for a static screen or one already transitioning.
+    /// Begin the transition. Ignored for a static screen or one already transitioning.
     pub fn start_transition(&mut self, now: Secs) {
         if self.roles.len() >= 2 && self.transition_started.is_none() {
             self.transition_started = Some(now);
         }
+    }
+
+    /// When the running transition began, if one is running.
+    pub fn transition_started(&self) -> Option<Secs> {
+        self.transition_started
     }
 
     pub fn transitioning(&self) -> bool {
@@ -127,25 +131,24 @@ impl ScreenState {
     }
 }
 
-/// Placement of the outgoing and incoming scene at `t ∈ 0..1`: the old one
-/// moves up and out, the new one comes in from below, both a touch smaller
-/// mid-move.
-pub fn slide(t: f32) -> (Placement, Placement) {
+/// Which role a transition frame shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Half {
+    Out,
+    In,
+}
+
+/// Crossfade via black at `t ∈ 0..1`: the outgoing role fades to black over
+/// the first half, the incoming one fades in over the second. Brightness is
+/// quantised to 1/64 so equal frames are skipped by the render workers.
+pub fn fade(t: f32) -> (Half, f32) {
     let t = t.clamp(0.0, 1.0);
-    let e = Easing::InOutCubic.apply(t);
-    let s = 1.0 - 0.08 * (std::f32::consts::PI * t).sin();
-    (
-        Placement {
-            dy: -240.0 * e,
-            scale: s,
-            alpha: 1.0 - 0.6 * e,
-        },
-        Placement {
-            dy: 240.0 * (1.0 - e),
-            scale: s,
-            alpha: 0.4 + 0.6 * e,
-        },
-    )
+    let q = |b: f32| (b * 64.0).round() / 64.0;
+    if t < 0.5 {
+        (Half::Out, q(1.0 - Easing::InOutCubic.apply(2.0 * t)))
+    } else {
+        (Half::In, q(Easing::InOutCubic.apply(2.0 * t - 1.0)))
+    }
 }
 
 #[cfg(test)]
@@ -231,16 +234,33 @@ mod tests {
         assert_eq!(s.cycle_secs, MIN_CYCLE_SECS);
     }
     #[test]
-    fn slide_moves_old_up_and_new_in_from_below() {
-        let (o, i) = slide(0.0);
-        assert_eq!((o.dy, o.scale, o.alpha), (0.0, 1.0, 1.0));
-        assert!((i.dy - 240.0).abs() < 1e-3 && (i.alpha - 0.4).abs() < 1e-6);
-        let (o, i) = slide(0.5);
-        assert!((o.dy + 120.0).abs() < 1e-3 && (i.dy - 120.0).abs() < 1e-3);
-        assert!((o.scale - 0.92).abs() < 1e-4 && (i.scale - 0.92).abs() < 1e-4);
-        assert!((o.alpha - 0.7).abs() < 1e-4 && (i.alpha - 0.7).abs() < 1e-4);
-        let (o, i) = slide(1.0);
-        assert!((o.dy + 240.0).abs() < 1e-3);
-        assert_eq!((i.dy, i.scale, i.alpha), (0.0, 1.0, 1.0));
+    fn fade_goes_out_to_black_then_in() {
+        assert_eq!(fade(0.0), (Half::Out, 1.0));
+        assert_eq!(fade(0.5), (Half::In, 0.0));
+        assert_eq!(fade(1.0), (Half::In, 1.0));
+        let (h, b) = fade(0.25);
+        assert_eq!(h, Half::Out);
+        assert!(b > 0.0 && b < 1.0);
+        // monotonic within each half, quantised to 1/64
+        let mut last = 2.0;
+        for i in 0..50 {
+            let (h, b) = fade(i as f32 / 100.0);
+            assert_eq!(h, Half::Out);
+            assert!(b <= last);
+            assert_eq!((b * 64.0).fract(), 0.0);
+            last = b;
+        }
+        let mut last = -1.0;
+        for i in 50..=100 {
+            let (h, b) = fade(i as f32 / 100.0);
+            assert_eq!(h, Half::In);
+            assert!(b >= last);
+            last = b;
+        }
+    }
+
+    #[test]
+    fn transition_lasts_four_tenths() {
+        assert_eq!(TRANSITION_SECS, 0.4);
     }
 }

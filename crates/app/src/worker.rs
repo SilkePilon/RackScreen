@@ -9,12 +9,10 @@ use anyhow::{anyhow, Result};
 use rackscreen_core::scene::Scene;
 use rackscreen_display::Mailbox;
 use rackscreen_render::frame::{
-    brightness_lut, dirty_rects, new_pixmap, pack_oriented, Orient, Rect,
+    brightness_lut, darken, dirty_rects, new_pixmap, pack_oriented, Orient, Rect,
 };
 use rackscreen_render::renderer::Renderer;
 use tiny_skia::Pixmap;
-
-use crate::runloop::darken;
 
 pub struct Job {
     pub scene: Scene,

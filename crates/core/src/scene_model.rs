@@ -4,7 +4,7 @@ use crate::anim::Secs;
 use crate::p2::screen::compose;
 use crate::p2::status::{connecting_scene, no_data_screen, NoData};
 use crate::p2::ui::ScreenUi;
-use crate::scene::{role_scene, Scene, Slide};
+use crate::scene::{role_scene, Scene};
 use crate::theme::Role;
 
 impl crate::model::Model {
@@ -59,19 +59,17 @@ impl crate::model::Model {
         };
         let role = state.current();
         if let Some(tr) = state.transition(now) {
-            let (out_at, inc_at) = crate::screens::slide(tr.t);
-            let out = self.scene_for_role(tr.from, now, ui.outgoing(tr.from));
-            let inc = self.scene_for_role(tr.to, now, ui);
-            let mut s = Scene::new();
-            s.slide = Some(Box::new(Slide {
-                out,
-                out_at,
-                inc,
-                inc_at,
-            }));
+            let (half, brightness) = crate::screens::fade(tr.t);
+            let mut s = match half {
+                crate::screens::Half::Out => {
+                    self.scene_for_role(tr.from, now, ui.outgoing(tr.from))
+                }
+                crate::screens::Half::In => self.scene_for_role(tr.to, now, ui),
+            };
+            s.fade = brightness;
             return s;
         }
-        ui.end_slide();
+        ui.end_transition();
         self.scene_for_role(role, now, ui)
     }
 
@@ -238,27 +236,33 @@ mod tests {
         assert_eq!(pill_of(&s).as_deref(), Some("Waiting for data"));
     }
 
+    /// Tick at 30 Hz until screen 0 starts a transition; returns its start time.
+    fn tick_until_transition(m: &mut Model) -> Secs {
+        for i in 0..=1000 {
+            m.tick(i as f64 / 30.0);
+            if let Some(t0) = m.screen(0).unwrap().transition_started() {
+                return t0;
+            }
+        }
+        panic!("no transition within 33 s");
+    }
+
     #[test]
-    fn cycling_screen_slides_between_roles() {
+    fn cycling_screen_fades_between_roles() {
         let mut m = ready_model();
         m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
-        for i in 0..=100 {
-            m.tick(i as f64 * 0.033);
-        }
+        let t0 = tick_until_transition(&mut m);
         let mut ui = ScreenUi::new();
-        let s = m.scene(0, 3.4, &mut ui);
-        let sl = s.slide.as_ref().expect("mid slide");
-        assert_eq!(title_of(&sl.out).as_deref(), Some("CPU"));
-        assert_eq!(title_of(&sl.inc).as_deref(), Some("MEMORY"));
-        assert!(
-            sl.out_at.dy < 0.0 && sl.inc_at.dy > 0.0,
-            "old goes up, new comes from below"
-        );
-        for i in 101..=200 {
-            m.tick(i as f64 * 0.033);
-        }
+        let out = m.scene(0, t0 + 0.05, &mut ui);
+        assert_eq!(title_of(&out).as_deref(), Some("CPU"));
+        assert!(out.fade > 0.0 && out.fade < 1.0, "outgoing half fading");
+        let inc = m.scene(0, t0 + 0.35, &mut ui);
+        assert_eq!(title_of(&inc).as_deref(), Some("MEMORY"));
+        assert!(inc.fade > 0.0 && inc.fade < 1.0, "incoming half fading in");
+        m.tick(t0 + 0.5);
         assert_eq!(m.current_role(0), Role::Mem);
-        assert!(m.scene(0, 6.6, &mut ui).slide.is_none(), "settled on mem");
+        let settled = m.scene(0, t0 + 0.6, &mut ui);
+        assert_eq!(settled.fade, 1.0, "settled on mem");
         assert_eq!(
             ui.outgoing(Role::Cpu).role(),
             None,
@@ -272,7 +276,7 @@ mod tests {
         m.set_screens(vec![vec![Role::Thermal]], vec![15.0]);
         let s = m.scene(0, 1.0, &mut ScreenUi::new());
         assert_eq!(pill_of(&s).as_deref(), Some("Waiting for data"));
-        assert!(s.slide.is_none());
+        assert_eq!(s.fade, 1.0);
         let s = m.scene(7, 1.0, &mut ScreenUi::new());
         assert!(connecting(&s));
     }
@@ -419,16 +423,13 @@ mod tests {
         m.set_screens(vec![vec![Role::PowerMix, Role::Cpu]], vec![3.0]);
         m.apply(electricity_event(), 0.0);
         m.apply(link(LinkTarget::Electricity, true), 0.0);
-        for i in 0..=100 {
-            m.tick(i as f64 * 0.033);
-        }
-        let s = m.scene(0, 3.4, &mut ScreenUi::new());
-        let sl = s.slide.as_ref().expect("mid transition");
+        let t0 = tick_until_transition(&mut m);
         assert!(
-            connecting(&sl.inc),
+            connecting(&m.scene(0, t0 + 0.3, &mut ScreenUi::new())),
             "incoming cpu half is the connecting scene"
         );
     }
+
     #[test]
     fn new_roles_wait_jellyfin_checks_config_and_exporters_can_be_missing() {
         let mut m = ready_model();
