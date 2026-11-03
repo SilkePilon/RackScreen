@@ -116,6 +116,10 @@ impl LoginFlow {
         }
     }
 
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
     pub fn url(&self) -> &str {
         &self.login.url
     }
@@ -207,6 +211,21 @@ impl LoginFlow {
             format!("> {}_", self.buf),
             th.title(),
         )));
+        if !self.buf.is_empty() {
+            let has_state = self.buf.contains("state=");
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "{} characters{}",
+                    self.buf.chars().count(),
+                    if has_state {
+                        ""
+                    } else {
+                        " (no state= part: fine, the code is enough)"
+                    }
+                ),
+                th.muted(),
+            )));
+        }
         if self.busy() {
             lines.push(Line::from(Span::styled("logging in...", th.warning())));
         } else if let Some(e) = &self.error {

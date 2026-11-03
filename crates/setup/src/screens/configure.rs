@@ -1007,6 +1007,8 @@ pub struct Configure {
     exchange: Exchange,
     /// "logged in as …", "not logged in", "token expired, log in again".
     login_status: String,
+    /// A login dialog closed with Esc, reopened as is.
+    parked_login: Option<LoginFlow>,
 }
 
 impl Configure {
@@ -1023,6 +1025,16 @@ impl Configure {
         if id.is_empty() {
             self.error = Some("set the client id first".into());
             return;
+        }
+        // Reopening the dialog keeps the same login attempt, so an address
+        // from a browser opened earlier still matches.
+        if let Some(mut flow) = self.parked_login.take() {
+            if flow.client_id() == id {
+                flow.error = None;
+                self.error = None;
+                self.mode = Mode::Login(flow);
+                return;
+            }
         }
         match LoginFlow::start(&id) {
             Ok(flow) => {
@@ -1061,6 +1073,7 @@ impl Configure {
             spotify_target: rackscreen_app::spotify::token_path_for_service_user().ok(),
             exchange: real_exchange(),
             login_status: String::new(),
+            parked_login: None,
         };
         c.refresh_login_status();
         c
@@ -1298,7 +1311,10 @@ impl Screen for Configure {
             }
             Mode::Login(mut flow) => {
                 match key.code {
-                    KeyCode::Esc if !flow.busy() => return Action::None,
+                    KeyCode::Esc if !flow.busy() => {
+                        self.parked_login = Some(flow);
+                        return Action::None;
+                    }
                     KeyCode::Enter if !flow.busy() => match &self.spotify_target {
                         Some(t) => flow.submit(self.exchange.clone(), t.clone()),
                         None => flow.error = Some("no home directory for the token file".into()),
@@ -2214,5 +2230,25 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0);
         assert!(matches!(screen.mode, Mode::Browse));
         assert!(!screen.dirty, "logging in does not touch the form");
+    }
+
+    #[test]
+    fn reopening_the_login_dialog_keeps_the_same_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = login_screen(dir.path());
+        screen.cfg.spotify.client_id = "cid".into();
+        screen.row = group_indices(Group::Spotify)[2];
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        let first = match &screen.mode {
+            Mode::Login(f) => f.url().to_string(),
+            _ => panic!("login dialog"),
+        };
+        screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        match &screen.mode {
+            Mode::Login(f) => assert_eq!(f.url(), first, "same state and verifier"),
+            _ => panic!("login dialog again"),
+        }
     }
 }

@@ -459,11 +459,26 @@ impl App {
             terminal.draw(|f| self.draw(f, now))?;
             // header glyph and pulse animate at 10 Hz; 60 Hz only while something moves
             let wait = if self.animating(now) { 16 } else { 100 };
-            if event::poll(Duration::from_millis(wait))? {
-                if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press && !self.handle(k, now) {
-                        return Ok(());
+            // Every queued event before the next frame: a pasted address
+            // arrives as hundreds of key events (or one Paste) and must not
+            // take a frame per character.
+            let mut timeout = Duration::from_millis(wait);
+            while event::poll(timeout)? {
+                timeout = Duration::ZERO;
+                match event::read()? {
+                    Event::Key(k) => {
+                        if k.kind == KeyEventKind::Press && !self.handle(k, now) {
+                            return Ok(());
+                        }
                     }
+                    Event::Paste(text) => {
+                        for ch in text.chars().filter(|c| !c.is_control()) {
+                            if !self.handle(KeyEvent::from(KeyCode::Char(ch)), now) {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -476,7 +491,16 @@ pub fn run(start: Start, ctx: Ctx) -> Result<()> {
     let sink = LogSink::new(500);
     rackscreen_app::logs::install_sink_subscriber(&sink);
     let mut terminal = ratatui::init();
+    // a paste arrives as one event instead of one key per character
+    let _ = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::EnableBracketedPaste
+    );
     let result = App::new(start, ctx, sink).run(&mut terminal);
+    let _ = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::DisableBracketedPaste
+    );
     ratatui::restore();
     result
 }

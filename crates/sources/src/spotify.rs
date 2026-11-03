@@ -111,11 +111,16 @@ pub fn parse_redirect(pasted: &str, state: &str) -> Result<String, AuthError> {
         url::form_urlencoded::parse(query.as_bytes())
             .into_owned()
             .collect();
-    if pairs.get("state").map(String::as_str) != Some(state) {
-        if pairs.is_empty() {
-            return Err(AuthError::BadUrl);
+    if pairs.is_empty() {
+        return Err(AuthError::BadUrl);
+    }
+    // A different state is another login attempt. A missing one is accepted:
+    // pastes (phone to terminal) sometimes lose the tail after `&`, and the
+    // PKCE verifier already ties the code to this login at the exchange.
+    if let Some(s) = pairs.get("state") {
+        if s != state {
+            return Err(AuthError::StateMismatch);
         }
-        return Err(AuthError::StateMismatch);
     }
     if let Some(e) = pairs.get("error") {
         return Err(AuthError::Denied(e.clone()));
@@ -717,6 +722,11 @@ mod tests {
             "a bare query"
         );
         assert_eq!(parse_redirect(ok, "other"), Err(AuthError::StateMismatch));
+        assert_eq!(
+            parse_redirect("http://127.0.0.1:8888/callback?code=AQ_cut", "st8"),
+            Ok("AQ_cut".to_string()),
+            "a paste that lost its state still works: PKCE ties the code to this login"
+        );
         assert_eq!(
             parse_redirect(
                 "http://127.0.0.1:8888/callback?error=access_denied&state=st8",
