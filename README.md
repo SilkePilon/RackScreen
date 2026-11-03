@@ -98,7 +98,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 - **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
 - **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels in a true-colour terminal, assumed unless `TERM` is a plain `xterm`/`screen`/`linux`; set `RACKSCREEN_TRUECOLOR=0` or `1` to force it; otherwise a drawn circle), the other panels are a strip in the info column to the right. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
-- **Configure** — every setting in seven groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds) listed in the sidebar: `Tab`/`←→` step through them, `1`–`7` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
+- **Configure** — every setting in eight groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds, GIFs) listed in the sidebar: `Tab`/`←→` step through them, `1`–`8` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
 - **Status** — the full service detail, links, boot files and the log tail; `l` for the log view, `r` to restart.
 - **Run here** — run the daemon in the foreground with its logs, without touching the service.
 - **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
@@ -142,6 +142,8 @@ Every screen shows one or more **roles** and cycles through them. Twenty-eight r
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill the screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), `m` mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
 Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
+
+Besides these, a screen can show a GIF: the role `gif:<name>` plays the GIF called `<name>` in the `gifs:` list; see [GIF role](#gif-role). GIFs appear in the role picker after the built-in roles.
 
 In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade to black and then show a dim moon until morning, when the moon fades out and the screens come back on their own. The panels stay on all night.
 
@@ -187,6 +189,22 @@ Create a fine-grained personal access token at github.com with read access to co
 ## Jellyfin role
 
 `jellyfin` shows what is playing on your Jellyfin server: the time left as the number, the position on the ring (amber for a movie, cyan for an episode, dimmed while paused), "Direct play", "Transcoding" or "Paused" in the pill, and the title, episode or year and the viewer in the card. With several sessions it picks the one that started most recently. Turn on `jellyfin enabled`, set `jellyfin url` to the server (`http://192.168.0.x:8096`; it lives outside the cluster, so the Pi must reach it directly) and paste a key from Dashboard → API Keys into `jellyfin api key`; `jellyfin poll` is 5 s by default. While the URL is empty the tile says "Check config"; an unreachable server says "Jellyfin offline" and a rejected key "Check API key". With nothing playing it shows the last thing watched this run.
+
+## GIF role
+
+`gif:<name>` shows a GIF over the whole panel, with no ring or icon, for the screen's `cycle_secs` like any role, and crossfades in and out like the rest. Add GIFs under **Configure › GIFs** in the setup TUI (`a` add, `⏎` edit, `d` remove; renaming updates the screens that use it, and removing one a screen shows asks to take it off those screens too), or in the config:
+
+```yaml
+gifs:
+  - { name: party, url: "https://giphy.com/gifs/some-slug-AbCdEf123" }
+  - { name: nod,   url: "https://tenor.com/view/some-slug-12345678" }
+screens:
+  - { roles: [cpu, "gif:party", mem], cycle_secs: 10, ... }
+```
+
+Paste the link from the browser; no API key is needed. A GIPHY page (`giphy.com/gifs/...`) or media link (`media*.giphy.com/media/<id>/...`) becomes `i.giphy.com/<id>.gif`; a Tenor page (`tenor.com/view/...`) is fetched once for its `.gif`; `media*.tenor.com` links and any other `https` link ending in `.gif` are used as is. Names are lowercase letters, digits and `-`.
+
+The Pi downloads each GIF a screen uses once (at most 20 MB) and keeps it in `~/.cache/rackscreen/gifs` of the service user (`$XDG_CACHE_HOME/rackscreen/gifs` when that is set), so a restart works offline. It is scaled to fill the round panel (centre crop) and plays at its own frame timing; frames of 0 or 10 ms play at 100 ms, as in browsers. GIFs longer than 150 frames keep every n-th frame, with the timing kept. **Memory:** a decoded GIF takes up to about 35 MB (150 frames × 230 KB), so mind the Pi 3B+'s 1 GB when adding many. Until a GIF is ready the screen says "Loading"; if it cannot be fetched or decoded it says "GIF failed" (the reason is in the log) and tries again every hour.
 
 ## Configuration
 
@@ -270,6 +288,13 @@ jellyfin:
   api_key: ""              # Jellyfin Dashboard → API Keys
   poll_secs: 5             # >= 2
 
+# GIFs a screen can show as the role gif:<name>: paste a GIPHY or Tenor link, or
+# any https link ending in .gif. Each GIF a screen uses takes up to ~35 MB of RAM;
+# downloads are cached in ~/.cache/rackscreen/gifs ($XDG_CACHE_HOME/rackscreen/gifs).
+# gifs:
+#   - { name: party, url: "https://giphy.com/gifs/some-slug-AbCdEf123" }
+#   - { name: nod,   url: "https://tenor.com/view/some-slug-12345678" }
+
 display:
   brightness: 1.0
   fps: 60
@@ -279,7 +304,8 @@ display:
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
-#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin
+#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin,
+#        gif:<name> (a GIF from the gifs: list)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:
@@ -302,6 +328,7 @@ screens:
 - **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
 - **`media`** — see [Media role](#media-role).
 - **`jellyfin`** — see [Jellyfin role](#jellyfin-role).
+- **`gifs`** — see [GIF role](#gif-role).
 - **`display`** — global brightness, frame rate, the SPI write chunk and whether screens change one at a time.
 - **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
 
