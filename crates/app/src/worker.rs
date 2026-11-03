@@ -62,7 +62,8 @@ impl ScreenFrames {
     /// Render and push one frame, or skip it when scene and fade match the
     /// last one (the panel already shows it).
     pub fn run(&mut self, r: &mut Renderer, job: Job) -> Done {
-        if job.force_full {
+        // `|` not `||`: the needs-full flag is taken every frame
+        if job.force_full | self.mailbox.take_needs_full() {
             self.first = true;
         }
         let unchanged =
@@ -249,6 +250,22 @@ mod tests {
             },
         );
         assert!(!d.skipped);
+    }
+
+    #[test]
+    fn failed_push_forces_the_next_frame_full() {
+        let mb = Mailbox::new();
+        let mut f = ScreenFrames::new(Orient::identity(), mb.clone(), 1.0);
+        let mut r = Renderer::new().unwrap();
+        f.run(&mut r, job(scene(50.0)));
+        let _ = mb.take();
+        // the display thread failed to push that frame
+        mb.set_needs_full();
+        let d = f.run(&mut r, job(scene(50.0)));
+        assert!(!d.skipped, "the panel may be stale: not skipped");
+        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == vec![Rect::full()]));
+        assert!(!mb.take_needs_full(), "taken once");
+        assert!(f.run(&mut r, job(scene(50.0))).skipped);
     }
 
     #[test]

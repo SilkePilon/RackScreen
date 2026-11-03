@@ -285,7 +285,10 @@ impl RenderLoop {
             }
             if stats.due(now) {
                 for (i, s) in self.screens.iter().enumerate() {
-                    tracing::info!("{}", stats.line(i, s.mailbox.take_push_stats(), stats.elapsed(now)));
+                    tracing::info!(
+                        "{}",
+                        stats.line(i, s.mailbox.take_push_stats(), stats.elapsed(now))
+                    );
                 }
                 stats.reset(now);
             }

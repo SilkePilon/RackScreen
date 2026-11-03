@@ -1,5 +1,6 @@
 //! Display backends and the per-screen mailbox between render loop and display threads.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
@@ -31,6 +32,11 @@ impl PackedFrame {
             (*r, s)
         })
     }
+}
+
+/// RGB565 byte count for `rects`.
+fn packed_len(rects: &[Rect]) -> usize {
+    rects.iter().map(|r| r.area() as usize * 2).sum()
 }
 
 pub trait Display: Send {
@@ -73,6 +79,9 @@ pub struct PushStats {
 pub struct Mailbox {
     inner: Arc<(Mutex<Slot>, Condvar)>,
     stats: Arc<Mutex<PushStats>>,
+    /// Set by the display thread when a push failed: the panel may not show
+    /// the frame the render side diffs against, so the next one goes out whole.
+    needs_full: Arc<AtomicBool>,
 }
 
 impl Default for Mailbox {
@@ -86,7 +95,18 @@ impl Mailbox {
         Self {
             inner: Arc::new((Mutex::new(Slot::default()), Condvar::new())),
             stats: Arc::new(Mutex::new(PushStats::default())),
+            needs_full: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Ask the render side to push its next frame whole.
+    pub fn set_needs_full(&self) {
+        self.needs_full.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether a full frame was asked for since the last call; clears it.
+    pub fn take_needs_full(&self) -> bool {
+        self.needs_full.swap(false, Ordering::Relaxed)
     }
 
     pub fn record_push(&self, ms: f64, bytes: u64) {
@@ -107,7 +127,10 @@ impl Mailbox {
         let (lock, cv) = &*self.inner;
         let mut slot = lock.lock().unwrap();
         match cmd {
-            DisplayCmd::Frame(f) => slot.frame = Some(f),
+            DisplayCmd::Frame(f) => {
+                debug_assert_eq!(f.bytes.len(), packed_len(&f.rects), "frame bytes vs rects");
+                slot.frame = Some(f)
+            }
             control => slot.control = Some(control),
         }
         cv.notify_one();
@@ -127,6 +150,7 @@ impl Mailbox {
         let full = Rect::full();
         let rects = merge_rects(all, full.w, full.h);
         let bytes = pack(&rects);
+        debug_assert_eq!(bytes.len(), packed_len(&rects), "packed bytes vs rects");
         slot.frame = Some(PackedFrame { rects, bytes });
         cv.notify_one();
     }
@@ -169,6 +193,9 @@ pub fn spawn_display_thread(
                     if r.is_ok() {
                         mailbox
                             .record_push(t0.elapsed().as_secs_f64() * 1000.0, f.bytes.len() as u64);
+                    } else {
+                        // these rects never reached the panel
+                        mailbox.set_needs_full();
                     }
                     r
                 }
@@ -248,6 +275,32 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "packed bytes vs rects")]
+    fn put_frame_rejects_a_short_pack() {
+        Mailbox::new().put_frame(&[Rect::full()], |_| vec![0; 10]);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "frame bytes vs rects")]
+    fn put_rejects_a_short_frame() {
+        Mailbox::new().put(DisplayCmd::Frame(PackedFrame {
+            rects: vec![Rect::full()],
+            bytes: vec![0; 10],
+        }));
+    }
+
+    #[test]
+    fn needs_full_is_taken_once() {
+        let mb = Mailbox::new();
+        assert!(!mb.take_needs_full());
+        mb.clone().set_needs_full();
+        assert!(mb.take_needs_full());
+        assert!(!mb.take_needs_full());
     }
 
     #[test]
