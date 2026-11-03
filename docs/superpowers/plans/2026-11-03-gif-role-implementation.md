@@ -84,9 +84,8 @@ cluster/sky, `ALL` unchanged (existing tests).
 - `Model::scene_for_role(Gif(i))`: `Ready` -> `Scene { Clear, Image }` with the
   frame from `ui.since`; else the status screen.
 - Tests: loading/failed pills and icon, playing scene has only Clear + Image,
-  frame advances with time and loops, equal instants give equal scenes,
-  a failure after ready keeps playing? (no: `GifFailed` only arrives before a
-  successful decode).
+  frame advances with time and loops, equal instants give equal scenes. A
+  `GifFailed` after a successful decode (not sent today) leaves it playing.
 
 ## Task 5: renderer
 
