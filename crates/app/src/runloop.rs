@@ -2,6 +2,7 @@
 //! orient, diff, hand frames to display threads. Also night mode.
 
 use rackscreen_core::p2::ui::ScreenUi;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ use rackscreen_core::event::Event;
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::is_night;
 use rackscreen_core::p2::status::night_scene;
+use rackscreen_core::shows::schedule::{Request, ShowScheduler};
+use rackscreen_core::shows::world::Layout;
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
 use rackscreen_render::frame::Orient;
@@ -131,6 +134,39 @@ pub struct RenderLoop {
     pub jellyfin_configured: bool,
     /// Only one screen may transition at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
+    /// The four-screen show schedule, the world layout and the screen order.
+    pub shows: ShowScheduler,
+    pub show_layout: Layout,
+    pub show_order: Vec<usize>,
+    /// The play-now request file; `None` when there is no home directory.
+    pub play_path: Option<PathBuf>,
+}
+
+/// How often the play-now request file is checked.
+const PLAY_POLL: Duration = Duration::from_secs(1);
+
+/// Consume a play-now request, if one is waiting: refused at night (it is
+/// dropped, not kept for the morning) and with fewer than two screens.
+fn poll_play(path: &Path, model: &mut Model, phase: NightPhase) {
+    let req = match crate::play::take(path) {
+        None => return,
+        Some(Err(e)) => {
+            tracing::warn!("play request ignored: {e:#}");
+            return;
+        }
+        Some(Ok(r)) => r,
+    };
+    let name = match req {
+        Request::Id(d) => d.id,
+        Request::Random => "random",
+    };
+    if phase != NightPhase::Day {
+        tracing::info!("play request {name} dropped: night mode");
+    } else if model.request_show(req) {
+        tracing::info!("play request: {name}");
+    } else {
+        tracing::info!("play request {name} dropped: shows need at least two screens");
+    }
 }
 
 impl RenderLoop {
@@ -167,6 +203,14 @@ impl RenderLoop {
         model.set_github_token_present(self.github_token_present);
         model.set_arr_configured(self.arr_configured);
         model.set_jellyfin_configured(self.jellyfin_configured);
+        let shows = std::mem::replace(&mut self.shows, ShowScheduler::new(false, 15, Vec::new()));
+        model.set_shows(
+            shows,
+            self.show_layout,
+            std::mem::take(&mut self.show_order),
+        );
+        let mut next_play_poll = Instant::now();
+        let mut show_started: Option<Secs> = None;
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut phase = NightPhase::Day;
         let mut stats = crate::stats::FrameStats::new(self.screens.len(), 60.0, 0.0);
@@ -181,7 +225,6 @@ impl RenderLoop {
             while let Ok(ev) = self.rx.try_recv() {
                 model.apply(ev, now);
             }
-            model.tick(now);
 
             let night = match model.night_override() {
                 Some(v) => v,
@@ -195,6 +238,23 @@ impl RenderLoop {
             phase = phase.step(night, now);
             if phase != prev {
                 tracing::info!("night mode: {prev:?} -> {phase:?}");
+            }
+            if let Some(path) = &self.play_path {
+                if Instant::now() >= next_play_poll {
+                    next_play_poll = Instant::now() + PLAY_POLL;
+                    poll_play(path, &mut model, phase);
+                }
+            }
+            // Shows start only in `Day`; the phase is known before the tick,
+            // so none starts on the tick the night fade begins.
+            model.set_night_day(phase == NightPhase::Day);
+            model.tick(now);
+            let run = model.show_run().copied();
+            if run.map(|r| r.started) != show_started {
+                if let Some(r) = run {
+                    tracing::info!("show: {} ({:.1} s)", r.def.id, r.total());
+                }
+                show_started = run.map(|r| r.started);
             }
             // The moon is up and still. The same scene goes to every worker each
             // idle tick: it is skipped for free, but a panel whose last push

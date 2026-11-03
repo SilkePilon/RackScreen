@@ -3,6 +3,7 @@
 //! frame index `f` and the quantised local time `t`.
 
 mod freight;
+pub mod schedule;
 pub mod world;
 
 use world::{Layout, World, WorldFrame};
@@ -10,6 +11,7 @@ use world::{Layout, World, WorldFrame};
 /// Frames per second every show is drawn at ("on twos").
 pub const FPS: f64 = 12.0;
 
+#[derive(Debug)]
 pub struct ShowDef {
     pub id: &'static str,
     pub name: &'static str,

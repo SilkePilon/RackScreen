@@ -8,7 +8,10 @@ use crate::event::{
 };
 use crate::history::{History, Hourly};
 use crate::screens::ScreenState;
+use crate::shows::schedule::{Request, ShowPhase, ShowRun, ShowScheduler};
+use crate::shows::world::{Layout, WorldFrame};
 use crate::theme::Role;
+use std::sync::Arc;
 
 /// Dwell per role on a cycling screen when the caller gives none.
 pub const DEFAULT_CYCLE_SECS: Secs = 15.0;
@@ -362,6 +365,28 @@ pub struct Model {
     arr_configured: bool,
     /// `jellyfin.url` is set; without it the role says "Check config".
     jellyfin_configured: bool,
+    /// When the four-screen shows play; off until `set_shows`.
+    shows: ShowScheduler,
+    show_layout: Layout,
+    /// Config index of each screen from the left; empty is config order.
+    show_order: Vec<usize>,
+    /// A play-now request waiting for the screens to be free.
+    show_request: Option<Request>,
+    /// The night machine is in `Day`: shows may start.
+    night_day: bool,
+    /// The current world frame, keyed by (show id, 12 fps frame index): one
+    /// `Arc` per frame for every screen and tick, so equal scenes stay equal.
+    show_frame: Option<(&'static str, u32, Arc<WorldFrame>)>,
+}
+
+/// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
+fn xorshift(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
 }
 
 impl Model {
@@ -422,6 +447,12 @@ impl Model {
             exporter_missing: Vec::new(),
             arr_configured: false,
             jellyfin_configured: false,
+            shows: ShowScheduler::new(false, 15, Vec::new()),
+            show_layout: Layout { panels: 4, gap: 46 },
+            show_order: Vec::new(),
+            show_request: None,
+            night_day: true,
+            show_frame: None,
         }
     }
 
@@ -641,22 +672,118 @@ impl Model {
         self.rng = if seed == 0 { RNG_SEED } else { seed };
     }
 
-    /// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
     fn next_rand(&mut self) -> u64 {
-        let mut x = self.rng;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.rng = x;
-        x
+        xorshift(&mut self.rng)
     }
 
-    /// Advance the deploy day and each screen's cycle. Call once per frame.
+    /// Install the show schedule, the world layout and the left-to-right
+    /// order (`order[pos]` is the config index of the screen at `pos`; empty
+    /// means config order).
+    pub fn set_shows(&mut self, scheduler: ShowScheduler, layout: Layout, order: Vec<usize>) {
+        self.shows = scheduler;
+        self.show_layout = layout;
+        self.show_order = order;
+        self.show_frame = None;
+    }
+
+    /// Fed by the run loop: true only while the night machine is in `Day`.
+    pub fn set_night_day(&mut self, day: bool) {
+        self.night_day = day;
+        if !day {
+            self.show_request = None;
+        }
+    }
+
+    /// Ask for a show now. Refused (false) at night or with fewer than two
+    /// screens; otherwise it starts on the first tick no screen is mid-crossfade.
+    pub fn request_show(&mut self, request: Request) -> bool {
+        if !self.night_day || self.screens.len() < 2 {
+            return false;
+        }
+        self.show_request = Some(request);
+        true
+    }
+
+    /// The running show sequence, if any.
+    pub fn show_run(&self) -> Option<&ShowRun> {
+        self.shows.current()
+    }
+
+    /// Left-to-right position of `screen` in the show world.
+    fn show_position(&self, screen: usize) -> u32 {
+        self.show_order
+            .iter()
+            .position(|&c| c == screen)
+            .unwrap_or(screen) as u32
+    }
+
+    /// The world frame of `run` at `now`: the cached `Arc` when `tick` built
+    /// this frame, else a fresh one.
+    pub(crate) fn show_world(&self, run: &ShowRun, now: Secs) -> Arc<WorldFrame> {
+        let t = run.local_t(now);
+        let f = (t * crate::shows::FPS).floor() as u32;
+        match &self.show_frame {
+            Some((id, ff, a)) if *id == run.def.id && *ff == f => a.clone(),
+            _ => Arc::new(crate::shows::render(run.def, self.show_layout, t)),
+        }
+    }
+
+    /// The world slice's left edge for `screen`.
+    pub(crate) fn show_x0(&self, screen: usize) -> u32 {
+        self.show_layout.x0(self.show_position(screen))
+    }
+
+    /// Start a show when due or requested and the screens are free; on start,
+    /// push every dwell back by the whole sequence. Keep the frame cache.
+    fn tick_shows(&mut self, now: Secs) {
+        if self.screens.len() < 2 {
+            self.show_request = None;
+        }
+        let allowed = self.night_day
+            && self.screens.len() >= 2
+            && !self.screens.iter().any(|s| s.transitioning());
+        let request = if allowed {
+            self.show_request.take()
+        } else {
+            None
+        };
+        let mut rng = self.rng;
+        let started = self
+            .shows
+            .tick(now, allowed, request, &mut || xorshift(&mut rng));
+        self.rng = rng;
+        if started {
+            let total = self.shows.current().map_or(0.0, |r| r.total());
+            for s in &mut self.screens {
+                s.extend_dwell(now, total);
+            }
+        }
+        self.show_frame = match self.shows.current().copied() {
+            Some(run)
+                if matches!(
+                    run.phase(now),
+                    Some((ShowPhase::Playing | ShowPhase::ShowOut, _))
+                ) =>
+            {
+                let frame = self.show_world(&run, now);
+                let f = (run.local_t(now) * crate::shows::FPS).floor() as u32;
+                Some((run.def.id, f, frame))
+            }
+            _ => None,
+        };
+    }
+
+    /// Advance the deploy day, each screen's cycle and the show schedule.
+    /// Call once per frame, before `scene`.
     pub fn tick(&mut self, now: Secs) {
         self.roll_deploy_day();
+        // Role cycling pauses while a show runs (the dwells cover it anyway).
+        let show_on = self.shows.current().is_some_and(|r| r.phase(now).is_some());
         let mut waiting: Vec<usize> = Vec::new();
         for (i, s) in self.screens.iter_mut().enumerate() {
-            if self.one_at_a_time {
+            if show_on {
+                s.advance(now);
+            } else if self.one_at_a_time {
                 // Finish a running transition; starting one is the slot holder's call.
                 s.advance(now);
                 if s.ready_to_transition(now) {
@@ -667,6 +794,7 @@ impl Model {
             }
         }
         self.start_one_transition(now, &waiting);
+        self.tick_shows(now);
     }
 
     /// Hand the free transition slot to a random waiting screen. The others keep
@@ -1659,5 +1787,100 @@ mod tests {
             11.0,
         );
         assert_eq!(m.jellyfin().status, JfStatus::Offline);
+    }
+
+    fn cycling_show_model() -> Model {
+        use crate::shows::{schedule::ShowScheduler, world::Layout, SHOWS};
+        let mut m = Model::new(Thresholds::default());
+        let roles = vec![Role::Cpu, Role::Mem];
+        m.set_screens(vec![roles.clone(), roles.clone(), roles], vec![15.0; 3]);
+        m.set_one_at_a_time(true);
+        m.set_shows(
+            ShowScheduler::new(true, 2, SHOWS.iter().collect()),
+            Layout { panels: 3, gap: 46 },
+            vec![],
+        );
+        m
+    }
+
+    #[test]
+    fn a_scheduled_show_pauses_role_cycling_and_extends_every_dwell() {
+        let mut m = cycling_show_model();
+        let mut run = None;
+        let mut last_role_change = 0.0;
+        let mut changes_after = Vec::new();
+        for i in 0..(200 * 30) {
+            let now = i as Secs / 30.0;
+            m.tick(now);
+            let transitioning = (0..3).any(|k| m.screen(k).unwrap().transitioning());
+            if transitioning {
+                last_role_change = now;
+            }
+            if let Some(r) = m.show_run() {
+                assert!(run.is_none() || run == Some(r.started), "one run");
+                if run.is_none() {
+                    assert!(now >= 120.0, "due after every_mins, got {now}");
+                    assert!(now - last_role_change > 0.0, "not mid-transition");
+                }
+                run = Some(r.started);
+                assert!(!transitioning, "no role change during a show at {now}");
+            } else if let Some(start) = run {
+                let total = crate::shows::by_id("freight").unwrap().secs + 0.6;
+                if transitioning && changes_after.is_empty() {
+                    changes_after.push(now - (start + total));
+                }
+            }
+        }
+        assert!(run.is_some(), "a show ran");
+        let gap = changes_after
+            .first()
+            .copied()
+            .expect("roles cycle again afterwards");
+        assert!(
+            gap >= crate::screens::MIN_CYCLE_SECS - 1e-6,
+            "no role change right after the show ({gap} s)"
+        );
+    }
+
+    #[test]
+    fn no_show_at_night_with_one_screen_or_mid_transition() {
+        use crate::shows::schedule::Request;
+        let freight = || Request::Id(crate::shows::by_id("freight").unwrap());
+        // night: the request is refused and nothing is scheduled
+        let mut m = cycling_show_model();
+        m.set_night_day(false);
+        assert!(!m.request_show(freight()));
+        for i in 0..(300 * 10) {
+            m.tick(i as Secs / 10.0);
+            assert!(m.show_run().is_none());
+        }
+        m.set_night_day(true);
+        m.tick(300.1);
+        assert!(
+            m.show_run().is_some(),
+            "due, so it starts once it is day again"
+        );
+        // one screen: never
+        let mut one = cycling_show_model();
+        one.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![15.0]);
+        assert!(!one.request_show(freight()));
+        one.tick(500.0);
+        assert!(one.show_run().is_none());
+        // mid-transition: the request waits for the crossfade to end
+        let mut m = cycling_show_model();
+        for s in &mut m.screens {
+            s.set_since(-100.0);
+        }
+        m.tick(0.0);
+        assert!(
+            m.screen(0).unwrap().transitioning()
+                || m.screen(1).unwrap().transitioning()
+                || m.screen(2).unwrap().transitioning()
+        );
+        assert!(m.request_show(freight()));
+        m.tick(0.1);
+        assert!(m.show_run().is_none(), "waits for the crossfade");
+        m.tick(0.5);
+        assert_eq!(m.show_run().map(|r| r.started), Some(0.5));
     }
 }

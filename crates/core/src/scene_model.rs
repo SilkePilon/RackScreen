@@ -4,7 +4,8 @@ use crate::anim::Secs;
 use crate::p2::screen::compose;
 use crate::p2::status::{connecting_scene, no_data_screen, NoData};
 use crate::p2::ui::ScreenUi;
-use crate::scene::{role_scene, Scene};
+use crate::scene::{role_scene, Drawable, Scene, WorldRef};
+use crate::shows::schedule::ShowPhase;
 use crate::theme::Role;
 
 impl crate::model::Model {
@@ -54,6 +55,23 @@ impl crate::model::Model {
             None => return connecting_scene("ms-sync", ui, now),
         };
         let role = state.current();
+        if let Some(run) = self.show_run() {
+            if let Some((phase, brightness)) = run.phase(now) {
+                let mut s = match phase {
+                    ShowPhase::RolesOut | ShowPhase::RolesIn => self.scene_for_role(role, now, ui),
+                    ShowPhase::Playing | ShowPhase::ShowOut => {
+                        let mut s = Scene::new();
+                        s.push(Drawable::World {
+                            frame: WorldRef(self.show_world(run, now)),
+                            x0: self.show_x0(screen),
+                        });
+                        s
+                    }
+                };
+                s.fade = brightness;
+                return s;
+            }
+        }
         if let Some(tr) = state.transition(now) {
             let (half, brightness) = crate::screens::fade(tr.t);
             let mut s = match half {
@@ -105,7 +123,6 @@ mod tests {
     use super::*;
     use crate::event::{Event, LinkTarget};
     use crate::model::{Model, Thresholds};
-    use crate::scene::Drawable;
 
     fn ready_model() -> Model {
         let mut m = Model::new(Thresholds::default());
@@ -442,5 +459,107 @@ mod tests {
             !connecting(&for_role(&m, Role::Ci, 3.0)),
             "ci is not a cluster role"
         );
+    }
+
+    fn show_model(order: Vec<usize>) -> Model {
+        use crate::shows::{schedule::ShowScheduler, world::Layout, SHOWS};
+        let mut m = ready_model();
+        m.set_shows(
+            ShowScheduler::new(true, 15, SHOWS.iter().collect()),
+            Layout { panels: 4, gap: 46 },
+            order,
+        );
+        m
+    }
+
+    fn world_of(s: &Scene) -> Option<(std::sync::Arc<crate::shows::world::WorldFrame>, u32)> {
+        match s.items.as_slice() {
+            [Drawable::Clear(c), Drawable::World { frame, x0 }] if *c == crate::theme::BLACK => {
+                Some((frame.0.clone(), *x0))
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_show_fades_roles_out_plays_the_world_and_fades_roles_back() {
+        use crate::shows::schedule::{Request, SHOW_FADE_SECS};
+        let order = vec![2, 0, 1, 3];
+        let mut m = show_model(order.clone());
+        let mut ui: Vec<ScreenUi> = (0..4).map(|_| ScreenUi::new()).collect();
+        assert!(m.request_show(Request::Id(crate::shows::by_id("freight").unwrap())));
+        m.tick(10.0);
+        let secs = crate::shows::by_id("freight").unwrap().secs;
+        // roles out: the role scene, dimmed like the crossfade's out half
+        m.tick(10.1);
+        let s = m.scene(0, 10.1, &mut ui[0]);
+        assert!(world_of(&s).is_none());
+        assert_eq!(s.fade, crate::screens::fade(0.25).1);
+        assert_eq!(
+            icon_of(&s),
+            icon_of(&m.scene_for_role(Role::Cpu, 10.1, &mut ScreenUi::new()))
+        );
+        // playing: one world, each screen at its position's slice
+        let t = 10.0 + SHOW_FADE_SECS + 1.04; // mid-frame
+        m.tick(t);
+        let layout = crate::shows::world::Layout { panels: 4, gap: 46 };
+        let mut frames = Vec::new();
+        for (screen, u) in ui.iter_mut().enumerate() {
+            let s = m.scene(screen, t, u);
+            assert_eq!(s.fade, 1.0);
+            let (frame, x0) = world_of(&s).expect("world scene");
+            let pos = order.iter().position(|&c| c == screen).unwrap() as u32;
+            assert_eq!(x0, layout.x0(pos), "screen {screen}");
+            assert_eq!(frame.width, layout.width());
+            frames.push(frame);
+        }
+        assert!(
+            frames
+                .windows(2)
+                .all(|w| std::sync::Arc::ptr_eq(&w[0], &w[1])),
+            "one Arc for all"
+        );
+        // same 12 fps frame on the next tick: the same Arc, so workers skip it
+        m.tick(t + 0.01);
+        let again = world_of(&m.scene(1, t + 0.01, &mut ui[1])).unwrap().0;
+        assert!(std::sync::Arc::ptr_eq(&again, &frames[0]));
+        m.tick(t + 0.1);
+        let next = world_of(&m.scene(1, t + 0.1, &mut ui[1])).unwrap().0;
+        assert!(
+            !std::sync::Arc::ptr_eq(&next, &frames[0]),
+            "a new frame, a new Arc"
+        );
+        // show out: the world fades
+        let t = 10.0 + SHOW_FADE_SECS + secs + 0.1;
+        m.tick(t);
+        let s = m.scene(3, t, &mut ui[3]);
+        assert!(world_of(&s).is_some());
+        assert_eq!(s.fade, crate::screens::fade(0.25).1);
+        // roles in
+        let t = 10.0 + 2.0 * SHOW_FADE_SECS + secs + 0.1;
+        m.tick(t);
+        let s = m.scene(3, t, &mut ui[3]);
+        assert!(world_of(&s).is_none());
+        assert_eq!(s.fade, crate::screens::fade(0.75).1);
+        // over: plain roles again
+        let t = 10.0 + 3.0 * SHOW_FADE_SECS + secs + 0.1;
+        m.tick(t);
+        let s = m.scene(3, t, &mut ui[3]);
+        assert!(world_of(&s).is_none());
+        assert_eq!(s.fade, 1.0);
+    }
+
+    #[test]
+    fn default_order_is_config_order() {
+        use crate::shows::schedule::Request;
+        let mut m = show_model(vec![]);
+        assert!(m.request_show(Request::Random));
+        m.tick(0.0);
+        m.tick(1.0);
+        let layout = crate::shows::world::Layout { panels: 4, gap: 46 };
+        for screen in 0..4 {
+            let (_, x0) = world_of(&m.scene(screen, 1.0, &mut ScreenUi::new())).unwrap();
+            assert_eq!(x0, layout.x0(screen as u32));
+        }
     }
 }

@@ -4,6 +4,7 @@ pub mod config;
 pub mod logs;
 pub mod night;
 pub mod panels;
+pub mod play;
 pub mod run;
 pub mod runloop;
 pub mod stats;

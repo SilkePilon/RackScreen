@@ -8,6 +8,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rackscreen_core::model::Thresholds;
 use rackscreen_core::night::parse_hhmm;
+use rackscreen_core::shows::schedule::ShowScheduler;
+use rackscreen_core::shows::world::{gap_px, Layout};
 use rackscreen_core::theme::Role;
 use rackscreen_sources::SourceCtx;
 use tokio_util::sync::CancellationToken;
@@ -154,6 +156,13 @@ impl Monitor {
             jellyfin_configured: matches!(source, SourceKind::Fake)
                 || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
             one_at_a_time: cfg.display.one_at_a_time,
+            shows: ShowScheduler::new(cfg.shows.enabled, cfg.shows.every_mins, cfg.shows.defs()),
+            show_layout: Layout {
+                panels: panels.handles.len() as u32,
+                gap: gap_px(cfg.shows.gap_mm),
+            },
+            show_order: cfg.shows.screen_order(panels.handles.len()),
+            play_path: crate::play::state_dir().map(|d| crate::play::request_path(&d)),
         };
         let render_thread = std::thread::Builder::new()
             .name("render".into())

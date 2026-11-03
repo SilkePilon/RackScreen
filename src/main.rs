@@ -40,6 +40,11 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Play a show now on every screen (not at night)
+    Play {
+        /// Show id (freight, ...) or `random`
+        show: String,
+    },
     /// Interactive setup (default when run in a terminal)
     Setup {
         /// Desktop simulator window instead of SPI displays
@@ -135,6 +140,11 @@ fn main() -> Result<()> {
                 rackscreen_setup::ops::update::run_cli(version)
             };
             std::process::exit(code);
+        }
+        Some(Cmd::Play { show }) => {
+            rackscreen_app::play::write_for_service_user(&show)?;
+            println!("requested {}", show.trim());
+            Ok(())
         }
         Some(Cmd::Setup { sim, config }) => setup(rackscreen_setup::Start::Menu, sim, config),
         Some(Cmd::Calibrate { sim, config }) => {

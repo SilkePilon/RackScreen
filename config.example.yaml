@@ -74,6 +74,13 @@ jellyfin:
   api_key: ""              # Jellyfin Dashboard → API Keys
   poll_secs: 5             # >= 2
 
+shows:
+  enabled: true            # pixel-art shows across all screens as one wide scene
+  every_mins: 15           # minutes between shows, >= 2; never at night
+  gap_mm: 25               # bezel gap between two panels
+  # list: [freight]        # show ids to pick from (default: every show)
+  # order: [0, 1, 2, 3]    # config index of each screen from the left (default: config order)
+
 display:
   brightness: 1.0
   fps: 60

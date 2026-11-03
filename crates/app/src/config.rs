@@ -39,7 +39,68 @@ pub struct Config {
     #[serde(default)]
     pub jellyfin: JellyfinCfg,
     #[serde(default)]
+    pub shows: ShowsCfg,
+    #[serde(default)]
     pub screens: Vec<ScreenCfg>,
+}
+
+/// Four-screen pixel shows.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct ShowsCfg {
+    pub enabled: bool,
+    /// Minutes between the end of one show and the start of the next; >= 2.
+    pub every_mins: u32,
+    /// Bezel gap between two panels, in mm.
+    pub gap_mm: f32,
+    /// Show ids to pick from. Left out of the file while it is every show, so
+    /// shows added in a later release join an existing config.
+    #[serde(skip_serializing_if = "is_every_show")]
+    pub list: Vec<String>,
+    /// Config index of each screen from the left; default config order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<Vec<usize>>,
+}
+
+fn every_show() -> Vec<String> {
+    rackscreen_core::shows::SHOWS
+        .iter()
+        .map(|s| s.id.to_string())
+        .collect()
+}
+
+fn is_every_show(list: &[String]) -> bool {
+    list == every_show().as_slice()
+}
+
+impl Default for ShowsCfg {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            every_mins: 15,
+            gap_mm: 25.0,
+            list: every_show(),
+            order: None,
+        }
+    }
+}
+
+impl ShowsCfg {
+    /// The listed shows; unknown ids (rejected by `validate`) are skipped.
+    pub fn defs(&self) -> Vec<&'static rackscreen_core::shows::ShowDef> {
+        self.list
+            .iter()
+            .filter_map(|id| rackscreen_core::shows::by_id(id))
+            .collect()
+    }
+
+    /// Left-to-right config indices for `screens` screens.
+    pub fn screen_order(&self, screens: usize) -> Vec<usize> {
+        match &self.order {
+            Some(o) if o.len() == screens => o.clone(),
+            _ => (0..screens).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -412,7 +473,7 @@ pub fn expand_home_with(p: &str, home: &Path) -> PathBuf {
 }
 
 /// The user who ran `sudo`, when we are root because of it.
-fn sudo_user() -> Option<nix::unistd::User> {
+pub(crate) fn sudo_user() -> Option<nix::unistd::User> {
     if !nix::unistd::geteuid().is_root() {
         return None;
     }
@@ -626,6 +687,32 @@ impl Config {
             "jellyfin.poll_secs must be at least 2 (got {})",
             self.jellyfin.poll_secs
         );
+        anyhow::ensure!(
+            self.shows.every_mins >= 2,
+            "shows.every_mins must be at least 2 (got {})",
+            self.shows.every_mins
+        );
+        if let Some(id) = self
+            .shows
+            .list
+            .iter()
+            .find(|id| rackscreen_core::shows::by_id(id).is_none())
+        {
+            let known: Vec<&str> = rackscreen_core::shows::SHOWS.iter().map(|s| s.id).collect();
+            anyhow::bail!(
+                "shows.list: unknown show '{id}' (known: {})",
+                known.join(", ")
+            );
+        }
+        if let Some(order) = &self.shows.order {
+            let mut sorted = order.clone();
+            sorted.sort_unstable();
+            anyhow::ensure!(
+                sorted == (0..self.screens.len()).collect::<Vec<_>>(),
+                "shows.order must list each screen index 0..{} once (got {order:?})",
+                self.screens.len()
+            );
+        }
         let url = self.jellyfin.url.trim();
         anyhow::ensure!(
             url.is_empty() || url.starts_with("http://") || url.starts_with("https://"),
@@ -1059,5 +1146,53 @@ mod tests {
         );
         assert_eq!(c.media.radarr.api_key, "r");
         assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+    }
+
+    #[test]
+    fn shows_defaults_and_validation() {
+        let c = Config::default();
+        assert!(c.shows.enabled);
+        assert_eq!((c.shows.every_mins, c.shows.gap_mm), (15, 25.0));
+        let all: Vec<String> = rackscreen_core::shows::SHOWS
+            .iter()
+            .map(|s| s.id.to_string())
+            .collect();
+        assert_eq!(c.shows.list, all, "every show by default");
+        assert_eq!(c.shows.order, None);
+        c.validate().unwrap();
+        assert_eq!(c.shows.defs().len(), all.len());
+        assert_eq!(c.shows.screen_order(4), vec![0, 1, 2, 3]);
+
+        let err = |c: &Config| c.validate().unwrap_err().to_string();
+        let mut bad = c.clone();
+        bad.shows.every_mins = 1;
+        assert!(err(&bad).contains("shows.every_mins"), "{}", err(&bad));
+        bad.shows.every_mins = 2;
+        bad.validate().unwrap();
+        bad.shows.list = vec!["freight".into(), "nope".into()];
+        assert!(
+            err(&bad).contains("nope"),
+            "names the unknown id: {}",
+            err(&bad)
+        );
+        bad.shows.list = vec!["freight".into()];
+        for order in [vec![0, 1, 2], vec![0, 1, 2, 2], vec![0, 1, 2, 4]] {
+            bad.shows.order = Some(order.clone());
+            assert!(
+                err(&bad).contains("shows.order"),
+                "{order:?}: {}",
+                err(&bad)
+            );
+        }
+        bad.shows.order = Some(vec![2, 0, 1, 3]);
+        bad.validate().unwrap();
+        assert_eq!(bad.shows.screen_order(4), vec![2, 0, 1, 3]);
+
+        let c = Config::from_yaml("shows: { every_mins: 2, order: [3, 2, 1, 0] }\n").unwrap();
+        assert_eq!((c.shows.every_mins, c.shows.gap_mm), (2, 25.0));
+        assert!(c.shows.enabled && c.shows.list == all);
+        assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+        // the default list is not written out, so new shows reach old configs
+        assert!(!Config::default().to_yaml().unwrap().contains("list:"));
     }
 }

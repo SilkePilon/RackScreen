@@ -107,6 +107,13 @@ impl ScreenState {
         }
     }
 
+    /// Push the dwell back by `secs` (a show is playing for that long), and
+    /// leave at least `MIN_CYCLE_SECS` of it for after, so no role change
+    /// fires right as the roles fade back in.
+    pub fn extend_dwell(&mut self, now: Secs, secs: Secs) {
+        self.since = self.since.max(now - self.cycle_secs + MIN_CYCLE_SECS) + secs;
+    }
+
     /// When the running transition began, if one is running.
     pub fn transition_started(&self) -> Option<Secs> {
         self.transition_started
@@ -258,6 +265,21 @@ mod tests {
             assert!(b >= last);
             last = b;
         }
+    }
+
+    #[test]
+    fn extend_dwell_pushes_the_next_change_past_the_show() {
+        let roles = vec![Role::Cpu, Role::Mem];
+        // 5 s of a 15 s dwell left: still 5 s left once a 10 s show is over
+        let mut s = ScreenState::new(roles.clone(), 15.0);
+        s.extend_dwell(10.0, 10.0);
+        assert!(!s.ready_to_transition(24.9));
+        assert!(s.ready_to_transition(25.0));
+        // overdue (waiting for the slot): at least the minimum dwell after the show
+        let mut s = ScreenState::new(roles, 15.0);
+        s.extend_dwell(40.0, 10.0);
+        assert!(!s.ready_to_transition(50.0 + MIN_CYCLE_SECS - 0.01));
+        assert!(s.ready_to_transition(50.0 + MIN_CYCLE_SECS));
     }
 
     #[test]
