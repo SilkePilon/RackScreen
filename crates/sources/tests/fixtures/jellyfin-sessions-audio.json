@@ -1,0 +1,46 @@
+[
+  {
+    "Id": "s1",
+    "UserName": "silke",
+    "DeviceName": "Living room TV",
+    "LastActivityDate": "2026-09-07T12:00:05.000Z",
+    "NowPlayingItem": {
+      "Name": "Blade Runner 2049",
+      "Type": "Movie",
+      "ProductionYear": 2017,
+      "RunTimeTicks": 98400000000
+    },
+    "PlayState": { "PositionTicks": 37200000000, "IsPaused": false }
+  },
+  {
+    "Id": "s2",
+    "UserName": "sam",
+    "DeviceName": "Kitchen",
+    "LastActivityDate": "2026-09-07T11:58:00.000Z",
+    "NowPlayingItem": {
+      "Id": "track-old",
+      "Name": "Angel",
+      "Type": "Audio",
+      "Artists": [],
+      "AlbumArtist": "Massive Attack",
+      "RunTimeTicks": 3790000000
+    },
+    "PlayState": { "PositionTicks": 600000000, "IsPaused": true }
+  },
+  {
+    "Id": "s3",
+    "UserName": "silke",
+    "DeviceName": "Desk",
+    "LastActivityDate": "2026-09-07T12:00:01.000Z",
+    "NowPlayingItem": {
+      "Id": "track-1",
+      "AlbumId": "album-9",
+      "Name": "Teardrop",
+      "Type": "Audio",
+      "Artists": ["Massive Attack", "Elizabeth Fraser"],
+      "AlbumArtist": "Massive Attack",
+      "RunTimeTicks": 3310000000
+    },
+    "PlayState": { "PositionTicks": 1340000000, "IsPaused": false }
+  }
+]
