@@ -51,14 +51,14 @@ pub fn draw(g: &mut World, f: u32, t: f64) {
         for s in 0..14 {
             let nx = x + js_round((rnd((s * 3 + 1) as f64) - 0.5) * 7.0);
             let ny = y + 3;
-            // The mockup sets white once, then each glow `P` leaves its
-            // colour as the canvas fill: only the first segment is white.
-            let c = if s == 0 { 0xffffff } else { 0xa9b8ff };
+            // Pale glow beside a white core on every segment (the mockup's
+            // canvas fill leaked the glow colour into later segments; the
+            // bolt is meant to be white and must show during the flash).
+            g.p(0xa9b8ff, (x + 1) as f64, y as f64, 1, 1);
             for i in 0..=3 {
                 let bx = x as f64 + (nx - x) as f64 * i as f64 / 3.0;
-                g.p(c, bx, (y + i) as f64, 1, 1);
+                g.p(0xffffff, bx, (y + i) as f64, 1, 1);
             }
-            g.p(0xa9b8ff, (x + 1) as f64, y as f64, 1, 1);
             x = nx;
             y = ny;
         }
