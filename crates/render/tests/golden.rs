@@ -552,6 +552,40 @@ fn every_role_normal() {
     }
 }
 
+/// The base cache hit path draws what one fresh pass draws, for every role,
+/// also with a slide frame in between.
+#[test]
+fn base_cache_hit_matches_a_fresh_render() {
+    let m = full_model();
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    let mut cached = 0;
+    for role in Role::ALL {
+        let scene = m.scene_for_role(role, 120.0, &mut ScreenUi::new());
+        if scene.base_len > 0 {
+            cached += 1;
+        }
+        let fresh = render(&m, role, 120.0);
+        r.render(&scene, &mut px);
+        r.render(&scene, &mut px);
+        assert!(px.data() == fresh.data(), "{role:?}: cache hit differs");
+
+        let other = m.scene_for_role(Role::Mem, 120.0, &mut ScreenUi::new());
+        let (out_at, inc_at) = rackscreen_core::screens::slide(0.5);
+        let mut slide = rackscreen_core::scene::Scene::new();
+        slide.slide = Some(Box::new(rackscreen_core::scene::Slide {
+            out: scene.clone(),
+            out_at,
+            inc: other,
+            inc_at,
+        }));
+        r.render(&slide, &mut px);
+        r.render(&scene, &mut px);
+        assert!(px.data() == fresh.data(), "{role:?}: differs after a slide");
+    }
+    assert!(cached > 0, "some role has a base layer");
+}
+
 #[test]
 fn warning_and_alternate_states() {
     let mut m = full_model();
