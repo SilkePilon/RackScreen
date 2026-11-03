@@ -105,6 +105,8 @@ impl Monitor {
             spawn_energy_sources(&runtime, cfg, &ctx);
             spawn_external_sources(&runtime, cfg, &ctx);
         }
+        // GIFs are pasted links, real in every source mode.
+        spawn_gif_source(&runtime, cfg, &ctx);
 
         // displays
         let panels = open_panels(cfg, opts.sim, opts.sim_grid, key_tx)?;
@@ -220,6 +222,25 @@ impl Drop for Monitor {
             p.shutdown();
         }
     }
+}
+
+/// Download and decode the GIFs the screens show, if any.
+fn spawn_gif_source(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
+    let gifs: Vec<rackscreen_sources::gif::GifSpec> = cfg
+        .used_gifs()
+        .into_iter()
+        .map(|(index, name, url)| rackscreen_sources::gif::GifSpec { index, name, url })
+        .collect();
+    if gifs.is_empty() {
+        return;
+    }
+    let dir = crate::config::gif_cache_dir().unwrap_or_else(|| {
+        let d = std::env::temp_dir().join("rackscreen-gifs");
+        tracing::warn!("no home directory; caching GIFs in {}", d.display());
+        d
+    });
+    tracing::info!("{} GIFs, cache {}", gifs.len(), dir.display());
+    runtime.spawn(rackscreen_sources::gif::run_gifs(gifs, dir, ctx.clone()));
 }
 
 /// Electricity Maps. It is independent of the cluster, so it runs whenever
