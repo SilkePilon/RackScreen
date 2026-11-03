@@ -57,20 +57,8 @@ function StatusFooter() {
   const status = useStatus()
   const down = status.isError
   const state = down ? "offline" : (status.data?.monitor.state ?? "…")
-  const tone = down
-    ? "bg-destructive"
-    : state === "running"
-      ? "bg-success"
-      : "bg-warning animate-pulse"
   return (
-    <div className="flex items-center gap-3 rounded-lg px-2.5 py-2">
-      <div className="relative flex size-8 shrink-0 items-center justify-center rounded-full border bg-background">
-        <RackGlyph />
-        <span
-          className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-sidebar", tone)}
-          aria-hidden
-        />
-      </div>
+    <div className="flex items-center rounded-lg px-2.5 py-2">
       <div className="flex min-w-0 flex-col leading-tight">
         {info.data ? (
           <>
