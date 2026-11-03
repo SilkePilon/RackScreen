@@ -15,6 +15,7 @@ use crate::ops::config_file::save_config;
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
+use crate::screens::gifs::GifPane;
 use crate::widgets::{confirm_dialog, help_line, SidebarView, StatusTone};
 use crate::{Action, Screen, Shared};
 
@@ -94,10 +95,12 @@ pub enum Group {
     Media,
     Display,
     Thresholds,
+    /// The `gifs:` list; a list pane rather than form fields.
+    Gifs,
 }
 
 impl Group {
-    pub const ALL: [Group; 7] = [
+    pub const ALL: [Group; 8] = [
         Group::Cluster,
         Group::Services,
         Group::Energy,
@@ -105,6 +108,7 @@ impl Group {
         Group::Media,
         Group::Display,
         Group::Thresholds,
+        Group::Gifs,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -115,6 +119,7 @@ impl Group {
             Group::Media => "Media & Jellyfin",
             Group::Display => "Display",
             Group::Thresholds => "Thresholds",
+            Group::Gifs => "GIFs",
         }
     }
     pub fn index(self) -> usize {
@@ -820,6 +825,8 @@ pub struct Configure {
     /// `s` must never overwrite the user's file with them.
     unreadable: bool,
     restart_rx: Option<Receiver<String>>,
+    /// The GIFs group is open: its list pane has the focus, `row` waits.
+    gifs: Option<GifPane>,
 }
 
 impl Configure {
@@ -846,10 +853,14 @@ impl Configure {
             dirty: false,
             unreadable,
             restart_rx: None,
+            gifs: None,
         }
     }
 
     pub fn group(&self) -> Group {
+        if self.gifs.is_some() {
+            return Group::Gifs;
+        }
         FIELDS[self.row].group
     }
 
@@ -867,6 +878,11 @@ impl Configure {
     }
 
     fn jump_to(&mut self, g: Group) {
+        if g == Group::Gifs {
+            self.gifs.get_or_insert_with(GifPane::default);
+            return;
+        }
+        self.gifs = None;
         self.row = group_indices(g)[0];
     }
 
@@ -924,11 +940,48 @@ impl Configure {
         self.restart_rx = Some(rx);
         self.mode = Mode::Restarting;
     }
+
+    fn draw_dialogs(&self, f: &mut Frame, area: Rect, th: &crate::theme::Theme) {
+        if matches!(self.mode, Mode::AskRestart) {
+            confirm_dialog(
+                f,
+                area,
+                th,
+                "Restart service?",
+                &["Apply the new config to the running service now?".to_string()],
+                "y/⏎ restart   Esc later",
+                false,
+            );
+        }
+        if matches!(self.mode, Mode::AskDiscard) {
+            confirm_dialog(
+                f,
+                area,
+                th,
+                "Discard changes?",
+                &["You have unsaved changes. Leave without saving?".to_string()],
+                "y/⏎ discard   Esc keep editing",
+                true,
+            );
+        }
+    }
 }
 
 impl Screen for Configure {
     fn handle(&mut self, key: KeyEvent, shared: &mut Shared, _now: Secs) -> Action {
         let (field, kind) = (FIELDS[self.row].field, FIELDS[self.row].kind);
+        if let (Some(pane), Mode::Browse) = (&mut self.gifs, &self.mode) {
+            let busy = pane.busy();
+            let r = pane.handle(key.code, &mut self.cfg);
+            if r.consumed {
+                self.error = r.error;
+                self.dirty |= r.changed;
+                return Action::None;
+            }
+            if busy {
+                return Action::None;
+            }
+        }
         // Take the mode out so the arms can replace it without a live borrow.
         let mode = std::mem::replace(&mut self.mode, Mode::Browse);
         match mode {
@@ -937,7 +990,7 @@ impl Screen for Configure {
                 KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.move_group(-1),
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.move_group(1),
-                KeyCode::Char(c @ '1'..='7') => {
+                KeyCode::Char(c @ '1'..='9') if ((c as u8 - b'1') as usize) < Group::ALL.len() => {
                     self.jump_to(Group::ALL[(c as u8 - b'1') as usize]);
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
@@ -1029,6 +1082,22 @@ impl Screen for Configure {
             Constraint::Length(1),
         ])
         .areas(area);
+        if let Some(pane) = &self.gifs {
+            pane.draw(f, list, area, th, &self.cfg);
+            match (&self.error, &self.note) {
+                (Some(e), _) => f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(format!("  {e}"), th.bad()))),
+                    help,
+                ),
+                (None, Some(n)) if !pane.editing() => f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(format!("  {n}"), th.good()))),
+                    help,
+                ),
+                _ => help_line(f, help, th, pane.help()),
+            }
+            self.draw_dialogs(f, area, th);
+            return;
+        }
 
         enum Row {
             Section(&'static str, Option<bool>),
@@ -1171,34 +1240,15 @@ impl Screen for Configure {
             ),
             (_, None, None) => help_line(f, help, th, FIELDS[self.row].help),
         }
-
-        if matches!(self.mode, Mode::AskRestart) {
-            confirm_dialog(
-                f,
-                area,
-                th,
-                "Restart service?",
-                &["Apply the new config to the running service now?".to_string()],
-                "y/⏎ restart   Esc later",
-                false,
-            );
-        }
-        if matches!(self.mode, Mode::AskDiscard) {
-            confirm_dialog(
-                f,
-                area,
-                th,
-                "Discard changes?",
-                &["You have unsaved changes. Leave without saving?".to_string()],
-                "y/⏎ discard   Esc keep editing",
-                true,
-            );
-        }
+        self.draw_dialogs(f, area, th);
     }
 
     fn keys(&self) -> String {
+        if let (Some(pane), Mode::Browse) = (&self.gifs, &self.mode) {
+            return pane.keys();
+        }
         match self.mode {
-            Mode::Browse => "↑↓ field  Tab/←→ group  1-7 jump  ⏎ edit  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  Tab/←→ group  1-8 jump  ⏎ edit  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
             Mode::AskDiscard => "y discard  Esc keep".into(),
@@ -1404,7 +1454,8 @@ mod tests {
             last = s.group.index();
         }
         for g in Group::ALL {
-            assert!(!group_indices(g).is_empty(), "{g:?} is empty");
+            // GIFs is a list, not form fields
+            assert_eq!(group_indices(g).is_empty(), g == Group::Gifs, "{g:?}");
         }
         assert_eq!(group_indices(Group::Cluster), vec![0, 1, 2, 3, 4]);
         assert_eq!(group_indices(Group::Thresholds).len(), 3);
@@ -1467,13 +1518,60 @@ mod tests {
         );
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
-        assert_eq!(screen.group(), Group::Thresholds, "groups wrap");
+        assert_eq!(screen.group(), Group::Gifs, "groups wrap");
+        screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Thresholds);
         assert!(screen.consumes_left());
         assert_eq!(
             screen.sidebar().unwrap().selected,
             Group::Thresholds.index()
         );
-        assert_eq!(screen.sidebar().unwrap().items.len(), 7);
+        assert_eq!(screen.sidebar().unwrap().items.len(), 8);
+    }
+
+    #[test]
+    fn gifs_group_adds_shows_and_saves_a_gif() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let mut sh = shared_at(&path);
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        screen.handle(KeyEvent::from(KeyCode::Char('8')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Gifs);
+        assert_eq!(screen.subtitle(), "Configure › GIFs");
+        assert!(screen.keys().contains("a add"), "{}", screen.keys());
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        for c in "party".chars() {
+            screen.handle(KeyEvent::from(KeyCode::Char(c)), &mut sh, 0.0);
+        }
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        // `s` and digits are typed into the link, not save or jump
+        for c in "https://giphy.com/gifs/s1-AbCdEf123".chars() {
+            screen.handle(KeyEvent::from(KeyCode::Char(c)), &mut sh, 0.0);
+        }
+        assert_eq!(screen.group(), Group::Gifs);
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(screen.dirty);
+        assert_eq!(screen.cfg.gifs[0].name, "party");
+        let mut term = Terminal::new(TestBackend::new(90, 20)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(
+            t.contains("party") && t.contains("giphy.com/gifs/s1-AbCdEf123"),
+            "{t}"
+        );
+        assert!(t.contains("+ add GIF") && t.contains("unused"), "{t}");
+        assert!(t.contains("35 MB"), "the memory note: {t}");
+        screen.handle(KeyEvent::from(KeyCode::Right), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Cluster, "groups wrap past GIFs");
+        screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Gifs);
+        assert!(matches!(
+            screen.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0),
+            Action::Back
+        ));
+        let saved = Config::load_or_default(&path).unwrap();
+        assert_eq!(saved.gifs.len(), 1);
+        assert_eq!(saved.gifs[0].url, "https://giphy.com/gifs/s1-AbCdEf123");
     }
 
     #[test]
@@ -1498,7 +1596,7 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Char('7')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Thresholds);
         assert!(!screen.dirty, "navigation never dirties the form");
-        assert!(screen.keys().contains("1-7 jump"));
+        assert!(screen.keys().contains("1-8 jump"));
     }
 
     #[test]
