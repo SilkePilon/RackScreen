@@ -196,6 +196,7 @@ impl Monitor {
                 rain: cfg.rain.enabled && cfg.location().is_some(),
                 github: cfg.github.enabled && !cfg.github.token.is_empty(),
                 argocd: cfg.argocd.enabled,
+                simulated: matches!(source, SourceKind::Fake),
             },
             gif_names: cfg.gifs.iter().map(|g| g.name.clone()).collect(),
             cycle_secs_cfg: cfg.screens.iter().map(|s| s.cycle_secs).collect(),

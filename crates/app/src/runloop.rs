@@ -77,6 +77,8 @@ pub struct LinkCfg {
     pub rain: bool,
     pub github: bool,
     pub argocd: bool,
+    /// `--source fake`: every link reports `ok`, detail `simulated`.
+    pub simulated: bool,
 }
 
 /// The calibration pattern on every panel: `identify` for a few seconds,
@@ -193,6 +195,16 @@ pub fn link_rows(
             },
         ),
     ];
+    if cfg.simulated {
+        return rows
+            .into_iter()
+            .map(|(_, name, ..)| LinkStatus {
+                name,
+                state: "ok",
+                detail: "simulated".into(),
+            })
+            .collect();
+    }
     rows.into_iter()
         .map(|(target, name, on, up, detail)| LinkStatus {
             name,
@@ -814,5 +826,23 @@ mod tests {
         assert_eq!(by(&rows, "Kubernetes").state, "ok");
         assert_eq!(by(&rows, "Kubernetes").detail, "3 nodes");
         assert_eq!(by(&rows, "Electricity Maps").state, "down");
+    }
+
+    #[test]
+    fn fake_source_reports_every_link_simulated() {
+        let model = Model::new(Thresholds {
+            hot_cpu: 90.0,
+            hot_mem: 90.0,
+            hot_temp: 70.0,
+        });
+        let cfg = LinkCfg {
+            simulated: true,
+            ..LinkCfg::default()
+        };
+        let rows = link_rows(model.link(), cfg, &HashSet::new(), &model);
+        assert_eq!(rows.len(), 8);
+        assert!(rows
+            .iter()
+            .all(|r| r.state == "ok" && r.detail == "simulated"));
     }
 }
