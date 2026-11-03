@@ -10,6 +10,7 @@ pub mod astro;
 pub mod buienradar;
 pub mod electricity;
 pub mod fake;
+pub mod gif;
 pub mod github;
 pub mod http;
 pub mod iss;
