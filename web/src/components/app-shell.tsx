@@ -12,7 +12,9 @@ import { Button } from "@/components/ui/button"
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { setLiveScreenCount } from "@/lib/live"
 import { pageFor } from "@/lib/nav"
+import { useStatus } from "@/lib/queries"
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme()
@@ -73,7 +75,16 @@ export function PageFallback() {
   )
 }
 
+/** Keep the live view's screen count in step with /api/status. */
+function useLiveScreenCount() {
+  const n = useStatus().data?.screens.length
+  React.useEffect(() => {
+    if (n !== undefined) setLiveScreenCount(n)
+  }, [n])
+}
+
 export function AppShell() {
+  useLiveScreenCount()
   const palette = useCommandPalette()
   const { pathname } = useLocation()
   const page = pageFor(pathname)

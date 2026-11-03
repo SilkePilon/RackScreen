@@ -137,7 +137,7 @@ function ScreenCard({ index, screen }: { index: number; screen: ScreenCfg }) {
       className="overflow-hidden rounded-xl border bg-card"
     >
       <header className="flex flex-wrap items-center gap-4 border-b border-hairline px-5 py-4">
-        <PanelMirror screen={index} className="w-14 shrink-0 p-[4px]" />
+        <PanelMirror thumb screen={index} className="w-14 shrink-0 p-[4px]" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             <h2 className="text-[15px] font-semibold tracking-tight">Screen {index + 1}</h2>
