@@ -70,7 +70,7 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={300}>
           <Gate />
-          <Toaster position="bottom-right" />
+          <Toaster position="top-center" offset={14} />
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

@@ -85,7 +85,7 @@ export function DraftProvider({ children }: { children: React.ReactNode }) {
     },
     onError: (e) => {
       setError(errorMessage(e))
-      toast.error("Not saved", { description: errorMessage(e) })
+      toast.error("Not saved; see the message below")
     },
   })
 

@@ -139,7 +139,7 @@ export function Row({
           {badge}
           {dirty && onReset && <ResetButton onClick={onReset} />}
         </div>
-        {d && <p className="max-w-xl text-[13px] leading-relaxed text-pretty text-muted-foreground">{d}</p>}
+        {d && <div className="max-w-xl text-[13px] leading-relaxed text-pretty text-muted-foreground">{d}</div>}
       </div>
       {children !== undefined && (
         <div className={cn("flex shrink-0 items-center gap-2", !stack && "sm:justify-end")}>{children}</div>

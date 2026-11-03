@@ -56,7 +56,7 @@ export default function Calibrate() {
       </HeaderActions>
       <PageIntro title="Calibrate">
         Turn on the test pattern, then rotate and mirror each screen until its arrow points up and the colour bar
-        reads red to violet. The previews show what the screen draws, before rotation.
+        reads red to violet. Each preview turns with your settings, like the glass would.
       </PageIntro>
       <div className="grid gap-6 md:grid-cols-2">
         {d.draft
@@ -71,6 +71,10 @@ function ScreenCalibration({ index }: { index: number }) {
   const base = `screens.${index}`
   const rotate = useField<number>(`${base}.rotate`)
   const hflip = useField<boolean>(`${base}.hflip`)
+  const spi = useField<number>(`${base}.spi`)
+  const cs = useField<number>(`${base}.cs`)
+  const dc = useField<number>(`${base}.dc`)
+  const rst = useField<number>(`${base}.rst`)
   const [open, setOpen] = React.useState(false)
   return (
     <section
@@ -89,8 +93,11 @@ function ScreenCalibration({ index }: { index: number }) {
         </div>
         <div className="flex flex-col gap-1">
           <h2 className="text-[15px] font-semibold tracking-tight">Screen {index + 1}</h2>
-          <p className="text-[13px] text-muted-foreground">
-            The preview turns as you change rotation and mirroring, like the glass would.
+          <p className="text-[13px] text-muted-foreground tabular">
+            Rotated {rotate.value}°{hflip.value ? ", mirrored" : ""}
+          </p>
+          <p className="text-xs text-muted-foreground/70 tabular">
+            SPI {spi.value} · CS {cs.value} · DC {dc.value} · RST {rst.value}
           </p>
         </div>
       </div>

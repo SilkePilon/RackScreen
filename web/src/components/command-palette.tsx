@@ -33,6 +33,20 @@ function isTyping(t: EventTarget | null) {
   )
 }
 
+/** Every typed word must appear in the item; earlier matches rank higher. */
+function paletteFilter(value: string, search: string) {
+  const v = value.toLowerCase()
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return 1
+  let score = 1
+  for (const w of words) {
+    const i = v.indexOf(w)
+    if (i === -1) return 0
+    score += 1 / (1 + i)
+  }
+  return score
+}
+
 export function useCommandPalette() {
   const [open, setOpen] = React.useState(false)
   React.useEffect(() => {
@@ -85,7 +99,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       description="Jump to a page or a setting, or run an action."
       className="max-w-xl! border bg-popover shadow-2xl shadow-black/60"
     >
-      <Command loop className="bg-popover">
+      <Command loop className="bg-popover" filter={paletteFilter}>
         <CommandInput placeholder="Search pages, settings and actions…" />
         <CommandList className="scrollbar-thin max-h-[min(60vh,420px)]">
           <CommandEmpty>Nothing matches. Try “brightness” or “spotify”.</CommandEmpty>

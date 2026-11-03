@@ -135,16 +135,19 @@ export function defaultConfig(): Config {
   }
 }
 
-const TARGETS = [
-  "rackscreen_sources::k8s",
-  "rackscreen_sources::prometheus",
-  "rackscreen_sources::weather",
-  "rackscreen_sources::spotify",
-  "rackscreen_app::render",
-  "rackscreen_app::monitor",
-  "rackscreen_sources::electricity",
-  "rackscreen_web::server",
-]
+const TARGET: Record<string, string> = {
+  prometheus: "rackscreen_sources::prometheus",
+  k8s: "rackscreen_sources::k8s",
+  render: "rackscreen_app::render",
+  weather: "rackscreen_sources::weather",
+  spotify: "rackscreen_sources::spotify",
+  electricity: "rackscreen_sources::electricity",
+  monitor: "rackscreen_app::monitor",
+  web: "rackscreen_web::server",
+  qbittorrent: "rackscreen_sources::qbittorrent",
+  shows: "rackscreen_app::shows",
+  spi: "rackscreen_app::spi",
+}
 const MESSAGES: [LogLevel, string][] = [
   ["INFO", "prometheus: 14 series in 38 ms"],
   ["INFO", "k8s: watch pods resync, 112 pods on 7 nodes"],
@@ -162,8 +165,6 @@ const MESSAGES: [LogLevel, string][] = [
 let seq = 1
 export function makeLog(at = Date.now()) {
   const [level, msg] = MESSAGES[Math.floor(Math.random() * MESSAGES.length)]
-  const target = msg.startsWith("render") || msg.startsWith("monitor") || msg.startsWith("spi")
-    ? TARGETS[4]
-    : TARGETS[Math.floor(Math.random() * TARGETS.length)]
+  const target = TARGET[msg.split(":")[0]] ?? "rackscreen_app"
   return { seq: seq++, unix_ms: at, level, target, msg }
 }

@@ -31,6 +31,10 @@ import { useControl, useShows, useStatus } from "@/lib/queries"
 import type { ShowInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+const PANEL_MASK = [12.5, 37.5, 62.5, 87.5]
+  .map((x) => `radial-gradient(circle at ${x}% 50%, #000 26px, transparent 27px)`)
+  .join(", ")
+
 // A tiny painted horizon per show, so the cards read at a glance.
 const SCENES: Record<string, [string, string, string]> = {
   freight: ["#1b1340", "#d9575b", "#f2a65a"],
@@ -192,17 +196,16 @@ function ShowCard({
         !on && "opacity-60 hover:opacity-100",
       )}
     >
-      <div
-        className="relative h-24 overflow-hidden"
-        style={{ background: `linear-gradient(180deg, ${a} 0%, ${b} 62%, ${c} 100%)` }}
-        aria-hidden
-      >
-        <div className="absolute inset-x-0 bottom-0 h-6 bg-black/50" />
-        <div className="absolute inset-x-0 bottom-0 flex justify-around px-4 pb-1.5">
-          {[0, 1, 2, 3].map((i) => (
-            <span key={i} className="size-3 rounded-full bg-black/40 ring-1 ring-white/15" />
-          ))}
-        </div>
+      <div className="relative h-28 overflow-hidden bg-black" aria-hidden>
+        {/* The scene seen through four round panels, like the rack shows it. */}
+        <div
+          className="absolute inset-0 transition-transform duration-700 ease-out group-hover:scale-105 motion-reduce:transition-none"
+          style={{
+            background: `linear-gradient(180deg, transparent 62%, rgba(0,0,0,.55) 62%), linear-gradient(180deg, ${a} 12%, ${b} 55%, ${c} 88%)`,
+            maskImage: PANEL_MASK,
+            WebkitMaskImage: PANEL_MASK,
+          }}
+        />
         <Button
           size="sm"
           variant="secondary"
