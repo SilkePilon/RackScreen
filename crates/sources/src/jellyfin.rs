@@ -145,10 +145,11 @@ pub fn pick_audio(sessions: &[JfAudio]) -> Option<&JfAudio> {
         .max_by(|a, b| (!a.paused, &a.last_activity).cmp(&(!b.paused, &b.last_activity)))
 }
 
-/// The primary image of `item`, at most 168 px wide.
+/// The primary image of `item`, at most 168 px wide, as a JPEG (the server
+/// may store WebP, which the cover decoder does not read).
 pub fn cover_url(base: &str, item: &str) -> String {
     format!(
-        "{}/Items/{item}/Images/Primary?maxWidth=168",
+        "{}/Items/{item}/Images/Primary?maxWidth=168&format=jpg",
         base.trim_end_matches('/')
     )
 }
@@ -345,7 +346,7 @@ mod tests {
         assert!(parse_audio(SESSIONS).is_empty());
         assert_eq!(
             cover_url("http://jf:8096/", "album-9"),
-            "http://jf:8096/Items/album-9/Images/Primary?maxWidth=168"
+            "http://jf:8096/Items/album-9/Images/Primary?maxWidth=168&format=jpg"
         );
         let t = a.clone().into_track(None);
         assert_eq!(t.source, rackscreen_core::event::MusicSource::Jellyfin);

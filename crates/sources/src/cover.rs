@@ -2,7 +2,7 @@
 //! and scale it to the screen's cover size, and keep the last few in memory
 //! so an album is downloaded once.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use rackscreen_core::event::{Cover, CoverRef};
@@ -134,10 +134,23 @@ pub fn cover_from_bytes(key: &str, bytes: &[u8]) -> Result<Cover> {
     })
 }
 
-/// The last `CACHE_LEN` covers by key, least recently used first.
+/// Keys whose last download or decode failed, remembered so a broken
+/// image is not fetched again on every poll.
+pub const FAILED_LEN: usize = 16;
+
+/// A cover that failed `failures` times in a row; next tried at `retry_at`.
+struct Failed {
+    key: String,
+    failures: u32,
+    retry_at: Instant,
+}
+
+/// The last `CACHE_LEN` covers by key, least recently used first, and the
+/// last `FAILED_LEN` keys that failed, with their backoff.
 #[derive(Default)]
 pub struct CoverCache {
     items: Vec<CoverRef>,
+    failed: Vec<Failed>,
 }
 
 impl CoverCache {
@@ -149,6 +162,7 @@ impl CoverCache {
     }
 
     pub fn insert(&mut self, cover: Cover) -> CoverRef {
+        self.forget_failure(&cover.key);
         self.items.retain(|c| c.0.key != cover.key);
         if self.items.len() >= CACHE_LEN {
             self.items.remove(0);
@@ -166,12 +180,60 @@ impl CoverCache {
         self.items.is_empty()
     }
 
+    /// Whether `key` may be downloaded at `now`: it never failed, or its
+    /// backoff (1, 5, 15, then 60 min, as for GIFs) has run out.
+    pub fn may_try(&self, key: &str, now: Instant) -> bool {
+        self.failed
+            .iter()
+            .find(|f| f.key == key)
+            .is_none_or(|f| now >= f.retry_at)
+    }
+
+    /// Note a failed download or decode of `key` at `now`.
+    pub fn failed(&mut self, key: &str, now: Instant) {
+        let failures = match self.failed.iter().position(|f| f.key == key) {
+            Some(i) => self.failed.remove(i).failures + 1,
+            None => 1,
+        };
+        if self.failed.len() >= FAILED_LEN {
+            self.failed.remove(0);
+        }
+        self.failed.push(Failed {
+            key: key.to_string(),
+            failures,
+            retry_at: now + crate::gif::retry_delay(failures),
+        });
+    }
+
+    pub fn forget_failure(&mut self, key: &str) {
+        self.failed.retain(|f| f.key != key);
+    }
+
+    /// Keys currently backing off.
+    pub fn failures(&self) -> usize {
+        self.failed.len()
+    }
+
     /// The cover for `key`: from memory, else downloaded with `req` once
     /// (at most `MAX_COVER_BYTES`) and decoded off the async threads. A
-    /// failed download or decode is logged and gives `None`.
+    /// failed download or decode is logged, gives `None` (the grey note
+    /// square) and is not tried again until its backoff runs out.
     pub async fn fetch(&mut self, key: &str, req: reqwest::RequestBuilder) -> Option<CoverRef> {
+        self.fetch_at(key, req, Instant::now()).await
+    }
+
+    /// `fetch` with the clock passed in.
+    pub async fn fetch_at(
+        &mut self,
+        key: &str,
+        req: reqwest::RequestBuilder,
+        now: Instant,
+    ) -> Option<CoverRef> {
         if let Some(c) = self.get(key) {
             return Some(c);
+        }
+        if !self.may_try(key, now) {
+            return None;
         }
         let got = async {
             let bytes = download(req, MAX_COVER_BYTES).await?;
@@ -183,6 +245,7 @@ impl CoverCache {
             Ok(c) => Some(self.insert(c)),
             Err(e) => {
                 tracing::debug!("cover {key}: {e:#}");
+                self.failed(key, now);
                 None
             }
         }
@@ -448,6 +511,64 @@ mod tests {
         let mut cache = CoverCache::default();
         let c = cache.fetch("ok", crate::http::client().get(&url)).await;
         assert_eq!(c.unwrap().0.size, COVER_PX, "decoded off the runtime");
+    }
+
+    #[test]
+    fn a_failed_cover_waits_1_5_15_then_60_minutes() {
+        let mut cache = CoverCache::default();
+        let t0 = Instant::now();
+        let min = |m: u64| Duration::from_secs(m * 60);
+        assert!(cache.may_try("k", t0));
+        let mut at = t0;
+        for wait in [1, 5, 15, 60, 60] {
+            cache.failed("k", at);
+            assert!(!cache.may_try("k", at + min(wait) - Duration::from_secs(1)));
+            assert!(cache.may_try("k", at + min(wait)), "after {wait} min");
+            assert!(cache.may_try("other", at), "per key");
+            at += min(wait);
+        }
+        cache.insert(Cover {
+            key: "k".into(),
+            size: 1,
+            rgba: vec![0, 0, 0, 255],
+        });
+        cache.failed("k2", at);
+        cache.forget_failure("k2");
+        assert!(
+            cache.may_try("k2", at),
+            "a good download clears the backoff"
+        );
+    }
+
+    #[test]
+    fn failures_are_remembered_for_a_bounded_number_of_keys() {
+        let mut cache = CoverCache::default();
+        let t0 = Instant::now();
+        for i in 0..100 {
+            cache.failed(&format!("k{i}"), t0);
+        }
+        assert!(cache.failures() <= FAILED_LEN);
+        assert!(!cache.may_try("k99", t0), "the newest is kept");
+    }
+
+    #[tokio::test]
+    async fn a_broken_cover_is_not_fetched_again_every_poll() {
+        let (url, hits) = serve(GARBAGE.to_vec(), false).await;
+        let mut cache = CoverCache::default();
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            let c = cache
+                .fetch_at("bad", crate::http::client().get(&url), t0)
+                .await;
+            assert!(c.is_none(), "no cover: the grey note square");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "fetched once");
+        let later = t0 + Duration::from_secs(61);
+        assert!(cache
+            .fetch_at("bad", crate::http::client().get(&url), later)
+            .await
+            .is_none());
+        assert_eq!(hits.load(Ordering::SeqCst), 2, "tried again after a minute");
     }
 
     #[test]
