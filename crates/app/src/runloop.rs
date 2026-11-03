@@ -162,6 +162,8 @@ fn poll_play(path: &Path, model: &mut Model, phase: NightPhase) {
     };
     if phase != NightPhase::Day {
         tracing::info!("play request {name} dropped: night mode");
+    } else if model.show_run().is_some() {
+        tracing::info!("play request {name} dropped: a show is already playing");
     } else if model.request_show(req) {
         tracing::info!("play request: {name}");
     } else {

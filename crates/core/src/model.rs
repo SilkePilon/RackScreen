@@ -694,10 +694,11 @@ impl Model {
         }
     }
 
-    /// Ask for a show now. Refused (false) at night or with fewer than two
-    /// screens; otherwise it starts on the first tick no screen is mid-crossfade.
+    /// Ask for a show now. Refused (false) at night, with fewer than two
+    /// screens or while a show runs; otherwise it starts on the first tick no
+    /// screen is mid-crossfade.
     pub fn request_show(&mut self, request: Request) -> bool {
-        if !self.night_day || self.screens.len() < 2 {
+        if !self.night_day || self.screens.len() < 2 || self.shows.current().is_some() {
             return false;
         }
         self.show_request = Some(request);
@@ -1841,6 +1842,24 @@ mod tests {
             gap >= crate::screens::MIN_CYCLE_SECS - 1e-6,
             "no role change right after the show ({gap} s)"
         );
+    }
+
+    #[test]
+    fn a_request_during_a_running_show_is_refused() {
+        use crate::shows::schedule::Request;
+        let freight = || Request::Id(crate::shows::by_id("freight").unwrap());
+        let mut m = cycling_show_model();
+        m.tick(0.0);
+        assert!(m.request_show(freight()));
+        m.tick(0.1);
+        let run = *m.show_run().expect("the request started a show");
+        assert!(!m.request_show(freight()), "refused mid-show");
+        let end = run.started + run.total();
+        m.tick(end + 0.01);
+        assert!(m.show_run().is_none(), "nothing was kept for later");
+        m.tick(end + 1.0);
+        assert!(m.show_run().is_none());
+        assert!(m.request_show(freight()), "accepted again once it is over");
     }
 
     #[test]

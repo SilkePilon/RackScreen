@@ -692,6 +692,11 @@ impl Config {
             "shows.every_mins must be at least 2 (got {})",
             self.shows.every_mins
         );
+        let gap_mm = self.shows.gap_mm;
+        anyhow::ensure!(
+            gap_mm.is_finite() && (0.0..=200.0).contains(&gap_mm),
+            "shows.gap_mm must be between 0 and 200 (got {gap_mm})"
+        );
         if let Some(id) = self
             .shows
             .list
@@ -1169,6 +1174,15 @@ mod tests {
         assert!(err(&bad).contains("shows.every_mins"), "{}", err(&bad));
         bad.shows.every_mins = 2;
         bad.validate().unwrap();
+        for gap in [-0.1, 200.1, f32::NAN, f32::INFINITY] {
+            bad.shows.gap_mm = gap;
+            assert!(err(&bad).contains("shows.gap_mm"), "{gap}: {}", err(&bad));
+        }
+        for gap in [0.0, 200.0] {
+            bad.shows.gap_mm = gap;
+            bad.validate().unwrap();
+        }
+        bad.shows.gap_mm = 25.0;
         bad.shows.list = vec!["freight".into(), "nope".into()];
         assert!(
             err(&bad).contains("nope"),
