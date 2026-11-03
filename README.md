@@ -143,7 +143,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-eight r
 
 Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
 
-In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade down and back up on their own.
+In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade to black and then show a dim moon until morning, when the moon fades out and the screens come back on their own. The panels stay on all night.
 
 ## Electricity mode
 
@@ -294,7 +294,7 @@ screens:
 - **`k8s`** — the kubeconfig the pod, node and alert watches use; `~` is the service user's home.
 - **`prometheus`** — where the metrics come from; `service: auto` picks the first service whose name contains "prometheus" and exposes `port`, and `ignore_alerts` keeps the always-on ones out of the health role.
 - **`qbittorrent`** — the client behind the download monitor; turn it off and HEALTH stays a health ring.
-- **`night`** — the window in which the panels dim, on the Pi's local clock.
+- **`night`** — the window in which the panels fade to a dim moon, on the Pi's local clock.
 - **`thresholds`** — when a node counts as hot: the CPU and memory percentages at which `cpu` and `mem` turn amber, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
 - **`electricity`** — see [Electricity mode](#electricity-mode).
 - **`location`**, **`weather`**, **`rain`**, **`iss`** — see [Sky roles](#sky-roles).

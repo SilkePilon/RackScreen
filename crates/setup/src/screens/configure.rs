@@ -557,7 +557,7 @@ pub const FIELDS: [FieldSpec; 55] = [
         "Night",
         "enabled",
         Bool,
-        "Dim the panels at night.",
+        "Fade the panels to a dim moon at night.",
     ),
     spec(
         Field::NightStart,
