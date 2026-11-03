@@ -81,24 +81,12 @@ pub enum Drawable {
         alpha: f32,
         clip: Option<ClipRect>,
     },
-    /// Text set along a circle around the screen centre, upright at the top,
-    /// centred on `centre_deg` (clockwise from 12 o'clock).
-    CurvedText {
-        text: String,
-        radius: f32,
-        centre_deg: f32,
-        px: f32,
-        font: FontId,
-        letter_spacing: f32,
-        color: Color,
-        alpha: f32,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub items: Vec<Drawable>,
-    /// `items[..base_len]` rarely change (clear, ring track, title, card
+    /// `items[..base_len]` rarely change (clear, ring track, card
     /// background); the renderer may reuse a cached raster of them.
     pub base_len: usize,
     /// Brightness of the whole frame, 1.0 = normal; below 1 during a screen
@@ -158,19 +146,26 @@ mod tests {
         );
         m
     }
-    fn title_of(s: &Scene) -> Option<String> {
-        s.items.iter().find_map(|d| match d {
-            Drawable::CurvedText { text, .. } => Some(text.clone()),
-            _ => None,
-        })
+    fn icons(s: &Scene) -> Vec<&'static str> {
+        s.items
+            .iter()
+            .filter_map(|d| match d {
+                Drawable::Icon { name, .. } => Some(*name),
+                _ => None,
+            })
+            .collect()
+    }
+    fn has_run(s: &Scene, t: &str) -> bool {
+        s.items
+            .iter()
+            .any(|d| matches!(d, Drawable::Run { text, .. } if text == t))
     }
     #[test]
     fn cpu_scene_is_a_p2_tile() {
         let m = model_with_cpu(42.0);
         let s = role_scene(&m, Role::Cpu, 5.0, &mut ScreenUi::new());
-        assert_eq!(title_of(&s).as_deref(), Some("CPU"));
         assert!(matches!(s.items[0], Drawable::Clear(_)));
-        assert!(!s.items.iter().any(|d| matches!(d, Drawable::Icon { .. })));
+        assert_eq!(icons(&s), vec!["ms-memory"], "the top icon and no other");
     }
     #[test]
     fn health_scene_switches_to_torrent_mode() {
@@ -183,10 +178,9 @@ mod tests {
             },
             0.0,
         );
-        assert_eq!(
-            title_of(&role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new())).as_deref(),
-            Some("CLUSTER")
-        );
+        let nodes = role_scene(&m, Role::Health, 0.0, &mut ScreenUi::new());
+        assert_eq!(icons(&nodes), vec!["ms-monitor_heart"]);
+        assert!(!has_run(&nodes, "dl-a"));
         m.apply(
             Event::Link {
                 target: LinkTarget::QBittorrent,
@@ -196,16 +190,15 @@ mod tests {
         );
         m.apply(
             Event::Torrents(vec![Torrent {
-                name: "a".into(),
+                name: "dl-a".into(),
                 progress: 50.0,
                 eta_secs: 60,
                 speed_bps: 2_097_152,
             }]),
             0.0,
         );
-        assert_eq!(
-            title_of(&role_scene(&m, Role::Health, 1.0, &mut ScreenUi::new())).as_deref(),
-            Some("DOWNLOADS")
-        );
+        let dl = role_scene(&m, Role::Health, 1.0, &mut ScreenUi::new());
+        assert_eq!(icons(&dl), vec!["ms-monitor_heart"], "same role, same icon");
+        assert!(has_run(&dl, "dl-a"), "the torrent's name in the pill");
     }
 }

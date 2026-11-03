@@ -1,4 +1,4 @@
-//! Text placed by core: the curved title, the tabular rolling hero with its
+//! Text placed by core: the top icon, the tabular rolling hero with its
 //! unit, the pill (with a marquee when the text is too wide) and scale ends.
 
 use crate::anim::Secs;
@@ -41,24 +41,17 @@ pub fn run_centred(
     }
 }
 
-/// The curved title in the ring gap: upper case, first word only when the
-/// whole title would not fit the gap.
-pub fn curved_title(title: &str) -> Drawable {
-    let upper = title.to_uppercase();
-    let text = if measure(FontId::Bold, TITLE_PX, &upper, TITLE_LS) > TITLE_MAX_W {
-        upper.split(' ').next().unwrap_or("").to_string()
-    } else {
-        upper
-    };
-    Drawable::CurvedText {
-        text,
-        radius: TITLE_R,
-        centre_deg: 0.0,
-        px: TITLE_PX,
-        font: FontId::Bold,
-        letter_spacing: TITLE_LS,
+/// The role icon in the ring gap at the top, `ICON_PX` across in `TEXT2`.
+pub fn top_icon(name: &'static str) -> Drawable {
+    Drawable::Icon {
+        name,
+        cx: CX,
+        cy: ICON_CY,
+        size: ICON_PX,
         color: TEXT2,
         alpha: 1.0,
+        scale: 1.0,
+        dy: 0.0,
     }
 }
 
@@ -365,28 +358,19 @@ mod tests {
     }
 
     #[test]
-    fn long_titles_use_their_first_word() {
-        match curved_title("partly cloudy forecast") {
-            Drawable::CurvedText {
-                text,
-                radius,
-                centre_deg,
-                px,
-                letter_spacing,
-                color,
-                ..
-            } => {
-                assert_eq!(text, "PARTLY");
-                assert_eq!(
-                    (radius, centre_deg, px, letter_spacing, color),
-                    (TITLE_R, 0.0, TITLE_PX, TITLE_LS, TEXT2)
-                );
+    fn top_icon_sits_in_the_ring_gap() {
+        assert_eq!(
+            top_icon("ms-memory"),
+            Drawable::Icon {
+                name: "ms-memory",
+                cx: 120.0,
+                cy: 120.0 - RING_R,
+                size: 18.0,
+                color: TEXT2,
+                alpha: 1.0,
+                scale: 1.0,
+                dy: 0.0,
             }
-            _ => panic!("curved text"),
-        }
-        assert!(matches!(curved_title("cpu"), Drawable::CurvedText { text, .. } if text == "CPU"));
-        assert!(
-            matches!(curved_title("air quality"), Drawable::CurvedText { text, .. } if text == "AIR QUALITY")
         );
     }
 

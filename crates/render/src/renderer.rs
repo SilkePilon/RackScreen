@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use rackscreen_core::scene::{Drawable, Scene};
-use rackscreen_core::theme::layout::{CX, CY};
 use tiny_skia::Pixmap;
 
 use crate::icons::IconCache;
@@ -166,30 +165,6 @@ impl Painter {
                     *clip,
                 );
             }
-            Drawable::CurvedText {
-                text,
-                radius,
-                centre_deg,
-                px: size,
-                font,
-                letter_spacing,
-                color,
-                alpha,
-            } => {
-                self.text.draw_curved(
-                    px,
-                    text,
-                    *font,
-                    *size,
-                    CX,
-                    CY,
-                    *radius,
-                    *centre_deg,
-                    *letter_spacing,
-                    *color,
-                    *alpha,
-                );
-            }
         }
     }
 }
@@ -198,6 +173,7 @@ impl Painter {
 mod tests {
     use super::*;
     use crate::frame::new_pixmap;
+    use rackscreen_core::theme::layout::{CX, CY};
 
     fn pixel(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {
         let i = ((y * p.width() + x) * 4) as usize;
@@ -369,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn run_and_curved_text_land_where_asked() {
+    fn run_lands_where_asked() {
         let run = render_one(Drawable::Run {
             x: 100.0,
             baseline: 130.0,
@@ -390,35 +366,5 @@ mod tests {
             !(0..240).any(|x| lit(&run, x, 140)),
             "nothing below the baseline"
         );
-        let curved = render_one(Drawable::CurvedText {
-            text: "MEMORY".into(),
-            radius: 106.0,
-            centre_deg: 0.0,
-            px: 10.0,
-            font: FontId::Bold,
-            letter_spacing: 1.5,
-            color: WHITE,
-            alpha: 1.0,
-        });
-        let top = (0..240)
-            .flat_map(|x| (0..40).map(move |y| (x, y)))
-            .filter(|&(x, y)| lit(&curved, x, y))
-            .count();
-        assert!(top > 60, "title pixels near the top: {top}");
-        assert!(
-            !(0..240).any(|x| (60..240).any(|y| lit(&curved, x, y))),
-            "nothing below y = 60"
-        );
-        let bottom = render_one(Drawable::CurvedText {
-            text: "MEMORY".into(),
-            radius: 106.0,
-            centre_deg: 180.0,
-            px: 10.0,
-            font: FontId::Bold,
-            letter_spacing: 1.5,
-            color: WHITE,
-            alpha: 1.0,
-        });
-        assert!((0..240).any(|x| (200..240).any(|y| lit(&bottom, x, y))));
     }
 }

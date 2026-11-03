@@ -8,7 +8,7 @@ use crate::p2::ring::RingSpec;
 use crate::p2::screen::P2Screen;
 use crate::theme::p2::{AMBER, CYAN, TEXT, TEXT2, TEXT3};
 
-/// The curved title for a WMO weather code.
+/// A short name for a WMO weather code (the screen's `title`).
 pub fn condition(code: u16) -> &'static str {
     match code {
         0 => "CLEAR",

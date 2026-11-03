@@ -1,4 +1,5 @@
-//! Lucide icons parsed once with usvg, drawn as strokes in any colour, size and scale.
+//! SVG icons (Lucide, Electricity Maps, Material Symbols) parsed once with
+//! usvg, drawn as strokes and fills in any colour, size and scale.
 
 use std::collections::HashMap;
 
@@ -12,8 +13,9 @@ use crate::prims::paint;
 struct IconPaths {
     strokes: Vec<(Path, f32)>,
     fills: Vec<Path>,
-    /// viewBox width of the source SVG: Lucide is 24, the Electricity Maps
-    /// icons are 8 or 16, so the draw scale is per icon.
+    /// Width of the source SVG: Lucide and Material Symbols are 24 (usvg
+    /// folds Material's `0 -960 960 960` viewBox into the path transforms),
+    /// the Electricity Maps icons are 8 or 16, so the draw scale is per icon.
     units: f32,
 }
 
@@ -131,6 +133,50 @@ mod tests {
             }
         }
         b
+    }
+
+    #[test]
+    fn every_role_icon_is_bundled_and_draws_inside_its_box() {
+        let cache = IconCache::new().unwrap();
+        for r in rackscreen_core::theme::Role::ALL {
+            assert!(cache.has(r.icon()), "{r:?} -> {}", r.icon());
+            let mut px = Pixmap::new(40, 40).unwrap();
+            cache.draw(
+                &mut px,
+                r.icon(),
+                20.0,
+                20.0,
+                18.0,
+                Color::hex(0xFFFFFF),
+                1.0,
+                1.0,
+                0.0,
+            );
+            let lit: Vec<(u32, u32)> = (0..40u32)
+                .flat_map(|y| (0..40u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| px.data()[((y * 40 + x) * 4 + 3) as usize] > 0)
+                .collect();
+            assert!(!lit.is_empty(), "{r:?} draws nothing");
+            let (x0, x1) = (
+                lit.iter().map(|p| p.0).min().unwrap(),
+                lit.iter().map(|p| p.0).max().unwrap(),
+            );
+            let (y0, y1) = (
+                lit.iter().map(|p| p.1).min().unwrap(),
+                lit.iter().map(|p| p.1).max().unwrap(),
+            );
+            assert!(
+                (x1 - x0).max(y1 - y0) >= 12,
+                "{r:?} fills most of its 18 px box: {}x{}",
+                x1 - x0,
+                y1 - y0
+            );
+            assert!(
+                lit.iter()
+                    .all(|&(x, y)| (10..=30).contains(&x) && (10..=30).contains(&y)),
+                "{r:?} spills out of its 18 px box"
+            );
+        }
     }
 
     #[test]

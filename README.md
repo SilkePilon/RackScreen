@@ -24,7 +24,7 @@
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a curved title in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and today's electricity price on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and today's electricity price on the next.
 
 ## Screens
 
@@ -39,7 +39,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | <img src=".github/media/screens/thermal.gif" alt="THERMAL role" width="200"> | <img src=".github/media/screens/storage.gif" alt="STORAGE role" width="200"> |
 | **`thermal`** — the hottest node, amber and red near the threshold; a bar per node | **`storage`** — used capacity split per Longhorn volume; a degraded volume turns red |
 | <img src=".github/media/screens/power-mix.gif" alt="POWER MIX role" width="200"> | <img src=".github/media/screens/price.gif" alt="PRICE role" width="200"> |
-| **`power-mix`** — twenty 5 % segments by source, the leader at the top, a capsule with icon and share for every source worth two segments | **`price`** — today's price on its five bands, the marker where it sits between today's low and high, the hours as bars |
+| **`power-mix`** — twenty 5 % segments by source, the leader first from the top right, a capsule with icon and share for every source worth two segments | **`price`** — today's price on its five bands, the marker where it sits between today's low and high, the hours as bars |
 | <img src=".github/media/screens/carbon.gif" alt="CARBON role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
 | **`carbon`** — grid carbon intensity on five bands, compared with the last 24 h | **`renewable`** — the renewable share, the fossil-free share in the pill, today as a sparkline |
 | <img src=".github/media/screens/gh-activity.gif" alt="GH ACTIVITY role" width="200"> | <img src=".github/media/screens/weather.gif" alt="WEATHER role" width="200"> |
@@ -118,12 +118,12 @@ Every screen shows one or more **roles** and cycles through them. Thirty roles e
 | `health` | Kubernetes API + Prometheus | a segment per node, pill the first node not ready, card alerts and not-ready; the top download in download mode |
 | `thermal` | Prometheus | ring the hottest node (amber from `hot node temp °C` − 5, red from + 5), card a bar per node |
 | `storage` | Prometheus (Longhorn) | ring the used share per volume, pill used of total or the degraded volume, card a stacked bar and free space |
-| `power-mix` | Electricity Maps | twenty 5 % segments by source, the leader at the top, a capsule per source worth two segments |
+| `power-mix` | Electricity Maps | twenty 5 % segments by source, the leader first from the top right, a capsule per source worth two segments |
 | `price` | Energy-Charts | five bands with a marker, pill the band, card today's hours as bars |
 | `carbon` | Electricity Maps | five bands over 0 to 500 gCO2/kWh, pill against the last 24 h, card a 24 h sparkline |
 | `renewable` | Electricity Maps | ring the renewable share, pill the fossil-free share, card today |
 | `gh-activity` | GitHub | ring today against the month's best, pill best day and streak, card this week |
-| `weather` | Open-Meteo | the condition as title, ring the day's low to high, pill rain ahead, card the next 12 h |
+| `weather` | Open-Meteo | ring the day's low to high, pill rain ahead, card the next 12 h |
 | `wind` | Open-Meteo | ring the speed, pill the gusts, card a compass strip |
 | `aqi` | Open-Meteo | six bands with a marker, pill the level, card the last 24 h |
 | `rain` | Buienradar | minutes to rain (or mm/h while raining), card the next two hours |
@@ -358,7 +358,7 @@ The design notes are in [`docs/superpowers/specs/2026-09-05-rackscreen-design.md
 
 ## Licence
 
-Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`. Font: [Outfit](https://github.com/Outfitio/Outfit-Fonts) (OFL), `assets/fonts/Outfit-LICENSE.txt`.
+Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`; the role icons at the top of each screen are [Material Symbols](https://fonts.google.com/icons) Rounded (Apache 2.0), `assets/icons/ms-*.svg`, see `assets/icons/MATERIAL-LICENSE.txt`. Font: [Outfit](https://github.com/Outfitio/Outfit-Fonts) (OFL), `assets/fonts/Outfit-LICENSE.txt`.
 
 The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps belongs to that service and is subject to its terms. Day-ahead prices come from [Energy-Charts](https://www.energy-charts.info) by Fraunhofer ISE under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 

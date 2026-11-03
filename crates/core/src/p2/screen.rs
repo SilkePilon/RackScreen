@@ -6,7 +6,7 @@ use crate::p2::font::{measure, FontId};
 use crate::p2::layout::*;
 use crate::p2::ring::{RingKind, RingSpec};
 use crate::p2::text::{
-    curved_title, hero_at, hero_fit_scale, pill, ring_ends, unit_below, unit_superscript,
+    hero_at, hero_fit_scale, pill, ring_ends, top_icon, unit_below, unit_superscript,
 };
 use crate::p2::ui::ScreenUi;
 use crate::scene::{Drawable, Scene};
@@ -16,7 +16,12 @@ use crate::theme::Color;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct P2Screen {
+    /// A short upper-case name; not drawn (the icon replaced the curved
+    /// title), kept so builders and tests can tell states apart.
     pub title: String,
+    /// Asset name of the icon in the ring gap; empty draws none. The role
+    /// dispatcher fills it from `Role::icon`.
+    pub icon: &'static str,
     pub hero: String,
     pub hero_scale: f32,
     pub hero_color: Color,
@@ -35,6 +40,7 @@ impl P2Screen {
     pub fn new(title: impl Into<String>, hero: impl Into<String>) -> P2Screen {
         P2Screen {
             title: title.into(),
+            icon: "",
             hero: hero.into(),
             hero_scale: 1.0,
             hero_color: TEXT,
@@ -95,15 +101,17 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
             alpha: 1.0,
         });
     }
-    // The base is a prefix of the original paint order (fill, title, ends,
+    // The base is a prefix of the original paint order (fill, icon, ends,
     // hero, unit, pill, card background): a drawable joins it only when
     // nothing drawn before it overlaps it. The card background sits inside
-    // the ring and below the pill, clear of the fill, title, ends, hero and
-    // unit, so moving it up is pixel-neutral. The title was drawn after the
-    // fill and may overlap it, so it stays out of the base, after the fill.
+    // the ring and below the pill, clear of the fill, icon, ends, hero and
+    // unit, so moving it up is pixel-neutral. The icon is drawn after the
+    // fill, so it stays out of the base, after the fill.
     scene.base_len = scene.items.len();
     scene.items.extend(ring.overlay());
-    scene.push(curved_title(&s.title));
+    if !s.icon.is_empty() {
+        scene.push(top_icon(s.icon));
+    }
     if let Some((a, b)) = &s.ends {
         scene.items.extend(ring_ends(a, b));
     }
@@ -173,10 +181,12 @@ mod tests {
     use crate::p2::chart::Card;
     use crate::p2::ring::RingSpec;
     use crate::p2::ui::ScreenUi;
+    use crate::theme::layout::CY;
     use crate::theme::p2::{BLUE, CARD, OK, TEXT2, TRACK};
 
     fn sample() -> P2Screen {
         let mut s = P2Screen::new("cpu", "42");
+        s.icon = "ms-memory";
         s.unit = Some("%".into());
         s.ring = RingSpec::fill(0.42, BLUE);
         s.pill = Some(("7 nodes · avg".into(), TEXT2));
@@ -194,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_orders_ring_title_hero_unit_pill_card() {
+    fn compose_orders_ring_icon_hero_unit_pill_card() {
         let mut ui = ScreenUi::new();
         let scene = compose(&sample(), &mut ui, 0.0);
         let items = &scene.items;
@@ -209,12 +219,13 @@ mod tests {
         );
         assert_eq!(scene.base_len, 3);
         assert!(
-            matches!(items[3], Drawable::Arc { sweep_deg, .. } if (sweep_deg - 300.0 * 0.42).abs() < 1e-3),
+            matches!(items[3], Drawable::Arc { sweep_deg, .. } if (sweep_deg - RING_SWEEP_DEG * 0.42).abs() < 1e-3),
             "fill right after the base"
         );
         assert!(
-            matches!(&items[4], Drawable::CurvedText { text, .. } if text == "CPU"),
-            "title after the fill, outside the base"
+            matches!(&items[4], Drawable::Icon { name, cx, cy, size, color, .. }
+                if *name == "ms-memory" && *cx == CX && *cy == ICON_CY && *size == ICON_PX && *color == TEXT2),
+            "icon after the fill, outside the base"
         );
         let runs: Vec<&String> = items
             .iter()
@@ -232,6 +243,28 @@ mod tests {
             .iter()
             .any(|d| matches!(d, Drawable::Polyline { width, .. } if *width == 1.8)));
         assert_eq!(scene.fade, 1.0);
+    }
+
+    #[test]
+    fn icon_sits_in_the_ring_gap_clear_of_the_caps() {
+        assert_eq!((RING_START_DEG, RING_SWEEP_DEG), (16.0, 328.0));
+        // the ring ends 16° either side of 12 o'clock; its caps are RING_W/2 round
+        let half_gap = (360.0 - RING_SWEEP_DEG) / 2.0;
+        let a = half_gap.to_radians();
+        let cap = (CX + RING_R * a.sin(), CY - RING_R * a.cos());
+        let dx = (cap.0 - CX).abs() - ICON_PX / 2.0;
+        assert!(dx > RING_W / 2.0, "icon box edge {dx} px from a cap centre");
+        assert_eq!((ICON_CY, ICON_PX), (CY - RING_R, 18.0));
+    }
+
+    #[test]
+    fn a_screen_without_an_icon_draws_none() {
+        let mut ui = ScreenUi::new();
+        let scene = compose(&P2Screen::new("ups", "—"), &mut ui, 0.0);
+        assert!(!scene
+            .items
+            .iter()
+            .any(|d| matches!(d, Drawable::Icon { .. })));
     }
 
     #[test]
@@ -253,7 +286,10 @@ mod tests {
             })
             .next()
             .unwrap();
-        assert!(sweep > 126.0 && sweep < 270.0, "gliding: {sweep}");
+        assert!(
+            sweep > RING_SWEEP_DEG * 0.42 && sweep < RING_SWEEP_DEG * 0.9,
+            "gliding: {sweep}"
+        );
         let mut below = sample();
         below.unit = Some("Mb/s".into());
         below.unit_below = true;

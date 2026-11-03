@@ -4,17 +4,17 @@ use crate::theme::layout::{CX, CY};
 
 pub const RING_R: f32 = 106.0;
 pub const RING_W: f32 = 9.0;
-/// The ring sweeps clockwise from 30° right of 12 o'clock round to 30° left of it.
-pub const RING_START_DEG: f32 = 30.0;
-pub const RING_SWEEP_DEG: f32 = 300.0;
+/// The ring sweeps clockwise from 16° right of 12 o'clock round to 16° left
+/// of it; the 32° gap at the top holds the role's icon.
+pub const RING_START_DEG: f32 = 16.0;
+pub const RING_SWEEP_DEG: f32 = 328.0;
 /// Nothing is drawn past this radius: the panel's visible edge.
 pub const EDGE_R: f32 = 116.0;
 
-pub const TITLE_R: f32 = 106.0;
-pub const TITLE_PX: f32 = 10.0;
-pub const TITLE_LS: f32 = 1.5;
-/// A title wider than this (the 60° gap is 111 px of arc) uses its first word.
-pub const TITLE_MAX_W: f32 = 104.0;
+/// The role icon in the ring gap: Material Symbols Rounded at this size,
+/// centred on the ring's radius at 12 o'clock.
+pub const ICON_PX: f32 = 18.0;
+pub const ICON_CY: f32 = CY - RING_R;
 
 pub const HERO_PX: f32 = 64.0;
 pub const HERO_BASELINE: f32 = 100.0;

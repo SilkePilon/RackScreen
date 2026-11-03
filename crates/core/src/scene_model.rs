@@ -54,7 +54,7 @@ impl crate::model::Model {
     pub fn scene(&self, screen: usize, now: Secs, ui: &mut ScreenUi) -> Scene {
         let state = match self.screen(screen) {
             Some(s) => s,
-            None => return connecting_scene(now),
+            None => return connecting_scene("ms-sync", now),
         };
         let role = state.current();
         if let Some(tr) = state.transition(now) {
@@ -75,7 +75,7 @@ impl crate::model::Model {
     /// Role scene without a transition (tests, goldens, calibrate).
     pub fn scene_for_role(&self, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
         if self.wants_connecting(role) {
-            return connecting_scene(now);
+            return connecting_scene(role.icon(), now);
         }
         if role == Role::Jellyfin && !self.jellyfin_configured() {
             ui.for_role(role);
@@ -169,9 +169,9 @@ mod tests {
         m
     }
 
-    fn title_of(s: &Scene) -> Option<String> {
+    fn icon_of(s: &Scene) -> Option<&'static str> {
         s.items.iter().find_map(|d| match d {
-            Drawable::CurvedText { text, .. } => Some(text.clone()),
+            Drawable::Icon { name, .. } if name.starts_with("ms-") => Some(*name),
             _ => None,
         })
     }
@@ -185,8 +185,11 @@ mod tests {
         runs.find(|t| t.chars().count() > 1 && t != "—")
     }
 
+    /// The connecting scene: the runner arc and the Kubernetes API pill.
     fn connecting(s: &Scene) -> bool {
-        title_of(s).as_deref() == Some("CONNECTING")
+        s.items
+            .iter()
+            .any(|d| matches!(d, Drawable::Run { text, .. } if text == "Kubernetes API"))
     }
 
     fn link(target: LinkTarget, up: bool) -> Event {
@@ -223,6 +226,7 @@ mod tests {
         let m = Model::new(Thresholds::default());
         let s = m.scene(Role::Cpu.index(), 0.0, &mut ScreenUi::new());
         assert!(connecting(&s));
+        assert_eq!(icon_of(&s), Some("ms-memory"), "the role's icon");
     }
 
     #[test]
@@ -253,10 +257,10 @@ mod tests {
         let t0 = tick_until_transition(&mut m);
         let mut ui = ScreenUi::new();
         let out = m.scene(0, t0 + 0.05, &mut ui);
-        assert_eq!(title_of(&out).as_deref(), Some("CPU"));
+        assert_eq!(icon_of(&out), Some("ms-memory"));
         assert!(out.fade > 0.0 && out.fade < 1.0, "outgoing half fading");
         let inc = m.scene(0, t0 + 0.35, &mut ui);
-        assert_eq!(title_of(&inc).as_deref(), Some("MEMORY"));
+        assert_eq!(icon_of(&inc), Some("ms-memory_alt"));
         assert!(inc.fade > 0.0 && inc.fade < 1.0, "incoming half fading in");
         m.tick(t0 + 0.5);
         assert_eq!(m.current_role(0), Role::Mem);
@@ -278,6 +282,7 @@ mod tests {
         assert_eq!(s.fade, 1.0);
         let s = m.scene(7, 1.0, &mut ScreenUi::new());
         assert!(connecting(&s));
+        assert_eq!(icon_of(&s), Some("ms-sync"));
     }
 
     #[test]
@@ -318,7 +323,7 @@ mod tests {
         );
         m.apply(link(LinkTarget::Prices, true), 0.0);
         let live = for_role(&m, Role::Price, 1.0);
-        assert_eq!(title_of(&live).as_deref(), Some("ELECTRICITY"));
+        assert_eq!(icon_of(&live), Some("ms-euro"));
         assert!(live
             .items
             .iter()
@@ -346,12 +351,12 @@ mod tests {
             0.0,
         );
         assert_eq!(
-            title_of(&for_role(&m, Role::Thermal, 1.0)).as_deref(),
-            Some("THERMAL")
+            icon_of(&for_role(&m, Role::Thermal, 1.0)),
+            Some("ms-thermostat")
         );
         assert_eq!(
-            title_of(&for_role(&m, Role::Storage, 1.0)).as_deref(),
-            Some("STORAGE")
+            icon_of(&for_role(&m, Role::Storage, 1.0)),
+            Some("ms-hard_drive")
         );
         m.apply(link(LinkTarget::Prometheus, false), 2.0);
         for role in [Role::Thermal, Role::Storage] {

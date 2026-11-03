@@ -6,7 +6,7 @@ use crate::p2::font::FontId;
 use crate::p2::layout::*;
 use crate::p2::ring::RingSpec;
 use crate::p2::screen::P2Screen;
-use crate::p2::text::{curved_title, middle_baseline, run_centred};
+use crate::p2::text::{middle_baseline, run_centred, top_icon};
 use crate::scene::{Drawable, Scene};
 use crate::theme::layout::CX;
 use crate::theme::p2::{TEXT2, TEXT3, TRACK, WARN};
@@ -28,6 +28,7 @@ pub enum NoData {
 
 pub fn no_data_screen(role: Role, why: NoData) -> P2Screen {
     let mut s = P2Screen::new(role.title(), "—");
+    s.icon = role.icon();
     s.hero_color = TEXT3;
     s.ring = RingSpec::empty();
     s.pill = Some(match why {
@@ -45,8 +46,8 @@ pub const CONNECT_LAP_SECS: Secs = 1.6;
 pub const CONNECT_RUNNER_FRAC: f32 = 0.12;
 
 /// The cluster link is down: a `TRACK` ring with a short `TEXT2` arc running
-/// round it, the title `CONNECTING` and the link's name in the pill.
-pub fn connecting_scene(now: Secs) -> Scene {
+/// round it, `icon` in the ring gap and the link's name in the pill.
+pub fn connecting_scene(icon: &'static str, now: Secs) -> Scene {
     let mut s = Scene::new();
     let spec = RingSpec::empty();
     s.items.extend(spec.drawables());
@@ -56,7 +57,7 @@ pub fn connecting_scene(now: Secs) -> Scene {
     if f1 > 1.0 {
         s.items.extend(spec.arc(0.0, f1 - 1.0, TEXT2, 1.0));
     }
-    s.push(curved_title("connecting"));
+    s.push(top_icon(icon));
     let text = "Kubernetes API";
     let w = crate::p2::font::measure(FontId::SemiBold, PILL_PX, text, 0.0) + PILL_PAD;
     s.push(Drawable::RoundRect {
@@ -94,8 +95,8 @@ mod tests {
     fn no_data_screens_show_a_dash_and_a_pill() {
         let s = no_data_screen(Role::Cpu, NoData::Waiting);
         assert_eq!(
-            (s.title.as_str(), s.hero.as_str(), s.hero_color),
-            ("CPU", "—", TEXT3)
+            (s.icon, s.hero.as_str(), s.hero_color),
+            ("ms-memory", "—", TEXT3)
         );
         assert!(matches!(s.ring.kind, RingKind::Empty));
         assert_eq!(s.pill, Some(("Waiting for data".into(), TEXT2)));
@@ -109,8 +110,8 @@ mod tests {
             Some(("Location needed".into(), WARN))
         );
         assert_eq!(
-            no_data_screen(Role::Weather, NoData::Waiting).title,
-            "WEATHER"
+            no_data_screen(Role::Weather, NoData::Waiting).icon,
+            "ms-partly_cloudy_day"
         );
         assert_eq!(
             no_data_screen(Role::Fans, NoData::Exporter).pill,
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn connecting_runs_an_arc_round_the_track() {
-        let a = connecting_scene(0.0);
+        let a = connecting_scene("ms-memory", 0.0);
         let arcs: Vec<(f32, f32)> = a
             .items
             .iter()
@@ -141,27 +142,30 @@ mod tests {
             })
             .collect();
         assert_eq!(arcs.len(), 2, "track and the runner");
-        assert!((arcs[1].1 - 0.12 * 300.0).abs() < 1e-3, "12 % of the sweep");
+        assert!(
+            (arcs[1].1 - 0.12 * RING_SWEEP_DEG).abs() < 1e-3,
+            "12 % of the sweep"
+        );
         assert!(a
             .items
             .iter()
-            .any(|d| matches!(d, Drawable::CurvedText { text, .. } if text == "CONNECTING")));
+            .any(|d| matches!(d, Drawable::Icon { name, .. } if *name == "ms-memory")));
         assert!(a
             .items
             .iter()
             .any(|d| matches!(d, Drawable::Run { text, .. } if text == "Kubernetes API")));
-        let b = connecting_scene(0.8);
+        let b = connecting_scene("ms-memory", 0.8);
         let half = match &b.items[2] {
             Drawable::Arc { start_deg, .. } => *start_deg,
             _ => panic!("arc"),
         };
         assert!(
-            (half - (arcs[1].0 + 150.0)).abs() < 1e-3,
+            (half - (arcs[1].0 + RING_SWEEP_DEG / 2.0)).abs() < 1e-3,
             "half a lap in 0.8 s"
         );
         assert_eq!(
-            connecting_scene(1.6),
-            connecting_scene(0.0),
+            connecting_scene("ms-memory", 1.6),
+            connecting_scene("ms-memory", 0.0),
             "one lap every 1.6 s"
         );
         let mut ui = ScreenUi::new();

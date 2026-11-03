@@ -1054,7 +1054,6 @@ fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
                 }
                 ("run", *color, *alpha, 0x78)
             }
-            D::CurvedText { color, alpha, .. } => ("title", *color, *alpha, 0x78),
         };
         if cut_out(color) || alpha <= 0.0 {
             continue;

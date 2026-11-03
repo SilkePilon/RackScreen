@@ -1,19 +1,20 @@
-//! The power-mix ring: twenty 5 % segments coloured by source, the leading
-//! source's run centred at 12 o'clock, and a capsule (icon + share) on the
-//! ring for every source with at least two segments.
+//! The power-mix ring: twenty 5 % segments coloured by source over the same
+//! 328° sweep as every other ring, the leading source's run first from the
+//! ring's start (upper right, just past the top icon), and a capsule (icon +
+//! share) on the ring for every source with at least two segments.
 
 use crate::anim::Secs;
 use crate::electricity::Source;
 use crate::model::Model;
 use crate::p2::font::{measure, FontId};
-use crate::p2::layout::EDGE_R;
+use crate::p2::layout::{EDGE_R, RING_START_DEG, RING_SWEEP_DEG};
 use crate::p2::ring::{RingKind, RingSpec};
-use crate::p2::text::middle_baseline;
+use crate::p2::text::{middle_baseline, top_icon};
 use crate::p2::ui::ScreenUi;
 use crate::scene::{Drawable, Scene};
 use crate::theme::layout::{CX, CY};
 use crate::theme::p2::{AMBER, BLUE, CYAN, INK, TRACK, VIOLET};
-use crate::theme::{Color, BLACK};
+use crate::theme::{Color, Role, BLACK};
 
 pub const SEGMENTS: usize = 20;
 pub const MIX_R: f32 = 104.0;
@@ -22,8 +23,6 @@ pub const MIX_GAP_K: f32 = 1.5;
 pub const CAPSULE_H: f32 = 22.0;
 pub const CAPSULE_PX: f32 = 10.0;
 pub const ICON_PX: f32 = 14.0;
-/// Rotation to a new leader.
-pub const ROTATE_SECS: Secs = 1.0;
 /// Stagger of the segment colour fades.
 pub const FADE_STAGGER: Secs = 0.02;
 
@@ -99,12 +98,14 @@ pub fn leader(counts: &[(Source, usize)], shares: &[(Source, f32)]) -> Option<us
     })
 }
 
-/// Start angle of segment 0 (clockwise from 12 o'clock) that centres the
-/// leader's run on 12 o'clock.
-pub fn rotation_for(counts: &[(Source, usize)], lead: usize) -> f32 {
-    let before: usize = counts.iter().take(lead).map(|c| c.1).sum();
-    let mid = before as f32 + counts.get(lead).map(|c| c.1).unwrap_or(0) as f32 / 2.0;
-    -mid / SEGMENTS as f32 * 360.0
+/// Ring order: the leader first, the rest in `Source::ALL` order.
+pub fn ring_order(counts: &[(Source, usize)], shares: &[(Source, f32)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..counts.len()).collect();
+    if let Some(lead) = leader(counts, shares) {
+        order.retain(|&i| i != lead);
+        order.insert(0, lead);
+    }
+    order
 }
 
 /// Centre of a capsule `w × h` on the ring at `angle_deg`, moved inward along
@@ -133,22 +134,20 @@ pub fn power_mix_scene(model: &Model, now: Secs, ui: &mut ScreenUi) -> Scene {
         .map(|(s, p)| (s, ui.glide(("share", s.index() as u32), p, now)))
         .collect();
     let counts = segment_counts(&shares);
-    let rot = match leader(&counts, &shares) {
-        Some(lead) => ui.glide_angle(("rot", 0), rotation_for(&counts, lead), now, ROTATE_SECS),
-        None => 0.0,
-    };
+    let order = ring_order(&counts, &shares);
     let spec = RingSpec {
         kind: RingKind::Empty,
         r: MIX_R,
         width: MIX_W,
-        start_deg: rot,
-        sweep_deg: 360.0,
+        start_deg: RING_START_DEG,
+        sweep_deg: RING_SWEEP_DEG,
     };
     let gap = spec.gap_frac(MIX_GAP_K);
     let mut owner: Vec<Color> = Vec::with_capacity(SEGMENTS);
-    for (s, c) in &counts {
-        for _ in 0..*c {
-            owner.push(source_color(*s));
+    for &i in &order {
+        let (s, c) = counts[i];
+        for _ in 0..c {
+            owner.push(source_color(s));
         }
     }
     owner.resize(SEGMENTS, TRACK);
@@ -159,9 +158,12 @@ pub fn power_mix_scene(model: &Model, now: Secs, ui: &mut ScreenUi) -> Scene {
             scene.items.extend(spec.arc(f0, f1, c, alpha));
         }
     }
+    scene.push(top_icon(Role::PowerMix.icon()));
     let mut acc = 0usize;
-    for (i, (s, c)) in counts.iter().enumerate() {
-        let mid = rot + (acc as f32 + *c as f32 / 2.0) / SEGMENTS as f32 * 360.0;
+    for &i in &order {
+        let (s, c) = &counts[i];
+        let mid =
+            RING_START_DEG + (acc as f32 + *c as f32 / 2.0) / SEGMENTS as f32 * RING_SWEEP_DEG;
         acc += c;
         if *c < 2 {
             continue;
@@ -235,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn largest_remainder_fills_twenty_segments_and_the_leader_is_centred() {
+    fn largest_remainder_fills_twenty_segments_and_the_leader_comes_first() {
         let counts = segment_counts(&shares());
         assert_eq!(counts.iter().map(|c| c.1).sum::<usize>(), SEGMENTS);
         assert_eq!(
@@ -247,11 +249,7 @@ mod tests {
         assert_eq!(counts[2], (Source::Gas, 3));
         assert_eq!(counts[5], (Source::Biomass, 1));
         assert_eq!(leader(&counts, &shares()), Some(0));
-        let rot = rotation_for(&counts, 0);
-        assert!(
-            (rot - (-(8.0 / 2.0) / 20.0 * 360.0)).abs() < 1e-4,
-            "wind's run centred on 12 o'clock: {rot}"
-        );
+        assert_eq!(ring_order(&counts, &shares()), vec![0, 1, 2, 3, 4, 5]);
         let tie = vec![
             (Source::Wind, 25.0),
             (Source::Solar, 25.0),
@@ -259,6 +257,11 @@ mod tests {
         ];
         let c = segment_counts(&tie);
         assert_eq!(leader(&c, &tie), Some(2));
+        assert_eq!(
+            ring_order(&c, &tie),
+            vec![2, 0, 1],
+            "gas leads, the rest keep their order"
+        );
         assert!(segment_counts(&[]).is_empty());
         assert_eq!(
             segment_counts(&[(Source::Gas, 100.0)]),
@@ -316,9 +319,33 @@ mod tests {
             .collect();
         assert_eq!(
             icons,
-            vec!["em-nuclear", "em-wind", "em-solar", "em-gas"],
-            "Source::ALL order; coal (1) and biomass (1) get no capsule"
+            vec!["ms-bolt", "em-wind", "em-nuclear", "em-solar", "em-gas"],
+            "the top icon, then the leader, then Source::ALL order; coal (1) and biomass (1) get no capsule"
         );
+        assert!(
+            s.items.iter().any(|d| matches!(d, Drawable::Icon { name, cx, cy, size, .. }
+                if *name == "ms-bolt" && *cx == CX && *cy == crate::p2::layout::ICON_CY && *size == crate::p2::layout::ICON_PX)),
+            "the bolt sits in the ring gap"
+        );
+        for d in &s.items {
+            if let Drawable::Arc {
+                start_deg,
+                sweep_deg,
+                ..
+            } = d
+            {
+                assert!(
+                    *start_deg >= RING_START_DEG - 1e-3
+                        && start_deg + sweep_deg <= RING_START_DEG + RING_SWEEP_DEG + 1e-3,
+                    "segments stay out of the top gap: {start_deg} + {sweep_deg}"
+                );
+            }
+        }
+        let first = s.items.iter().find_map(|d| match d {
+            Drawable::Arc { color, .. } => Some(*color),
+            _ => None,
+        });
+        assert_eq!(first, Some(CYAN), "wind leads from the ring's start");
         let runs: Vec<String> = s
             .items
             .iter()
@@ -327,14 +354,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(runs, vec!["12%", "38%", "24%", "14%"]);
-        assert!(
-            !s.items
-                .iter()
-                .any(|d| matches!(d, Drawable::CurvedText { .. })),
-            "no title"
-        );
-        // a leader change turns the ring and fades the segments
+        assert_eq!(runs, vec!["38%", "12%", "24%", "14%"]);
+        // a leader change moves the new leader to the start, fading the segments
         m.apply(
             Event::Electricity {
                 zone: "NL".into(),
@@ -357,16 +378,20 @@ mod tests {
             arcs2 > SEGMENTS,
             "segments that changed colour draw two layers while fading"
         );
-        let start = |s: &crate::scene::Scene| match &s.items[1] {
-            Drawable::Arc { start_deg, .. } => *start_deg,
+        let s3 = power_mix_scene(&m, 10.0, &mut ui);
+        match &s3.items[1] {
+            Drawable::Arc { color, .. } => assert_eq!(*color, AMBER, "solar leads now"),
             _ => panic!("arc"),
-        };
-        assert_ne!(start(&s), start(&s2), "the ring is turning");
+        }
         let empty = power_mix_scene(
             &Model::new(Thresholds::default()),
             0.0,
             &mut ScreenUi::new(),
         );
-        assert_eq!(empty.items.len(), 1 + SEGMENTS, "track segments only");
+        assert_eq!(
+            empty.items.len(),
+            2 + SEGMENTS,
+            "track segments and the top icon only"
+        );
     }
 }

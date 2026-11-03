@@ -1,5 +1,6 @@
 //! Embedded icons: the Lucide arrow (calibrate) and the energy-source set
-//! (power-mix capsules). The fonts live in core.
+//! (power-mix capsules) and the Material Symbols Rounded set (the icon at
+//! the top of every screen). The fonts live in core.
 
 macro_rules! icons {
     ($($name:literal),* $(,)?) => {
@@ -27,6 +28,37 @@ icons!(
     "em-gas",
     "em-oil",
     "em-unknown",
+    "ms-memory",
+    "ms-memory_alt",
+    "ms-deployed_code",
+    "ms-monitor_heart",
+    "ms-thermostat",
+    "ms-hard_drive",
+    "ms-bolt",
+    "ms-euro",
+    "ms-co2",
+    "ms-eco",
+    "ms-commit",
+    "ms-partly_cloudy_day",
+    "ms-air",
+    "ms-aq",
+    "ms-rainy",
+    "ms-wb_sunny",
+    "ms-dark_mode",
+    "ms-satellite_alt",
+    "ms-battery_charging_full",
+    "ms-lan",
+    "ms-rocket_launch",
+    "ms-video_library",
+    "ms-swap_vert",
+    "ms-restart_alt",
+    "ms-timer",
+    "ms-mode_fan",
+    "ms-electrical_services",
+    "ms-speed",
+    "ms-build",
+    "ms-movie",
+    "ms-sync",
 );
 
 #[cfg(test)]

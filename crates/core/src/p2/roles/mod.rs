@@ -17,7 +17,7 @@ use crate::theme::Role;
 /// The P2 screen for a role with live data. `None` for roles that still draw
 /// their legacy scene, and for power-mix, which draws itself.
 pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
-    Some(match role {
+    let mut screen = match role {
         Role::Cpu => cluster::cpu(model, now),
         Role::Mem => cluster::mem(model, now),
         Role::Storage => cluster::storage(model, now),
@@ -48,7 +48,9 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Ci => github::ci(model, now),
         Role::Jellyfin => media::jellyfin(model, now),
         Role::PowerMix => return None,
-    })
+    };
+    screen.icon = role.icon();
+    Some(screen)
 }
 
 /// A two-character node label for the node bars: the last `-` token, prefixed

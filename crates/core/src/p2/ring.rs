@@ -212,14 +212,14 @@ mod tests {
         let a = arcs(&RingSpec::fill(0.5, BLUE));
         assert_eq!(a.len(), 2);
         assert_eq!(a[0], (RING_START_DEG, RING_SWEEP_DEG, TRACK, 1.0));
-        assert_eq!(a[1], (RING_START_DEG, 150.0, BLUE, 1.0));
+        assert_eq!(a[1], (RING_START_DEG, RING_SWEEP_DEG * 0.5, BLUE, 1.0));
         assert_eq!(
             arcs(&RingSpec::fill(7.0, BLUE))[1].1,
-            300.0,
+            RING_SWEEP_DEG,
             "clamps above one"
         );
         assert!(
-            (arcs(&RingSpec::fill(-1.0, BLUE))[1].1 - 300.0 * 0.004).abs() < 1e-4,
+            (arcs(&RingSpec::fill(-1.0, BLUE))[1].1 - RING_SWEEP_DEG * 0.004).abs() < 1e-4,
             "a dot at the start, never nothing"
         );
         assert_eq!(arcs(&RingSpec::empty()).len(), 1);
@@ -235,13 +235,13 @@ mod tests {
             (a[1].0 - RING_START_DEG).abs() < 1e-4,
             "first run starts at the start"
         );
-        assert!((a[1].1 - (150.0 - gap / 2.0)).abs() < 1e-3);
-        assert!((a[2].0 - (RING_START_DEG + 150.0 + gap / 2.0)).abs() < 1e-3);
-        assert!((a[2].1 - (90.0 - gap)).abs() < 1e-3);
+        assert!((a[1].1 - (RING_SWEEP_DEG * 0.5 - gap / 2.0)).abs() < 1e-3);
+        assert!((a[2].0 - (RING_START_DEG + RING_SWEEP_DEG * 0.5 + gap / 2.0)).abs() < 1e-3);
+        assert!((a[2].1 - (RING_SWEEP_DEG * 0.3 - gap)).abs() < 1e-3);
         assert_eq!(a[3].2, CRIT);
         let over = arcs(&RingSpec::parts(vec![(1.0, OK), (1.0, WARN)]));
         assert!(
-            (over[1].1 + over[2].1 + 1.5 * gap - 300.0).abs() < 1e-2,
+            (over[1].1 + over[2].1 + 1.5 * gap - RING_SWEEP_DEG).abs() < 1e-2,
             "sum over one is normalised"
         );
         assert_eq!(
@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(a.len(), 8);
         let gap = spec.gap_frac(1.6) * RING_SWEEP_DEG;
         for (i, seg) in a[1..].iter().enumerate() {
-            assert!((seg.1 - (300.0 / 7.0 - gap)).abs() < 1e-3);
+            assert!((seg.1 - (RING_SWEEP_DEG / 7.0 - gap)).abs() < 1e-3);
             assert_eq!(seg.2, colors[i]);
         }
         assert!(gap > 0.0 && gap < 10.0, "{gap}");

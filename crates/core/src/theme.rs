@@ -129,9 +129,7 @@ impl Role {
     pub fn from_index(i: usize) -> Option<Role> {
         Role::ALL.get(i).copied()
     }
-    /// Config identifier.
-    /// The curved title in the P2 look (upper case); `weather` and `sun` show
-    /// a live title instead and use this one only while waiting for data.
+    /// A short upper-case name for the role.
     pub fn title(self) -> &'static str {
         match self {
             Role::Cpu => "CPU",
@@ -164,6 +162,43 @@ impl Role {
             Role::Load => "LOAD",
             Role::Ci => "CI",
             Role::Jellyfin => "NOW PLAYING",
+        }
+    }
+
+    /// The Material Symbols icon (asset name) shown in the ring gap at the
+    /// top of the role's screen.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Role::Cpu => "ms-memory",
+            Role::Mem => "ms-memory_alt",
+            Role::Pods => "ms-deployed_code",
+            Role::Health => "ms-monitor_heart",
+            Role::Thermal => "ms-thermostat",
+            Role::Storage => "ms-hard_drive",
+            Role::PowerMix => "ms-bolt",
+            Role::Price => "ms-euro",
+            Role::Carbon => "ms-co2",
+            Role::Renewable => "ms-eco",
+            Role::GhActivity => "ms-commit",
+            Role::Weather => "ms-partly_cloudy_day",
+            Role::Wind => "ms-air",
+            Role::Aqi => "ms-aq",
+            Role::Rain => "ms-rainy",
+            Role::Sun => "ms-wb_sunny",
+            Role::Moon => "ms-dark_mode",
+            Role::Iss => "ms-satellite_alt",
+            Role::Ups => "ms-battery_charging_full",
+            Role::Net => "ms-lan",
+            Role::Deploys => "ms-rocket_launch",
+            Role::Media => "ms-video_library",
+            Role::Traffic => "ms-swap_vert",
+            Role::Restarts => "ms-restart_alt",
+            Role::Uptime => "ms-timer",
+            Role::Fans => "ms-mode_fan",
+            Role::Mains => "ms-electrical_services",
+            Role::Load => "ms-speed",
+            Role::Ci => "ms-build",
+            Role::Jellyfin => "ms-movie",
         }
     }
 
@@ -279,6 +314,15 @@ pub mod layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_role_has_a_material_icon() {
+        for r in Role::ALL {
+            assert!(r.icon().starts_with("ms-"), "{r:?}");
+        }
+        assert_eq!(Role::Cpu.icon(), "ms-memory");
+        assert_eq!(Role::Jellyfin.icon(), "ms-movie");
+    }
 
     #[test]
     fn hex_parses_channels() {
