@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ArrowDownIcon, PauseIcon, PlayIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react"
+import { ArrowDownIcon, CopyIcon, PauseIcon, PlayIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { copyText } from "@/components/copy-button"
@@ -12,7 +12,6 @@ import { api, errorMessage } from "@/lib/api"
 import { openLogStream } from "@/lib/live"
 import type { LogLevel, LogLine } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { CopyIcon } from "lucide-react"
 
 const MAX = 2000
 const RANK: Record<LogLevel, number> = { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 }
@@ -59,6 +58,20 @@ function Highlight({ text, q }: { text: string; q: string }) {
   )
 }
 
+/** Page through the ring from the start and keep the newest MAX lines. */
+async function loadTail(): Promise<LogLine[]> {
+  let all: LogLine[] = []
+  let after = 0
+  for (let i = 0; i < 50; i++) {
+    const page = await api.logs(after, MAX)
+    if (page.lines.length) all = [...all, ...page.lines].slice(-MAX)
+    const next = page.lines.at(-1)?.seq ?? page.next
+    if (!page.lines.length || next <= after || page.lines.length < MAX) break
+    after = next
+  }
+  return all
+}
+
 export default function Logs() {
   const [lines, setLines] = React.useState<LogLine[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -86,39 +99,85 @@ export default function Logs() {
 
   React.useEffect(() => {
     let alive = true
-    let source: ReturnType<typeof openLogStream> | null = null
-    api
-      .logs(undefined, 500)
-      .then((page) => {
+    // While a baseline fetch runs, stream lines wait here and are merged after.
+    let syncing = true
+    let pending: LogLine[] = []
+    let wasDown = false
+
+    const push = (l: LogLine) => {
+      lastSeq.current = l.seq
+      if (pausedRef.current) {
+        buffer.current.push(l)
+        if (buffer.current.length > MAX) buffer.current.shift()
+        setHeld(buffer.current.length)
+      } else setLines((prev) => [...(prev ?? []), l].slice(-MAX))
+    }
+
+    // Load the newest MAX lines and restart sequence tracking from them. Runs
+    // at mount, after an SSE reconnect and when the sequence goes backwards
+    // (the service restarted and its log ring started over at 1).
+    const baseline = async () => {
+      syncing = true
+      try {
+        const all = await loadTail()
         if (!alive) return
-        setLines(page.lines)
-        lastSeq.current = page.lines.at(-1)?.seq ?? 0
-        source = openLogStream()
-        source.onopen = () => setLive("live")
-        source.onerror = () => setLive("down")
-        source.addEventListener("log", (ev) => {
-          setLive("live")
-          let l: LogLine
-          try {
-            l = JSON.parse(ev.data) as LogLine
-          } catch {
-            return
-          }
-          if (l.seq <= lastSeq.current) return
-          lastSeq.current = l.seq
-          if (pausedRef.current) {
-            buffer.current.push(l)
-            if (buffer.current.length > MAX) buffer.current.shift()
-            setHeld(buffer.current.length)
-          } else setLines((prev) => [...(prev ?? []), l].slice(-MAX))
-        })
-      })
-      .catch((e) => {
-        if (alive) setError(errorMessage(e))
-      })
+        buffer.current = []
+        setHeld(0)
+        setError(null)
+        setLines(all)
+        lastSeq.current = all.at(-1)?.seq ?? 0
+        const waiting = pending
+        pending = []
+        syncing = false
+        // Lines that arrived during the fetch: keep the ones it did not include.
+        // After a restart the stream may carry seqs below lastSeq from the old
+        // process; those are already gone from the ring, so skip them too.
+        for (const l of waiting) if (l.seq > lastSeq.current) push(l)
+      } catch (e) {
+        if (!alive) return
+        syncing = false
+        pending = []
+        setError(errorMessage(e))
+      }
+    }
+
+    const source = openLogStream()
+    source.onopen = () => {
+      setLive("live")
+      if (wasDown) {
+        wasDown = false
+        void baseline()
+      }
+    }
+    source.onerror = () => {
+      wasDown = true
+      setLive("down")
+    }
+    source.addEventListener("log", (ev) => {
+      setLive("live")
+      let l: LogLine
+      try {
+        l = JSON.parse(ev.data) as LogLine
+      } catch {
+        return
+      }
+      if (syncing) {
+        pending.push(l)
+        return
+      }
+      if (l.seq < lastSeq.current) {
+        // The sequence went backwards: a new process. Start over.
+        pending.push(l)
+        void baseline()
+        return
+      }
+      if (l.seq === lastSeq.current) return
+      push(l)
+    })
+    void baseline()
     return () => {
       alive = false
-      source?.close()
+      source.close()
     }
   }, [])
 
@@ -212,11 +271,23 @@ export default function Logs() {
           ]}
         />
         <div className="flex-1" />
-        <Button variant="outline" size="sm" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setPaused((p) => !p)}
+          aria-pressed={paused}
+          aria-label={paused ? (held ? `Resume live view, ${held} new lines` : "Resume live view") : "Pause live view"}
+        >
           {paused ? <PlayIcon data-icon="inline-start" /> : <PauseIcon data-icon="inline-start" />}
           {paused ? (held ? `Resume · ${held} new` : "Resume") : "Pause"}
         </Button>
-        <Button variant="outline" size="sm" onClick={() => void copy()} disabled={!shown.length}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void copy()}
+          disabled={!shown.length}
+          aria-label={`Copy ${shown.length} shown lines`}
+        >
           <CopyIcon data-icon="inline-start" />
           Copy
         </Button>
@@ -230,6 +301,7 @@ export default function Logs() {
           onScroll={onScroll}
           className="scrollbar-thin absolute inset-0 overflow-auto py-2 font-mono text-[12.5px] leading-[1.7]"
           role="log"
+          aria-label="Service log"
           aria-live={paused ? "off" : "polite"}
           aria-relevant="additions"
         >
@@ -273,6 +345,7 @@ export default function Logs() {
             variant="secondary"
             className="absolute right-4 bottom-4 shadow-lg animate-in fade-in-0 slide-in-from-bottom-1"
             onClick={() => setFollow(true)}
+            aria-label="Scroll to the latest line"
           >
             <ArrowDownIcon data-icon="inline-start" />
             Latest
