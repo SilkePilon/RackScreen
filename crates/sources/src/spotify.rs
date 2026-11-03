@@ -1,7 +1,7 @@
 //! Spotify now playing: Authorization Code with PKCE against the user's own
 //! developer app, a token file in the service user's state dir, and a poll
 //! of `GET /v1/me/player` (3 s while playing, 15 s otherwise, `Retry-After`
-//! on 429).
+//! up to 2 min on a 429 from the player or the token endpoint).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -348,13 +348,32 @@ pub fn parse_player(status: u16, body: &str) -> Result<Option<SpotifyItem>> {
     }))
 }
 
+/// The longest `Retry-After` honoured: a misbehaving header never parks
+/// the source for an hour.
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(120);
+/// The wait on a 429 without a usable `Retry-After`.
+pub const DEFAULT_RETRY_AFTER: u64 = 30;
+
 /// How long to wait before the next poll.
 pub fn next_poll(playing: bool, retry_after: Option<u64>) -> Duration {
     let base = if playing { POLL_PLAYING } else { POLL_IDLE };
     match retry_after {
-        Some(s) => Duration::from_secs(s.min(3600)).max(POLL_PLAYING),
+        Some(s) => Duration::from_secs(s)
+            .min(MAX_RETRY_AFTER)
+            .max(POLL_PLAYING),
         None => base,
     }
+}
+
+/// `Retry-After` in seconds (the HTTP-date form is not used by Spotify).
+pub fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 impl SpotifyItem {
@@ -384,6 +403,35 @@ pub struct LoginError(pub String);
 
 pub fn is_login_error(e: &anyhow::Error) -> bool {
     e.downcast_ref::<LoginError>().is_some()
+}
+
+/// A 429 from the player or the token endpoint, with its `Retry-After`.
+#[derive(Debug, thiserror::Error)]
+#[error("rate limited by Spotify")]
+pub struct RateLimited(pub Option<u64>);
+
+/// The wait after a failed poll: a rate limit's `Retry-After` (capped), a
+/// missing login's `LOGIN_RETRY`, else the idle poll.
+pub fn wait_after_error(e: &anyhow::Error) -> Duration {
+    if let Some(RateLimited(after)) = e.downcast_ref::<RateLimited>() {
+        next_poll(false, Some(after.unwrap_or(DEFAULT_RETRY_AFTER)))
+    } else if is_login_error(e) {
+        LOGIN_RETRY
+    } else {
+        POLL_IDLE
+    }
+}
+
+/// What a failed token refresh is: a rate limit (wait, keep the login), a
+/// refused login (`invalid_grant`, `invalid_client`), or a passing failure.
+pub fn refresh_failure(status: u16, retry_after: Option<u64>, code: &str) -> anyhow::Error {
+    if status == 429 {
+        RateLimited(retry_after).into()
+    } else if code == "invalid_grant" || code == "invalid_client" {
+        LoginError(format!("token refresh refused: {code}")).into()
+    } else {
+        anyhow::anyhow!("token refresh failed: {code}")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -422,19 +470,22 @@ async fn access_token(cfg: &SpotifyConfig, force: bool) -> Result<String> {
         .await
         .context("token refresh")?;
     let status = resp.status().as_u16();
+    let after = retry_after(resp.headers());
     let body = resp.text().await.unwrap_or_default();
     match apply_token_response(status, &body, Some(&tok), now) {
         Ok(next) => {
             write_token(&cfg.token_path, &next, None)?;
             Ok(next.access_token)
         }
-        Err(code) if code == "invalid_grant" || code == "invalid_client" => {
-            let mut bad = tok.clone();
-            bad.error = Some(code.clone());
-            write_token(&cfg.token_path, &bad, None)?;
-            Err(LoginError(format!("token refresh refused: {code}")).into())
+        Err(code) => {
+            let e = refresh_failure(status, after, &code);
+            if is_login_error(&e) {
+                let mut bad = tok.clone();
+                bad.error = Some(code);
+                write_token(&cfg.token_path, &bad, None)?;
+            }
+            Err(e)
         }
-        Err(code) => bail!("token refresh failed: {code}"),
     }
 }
 
@@ -469,11 +520,10 @@ pub async fn run_spotify(cfg: SpotifyConfig, ctx: SourceCtx) {
                         source: MusicSource::Spotify,
                         track: None,
                     });
-                    LOGIN_RETRY
-                } else {
-                    // a network blip: keep the last track on screen
-                    POLL_IDLE
                 }
+                // a network blip or a rate limit keeps the last track on
+                // screen (it shows paused once polls fail for long)
+                wait_after_error(&e)
             }
         };
         tokio::select! {
@@ -506,13 +556,7 @@ async fn poll_once(
     }
     let status = resp.status().as_u16();
     if status == 429 {
-        let retry = resp
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse().ok());
-        tracing::debug!("spotify: rate limited, retry after {retry:?} s");
-        return Ok((prev.clone(), next_poll(false, retry.or(Some(30)))));
+        return Err(RateLimited(retry_after(resp.headers())).into());
     }
     let body = resp.text().await.unwrap_or_default();
     let Some(item) = parse_player(status, &body)? else {
@@ -860,8 +904,46 @@ mod tests {
         assert_eq!(next_poll(true, Some(0)), POLL_PLAYING, "never faster");
         assert_eq!(
             next_poll(false, Some(100_000)),
-            Duration::from_secs(3600),
-            "capped at an hour"
+            Duration::from_secs(120),
+            "capped at two minutes"
         );
+        assert_eq!(next_poll(false, Some(121)), MAX_RETRY_AFTER);
+    }
+
+    #[test]
+    fn retry_after_header_is_read_in_seconds() {
+        let h = |v: &str| {
+            let mut m = reqwest::header::HeaderMap::new();
+            m.insert("retry-after", v.parse().unwrap());
+            m
+        };
+        assert_eq!(retry_after(&h("42")), Some(42));
+        assert_eq!(retry_after(&h(" 7 ")), Some(7));
+        assert_eq!(retry_after(&h("Wed, 21 Oct 2026 07:28:00 GMT")), None);
+        assert_eq!(retry_after(&reqwest::header::HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn a_429_from_either_endpoint_waits_for_retry_after() {
+        let wait = |e: anyhow::Error| wait_after_error(&e);
+        // the player and the token endpoint answer 429 the same way
+        assert_eq!(wait(RateLimited(Some(90)).into()), Duration::from_secs(90));
+        assert_eq!(wait(RateLimited(None).into()), Duration::from_secs(30));
+        assert_eq!(wait(RateLimited(Some(10_000)).into()), MAX_RETRY_AFTER);
+        let e = refresh_failure(429, Some(60), "http 429");
+        assert!(!is_login_error(&e), "a rate limit keeps the login");
+        assert_eq!(wait(e), Duration::from_secs(60));
+        let e = refresh_failure(500, None, "http 500");
+        assert!(!is_login_error(&e));
+        assert_eq!(wait(e), POLL_IDLE);
+        assert!(is_login_error(&refresh_failure(400, None, "invalid_grant")));
+        assert!(is_login_error(&refresh_failure(
+            401,
+            None,
+            "invalid_client"
+        )));
+        assert_eq!(wait(LoginError("x".into()).into()), LOGIN_RETRY);
+        let net = anyhow::anyhow!("dns").context("player");
+        assert_eq!(wait(net), POLL_IDLE);
     }
 }
