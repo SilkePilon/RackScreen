@@ -53,3 +53,10 @@ Icon per role (`Role::icon() -> &'static str`):
 - Ring ends at 16° and 344°; the icon sits in the gap without touching the ring caps (icon box vs cap circles).
 - Contrast-floor test still passes (icon is `TEXT2`).
 - Goldens and gifs re-captured; visual check of cpu, jellyfin, power-mix, sun and a status screen.
+
+## Follow-up picks (2026-11-03)
+
+- The icon is 22 px, drawn in `TEXT` at alpha 0.70 (not `TEXT2`).
+- The connecting screen's pill reads "Connecting to <link>".
+- Words that sat in the curved titles moved into the pills (e.g. the weather condition, "Sunrise"/"Sunset").
+- The carbon unit is gCO2/kWh.

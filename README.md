@@ -43,11 +43,11 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | <img src=".github/media/screens/carbon.gif" alt="CARBON role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
 | **`carbon`** — grid carbon intensity on five bands, compared with the last 24 h | **`renewable`** — the renewable share, the fossil-free share in the pill, today as a sparkline |
 | <img src=".github/media/screens/gh-activity.gif" alt="GH ACTIVITY role" width="200"> | <img src=".github/media/screens/weather.gif" alt="WEATHER role" width="200"> |
-| **`gh-activity`** — today's contributions against your best day, this week as seven bars | **`weather`** — the temperature on the day's low to high, rain ahead in the pill, the next 12 h as a curve |
+| **`gh-activity`** — today's contributions against your best day, this week as seven bars | **`weather`** — the temperature on the day's low to high, the condition and rain ahead in the pill, the next 12 h as a curve |
 | <img src=".github/media/screens/wind.gif" alt="WIND role" width="200"> | <img src=".github/media/screens/aqi.gif" alt="AQI role" width="200"> |
 | **`wind`** — wind speed, gusts in the pill, a compass strip that slides to the direction | **`aqi`** — the European air quality index on its six bands, the last 24 h as a sparkline |
 | <img src=".github/media/screens/rain.gif" alt="RAIN role" width="200"> | <img src=".github/media/screens/sun.gif" alt="SUN role" width="200"> |
-| **`rain`** — minutes until rain, the next two hours as five-minute bars | **`sun`** — the next sunset or sunrise, a countdown, and how far the day or night has run |
+| **`rain`** — minutes until rain, the next two hours as five-minute bars | **`sun`** — the next event (Sunrise or Sunset) and its countdown in the pill, and how far the day or night has run |
 | <img src=".github/media/screens/moon.gif" alt="MOON role" width="200"> | <img src=".github/media/screens/iss.gif" alt="ISS role" width="200"> |
 | **`moon`** — the illuminated fraction, the phase, days to full and new moon | **`iss`** — a countdown to the next ISS pass with its start, duration and height |
 | <img src=".github/media/screens/ups.gif" alt="UPS role" width="200"> | <img src=".github/media/screens/net.gif" alt="NET role" width="200"> |
@@ -123,11 +123,11 @@ Every screen shows one or more **roles** and cycles through them. Thirty roles e
 | `carbon` | Electricity Maps | five bands over 0 to 500 gCO2/kWh, pill against the last 24 h, card a 24 h sparkline |
 | `renewable` | Electricity Maps | ring the renewable share, pill the fossil-free share, card today |
 | `gh-activity` | GitHub | ring today against the month's best, pill best day and streak, card this week |
-| `weather` | Open-Meteo | ring the day's low to high, pill rain ahead, card the next 12 h |
+| `weather` | Open-Meteo | ring the day's low to high, pill the condition and the rain hint, card the next 12 h |
 | `wind` | Open-Meteo | ring the speed, pill the gusts, card a compass strip |
 | `aqi` | Open-Meteo | six bands with a marker, pill the level, card the last 24 h |
 | `rain` | Buienradar | minutes to rain (or mm/h while raining), card the next two hours |
-| `sun` | computed | the next sunset or sunrise, ring the day or night so far, pill the countdown |
+| `sun` | computed | the next sunset or sunrise, ring the day or night so far, pill the next event (Sunrise/Sunset) and the countdown |
 | `moon` | computed | ring the illuminated fraction, pill the phase, card days to full and new |
 | `iss` | Celestrak + SGP4 | a countdown to the next pass, pill visibility and height, card start and duration |
 | `ups` | Prometheus (nut-exporter) | ring the charge, pill mains or battery, card runtime and load |
