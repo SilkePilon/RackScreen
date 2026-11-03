@@ -1,0 +1,7 @@
+{
+  "access_token": "BQ-new",
+  "token_type": "Bearer",
+  "scope": "user-read-playback-state user-read-currently-playing",
+  "expires_in": 3600,
+  "refresh_token": "AQ-first"
+}

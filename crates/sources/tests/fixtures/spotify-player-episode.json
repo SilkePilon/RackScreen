@@ -1,0 +1,37 @@
+{
+  "device": {
+    "name": "Phone"
+  },
+  "progress_ms": 60000,
+  "is_playing": true,
+  "currently_playing_type": "episode",
+  "item": {
+    "type": "episode",
+    "id": "ep1",
+    "name": "The Mountain",
+    "duration_ms": 3000000,
+    "images": [
+      {
+        "url": "https://i.scdn.co/image/ep640",
+        "height": 640,
+        "width": 640
+      },
+      {
+        "url": "https://i.scdn.co/image/ep300",
+        "height": 300,
+        "width": 300
+      }
+    ],
+    "show": {
+      "id": "show1",
+      "name": "Radiolab",
+      "images": [
+        {
+          "url": "https://i.scdn.co/image/show",
+          "height": 640,
+          "width": 640
+        }
+      ]
+    }
+  }
+}

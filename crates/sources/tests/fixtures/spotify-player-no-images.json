@@ -1,0 +1,34 @@
+{
+  "device": {
+    "id": "d1",
+    "is_active": true,
+    "name": "Kitchen speaker",
+    "type": "Speaker",
+    "volume_percent": 40
+  },
+  "shuffle_state": false,
+  "repeat_state": "off",
+  "timestamp": 1788782380000,
+  "progress_ms": 134250,
+  "is_playing": true,
+  "currently_playing_type": "track",
+  "item": {
+    "type": "track",
+    "id": "4fbvXwMTXPWaFyaMWUm9CR",
+    "name": "Holocene",
+    "duration_ms": 337000,
+    "artists": [
+      {
+        "name": "Bon Iver"
+      },
+      {
+        "name": "Guest"
+      }
+    ],
+    "album": {
+      "id": "noart",
+      "name": "Bon Iver, Bon Iver",
+      "images": []
+    }
+  }
+}
