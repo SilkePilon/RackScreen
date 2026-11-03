@@ -196,11 +196,29 @@ impl RenderLoop {
             if phase != prev {
                 tracing::info!("night mode: {prev:?} -> {phase:?}");
             }
-            // The moon is up and still: the panels already show it, so only
-            // the clock and the model are kept going.
+            // The moon is up and still. The same scene goes to every worker each
+            // idle tick: it is skipped for free, but a panel whose last push
+            // failed (`needs_full`) gets a full frame again within 500 ms.
             if prev == NightPhase::Icon && phase == NightPhase::Icon {
+                for w in &workers {
+                    w.send(Job {
+                        scene: night_scene(1.0),
+                        fade: None,
+                        force_full: false,
+                    })?;
+                }
+                for w in &workers {
+                    w.wait()?;
+                }
                 std::thread::sleep(Duration::from_millis(500));
                 continue;
+            }
+            if prev == NightPhase::Icon && phase != NightPhase::Icon {
+                // the hours under the moon belong to no stats period
+                for s in &self.screens {
+                    let _ = s.mailbox.take_push_stats();
+                }
+                stats.reset(now);
             }
             if prev.shows_icon() && phase == NightPhase::Day {
                 for s in &self.screens {
