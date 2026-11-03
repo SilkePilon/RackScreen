@@ -18,7 +18,7 @@ pub struct Job {
     pub scene: Scene,
     /// Night fade progress, `Some(1.0)` = black.
     pub fade: Option<f32>,
-    /// Push the whole frame (after waking the panels).
+    /// Push the whole frame (at start and after the night).
     pub force_full: bool,
 }
 

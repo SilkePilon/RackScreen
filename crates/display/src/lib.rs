@@ -48,8 +48,6 @@ pub trait Display: Send {
 #[derive(Debug)]
 pub enum DisplayCmd {
     Frame(PackedFrame),
-    Sleep,
-    Wake,
     Quit,
 }
 
@@ -199,8 +197,6 @@ pub fn spawn_display_thread(
                     }
                     r
                 }
-                DisplayCmd::Sleep => display.sleep(),
-                DisplayCmd::Wake => display.wake(),
                 DisplayCmd::Quit => {
                     let _ = display.sleep();
                     return;
@@ -333,9 +329,9 @@ mod tests {
     #[test]
     fn frame_is_delivered_after_pending_control() {
         let mb = Mailbox::new();
-        mb.put(DisplayCmd::Sleep);
+        mb.put(DisplayCmd::Quit);
         mb.put_frame(&[Rect::full()], |rs| bytes_for(rs, 1));
-        assert!(matches!(mb.take(), DisplayCmd::Sleep));
+        assert!(matches!(mb.take(), DisplayCmd::Quit));
         assert!(matches!(mb.take(), DisplayCmd::Frame(..)));
         assert!(mb.try_take().is_none());
         mb.put_frame(&[Rect::full()], |rs| bytes_for(rs, 1));
@@ -363,7 +359,7 @@ mod tests {
         let mb2 = mb.clone();
         let h = std::thread::spawn(move || mb2.take());
         std::thread::sleep(std::time::Duration::from_millis(50));
-        mb.put(DisplayCmd::Wake);
-        assert!(matches!(h.join().unwrap(), DisplayCmd::Wake));
+        mb.put(DisplayCmd::Quit);
+        assert!(matches!(h.join().unwrap(), DisplayCmd::Quit));
     }
 }

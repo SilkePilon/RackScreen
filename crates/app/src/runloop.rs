@@ -13,13 +13,13 @@ use rackscreen_core::anim::Secs;
 use rackscreen_core::event::Event;
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::is_night;
+use rackscreen_core::p2::status::night_scene;
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
 use rackscreen_render::frame::Orient;
 
+use crate::night::{NightFrame, NightPhase};
 use crate::worker::{Job, ScreenWorker};
-
-const NIGHT_FADE_SECS: Secs = 1.0;
 
 pub struct ScreenSlot {
     /// Physical position, top to bottom; the model is asked for `scene(index, now)`.
@@ -168,8 +168,7 @@ impl RenderLoop {
         model.set_arr_configured(self.arr_configured);
         model.set_jellyfin_configured(self.jellyfin_configured);
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
-        let mut asleep = false;
-        let mut fade_started: Option<Secs> = None;
+        let mut phase = NightPhase::Day;
         let mut stats = crate::stats::FrameStats::new(self.screens.len(), 60.0, 0.0);
         let mut deadline = Instant::now();
 
@@ -192,38 +191,41 @@ impl RenderLoop {
                 }
             };
 
-            if night && asleep {
+            let prev = phase;
+            phase = phase.step(night, now);
+            if phase != prev {
+                tracing::info!("night mode: {prev:?} -> {phase:?}");
+            }
+            // The moon is up and still: the panels already show it, so only
+            // the clock and the model are kept going.
+            if prev == NightPhase::Icon && phase == NightPhase::Icon {
                 std::thread::sleep(Duration::from_millis(500));
                 continue;
             }
-            if !night && asleep {
-                tracing::info!("night mode over, waking displays");
+            if prev.shows_icon() && phase == NightPhase::Day {
                 for s in &self.screens {
-                    s.mailbox.put(DisplayCmd::Wake);
                     // pushes from before the night belong to no period
                     let _ = s.mailbox.take_push_stats();
                 }
-                asleep = false;
                 force_full = true;
                 // the night is not part of the stats period
                 stats.reset(now);
-                // the first frame after waking is not late
+                // the first frame after the night is not late
                 deadline = Instant::now();
                 model.tick(now);
             }
-            let fade = if night {
-                let f0 = *fade_started.get_or_insert(now);
-                // quantised like the role crossfade, so equal frames are skipped
-                let f = (((now - f0) / NIGHT_FADE_SECS) as f32).min(1.0);
-                Some((f * 64.0).round() / 64.0)
-            } else {
-                fade_started = None;
-                None
+            let frame = phase.frame(now);
+            let fade = match frame {
+                NightFrame::Fade(f) => Some(f),
+                NightFrame::Day | NightFrame::Icon(_) => None,
             };
 
             for (i, s) in self.screens.iter_mut().enumerate() {
                 let t = Instant::now();
-                let scene = model.scene(s.index, now, &mut s.ui);
+                let scene = match frame {
+                    NightFrame::Icon(a) => night_scene(a),
+                    NightFrame::Day | NightFrame::Fade(_) => model.scene(s.index, now, &mut s.ui),
+                };
                 stats
                     .screen(i)
                     .build
@@ -253,15 +255,6 @@ impl RenderLoop {
                     );
                 }
                 stats.reset(now);
-            }
-
-            if fade == Some(1.0) {
-                tracing::info!("night mode, sleeping displays");
-                for s in &self.screens {
-                    s.mailbox.put(DisplayCmd::Sleep);
-                }
-                asleep = true;
-                continue;
             }
 
             deadline = advance(deadline, tick, Instant::now());
