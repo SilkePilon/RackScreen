@@ -107,6 +107,12 @@ export interface GifCfg {
   name: string
   url: string
 }
+export type GifRating = "g" | "pg" | "pg-13" | "r"
+export interface GifSearchCfg {
+  giphy_key: Secret
+  tenor_key: Secret
+  rating: GifRating
+}
 export interface ScreenCfg {
   roles: string[]
   cycle_secs: number
@@ -145,6 +151,7 @@ export interface Config {
   shows: ShowsCfg
   /** Left out when empty. */
   gifs?: GifCfg[]
+  gif_search: GifSearchCfg
   screens: ScreenCfg[]
   web: WebCfg
 }
@@ -159,6 +166,8 @@ export const SECRET_PATHS = [
   "media.lidarr.api_key",
   "jellyfin.api_key",
   "web.password",
+  "gif_search.giphy_key",
+  "gif_search.tenor_key",
 ] as const
 export type SecretPath = (typeof SECRET_PATHS)[number]
 
@@ -171,6 +180,23 @@ export interface ConfigResponse {
 export interface SaveResponse extends ConfigResponse {
   restart: "monitor" | "process" | "none"
 }
+
+export type GifProvider = "giphy" | "tenor"
+export interface GifHit {
+  id: string
+  title: string
+  /** The link to store under gifs:. */
+  url: string
+  preview: string
+  width: number
+  height: number
+}
+export interface GifPage {
+  results: GifHit[]
+  /** Pass back as offset for the next page; null at the end. */
+  next: string | null
+}
+export type GifProviders = Record<GifProvider, boolean>
 
 export interface AuthState {
   required: boolean

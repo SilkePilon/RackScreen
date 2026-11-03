@@ -41,3 +41,27 @@ export function classifyLink(raw: string): GifLink {
   if (path.toLowerCase().endsWith(".gif")) return { ok: true, preview: url }
   return { ok: false, error: "Not a GIPHY or Tenor link, or an https link ending in .gif" }
 }
+
+/** A GIF name from a search query or a result title: "Happy Cat GIF by X" → "happy-cat". */
+export function suggestName(text: string, taken: string[]): string {
+  const base =
+    text
+      .replace(/\s+GIF(\s+by\s+.*)?$/i, "")
+      .replace(/\s+(sticker|gif)$/i, "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24)
+      .replace(/-+$/, "") || "gif"
+  if (!taken.includes(base)) return base
+  for (let i = 2; ; i++) if (!taken.includes(`${base}-${i}`)) return `${base}-${i}`
+}
+
+/** Why `name` cannot be used for the GIF at `index` (null when adding), or null. */
+export function gifNameError(name: string, gifs: { name: string }[], index: number | null): string | null {
+  if (!name) return "Give it a name."
+  if (!GIF_NAME.test(name)) return "Lowercase letters, digits and - only."
+  if (gifs.some((g, i) => g.name === name && i !== index)) return "Another GIF has this name."
+  return null
+}

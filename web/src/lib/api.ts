@@ -2,6 +2,9 @@ import type {
   AuthState,
   Config,
   ConfigResponse,
+  GifPage,
+  GifProvider,
+  GifProviders,
   Info,
   LogsPage,
   NightMode,
@@ -91,6 +94,7 @@ export const api = {
   saveConfig: (config: Config) => put<SaveResponse>("/config", { config }),
   validateConfig: (config: unknown) =>
     post<{ ok: boolean; error?: string }>("/config/validate", { config }),
+  validateYaml: (yaml: string) => post<{ ok: boolean; error?: string }>("/config/validate", { yaml }),
   yaml: () => get<{ yaml: string }>("/config/yaml"),
   saveYaml: (yaml: string) => put<SaveResponse>("/config/yaml", { yaml }),
 
@@ -109,6 +113,13 @@ export const api = {
   spotifyCallback: (pasted: string) =>
     post<{ ok: boolean; status: string }>("/spotify/callback", { pasted }),
   spotifyLogout: () => post<unknown>("/spotify/logout"),
+
+  gifProviders: () => get<GifProviders>("/gifs/providers"),
+  gifSearch: (provider: GifProvider, q: string, offset?: string | null) =>
+    get<GifPage>(`/gifs/search?${new URLSearchParams({ provider, q, ...(offset ? { offset } : {}) })}`),
+  gifTrending: (provider: GifProvider, offset?: string | null) =>
+    get<GifPage>(`/gifs/trending?${new URLSearchParams({ provider, ...(offset ? { offset } : {}) })}`),
+  gifTrendingTerms: (provider: GifProvider) => get<{ terms: string[] }>(`/gifs/trending-terms?provider=${provider}`),
 
   update: () => get<UpdateState>("/update"),
   startUpdate: () => post<unknown>("/update"),

@@ -125,6 +125,7 @@ export function defaultConfig(): Config {
       { name: "party", url: "https://giphy.com/gifs/party-parrot-l3q2zVr6cu95nF6O4" },
       { name: "nod", url: "https://tenor.com/view/nod-yes-gif-12345678" },
     ],
+    gif_search: { giphy_key: null, tenor_key: null, rating: "g" },
     screens: [
       { roles: ["cpu", "power-mix"], cycle_secs: 15, spi: 0, cs: 0, dc: 6, rst: 5, rotate: 270, hflip: false, hz },
       { roles: ["mem", "renewable", "weather"], cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true, hz },

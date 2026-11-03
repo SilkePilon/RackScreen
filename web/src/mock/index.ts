@@ -1,13 +1,13 @@
 // A fake RackScreen API for `npm run dev:mock`. Patches fetch for /api/*,
 // and swaps the live-frame socket and log stream for local generators.
 // Handy toggles from the browser console: __mock.offline(true), __mock.login(true).
-// URL flags: ?login (password "rackscreen"), ?offline, ?update.
+// URL flags: ?login (password "rackscreen"), ?offline, ?update, ?nogifkeys (no GIF search keys).
 
 import { parse, stringify } from "yaml"
 
 import { setLiveFactory, setLogStreamFactory, type LiveSocket, type LogSource } from "@/lib/live"
 import { setAt, getAt } from "@/lib/path"
-import type { Config, LogLine, NightMode, SecretPath, Showing, Status, UpdateState } from "@/lib/types"
+import type { Config, GifHit, GifPage, GifProvider, LogLine, NightMode, SecretPath, Showing, Status, UpdateState } from "@/lib/types"
 import { SECRET_PATHS } from "@/lib/types"
 import { defaultConfig, makeLog, rolesFor, ROLE_DEFS, SHOWS } from "@/mock/data"
 import { drawFrame } from "@/mock/frames"
@@ -20,6 +20,9 @@ const state = {
     "electricity.token": "em-xxxxxxxx",
     "github.token": "github_pat_xxx",
     "qbittorrent.pass": "hunter2",
+    ...(params.has("nogifkeys")
+      ? {}
+      : { "gif_search.giphy_key": "giphy-mock-key", "gif_search.tenor_key": "tenor-mock-key" }),
   } as Partial<Record<SecretPath, string>>,
   night: "auto" as NightMode,
   patternUntil: 0,
@@ -169,6 +172,8 @@ function validate(c: Config): string | null {
     if (s.cycle_secs < 3 || s.cycle_secs > 300)
       return `screen '${s.roles[0]}': cycle_secs must be between 3 and 300 (got ${s.cycle_secs})`
   }
+  if (!["g", "pg", "pg-13", "r"].includes(c.gif_search?.rating ?? "g"))
+    return `gif_search.rating must be g, pg, pg-13 or r (got ${c.gif_search.rating})`
   if (c.electricity.enabled && !c.electricity.zone.trim()) return "electricity.zone must be set when electricity is enabled"
   if ((c.location.lat === null) !== (c.location.lon === null)) return "location needs both lat and lon, or neither"
   if ((c.weather.enabled || c.rain.enabled || c.iss.enabled) && c.location.lat === null)
@@ -200,17 +205,61 @@ function save(incoming: Config, fromYaml: boolean) {
   let c = structuredClone(incoming)
   for (const p of SECRET_PATHS) c = setAt(c, p, null)
   state.config = c
-  const restart = webChanged ? "process" : "monitor"
+  const onlySearch =
+    JSON.stringify({ ...state.config, gif_search: null }) === JSON.stringify({ ...c, gif_search: null })
+  const restart = webChanged ? "process" : onlySearch ? "none" : "monitor"
   if (webChanged) {
     state.started = Math.floor(Date.now() / 1000) + 4
     state.offline = true
     setTimeout(() => (state.offline = false), 4000)
-  } else {
+  } else if (restart === "monitor") {
     state.restartingUntil = Date.now() + 1500
     state.monitorSince = Math.floor(Date.now() / 1000) + 1
   }
   pushLog("INFO", `config saved; restarting the ${restart}`)
   return json(200, { config: maskedConfig(), secrets: secretsMap(), restart })
+}
+
+// Fake GIF search: animated SVG previews as data URLs, nothing from the network.
+const WORDS = ["happy", "dance", "party", "cat", "wow", "yes", "spin", "wave", "jump", "cheers", "hype", "chill"]
+function hash(s: string) {
+  let h = 2166136261
+  for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619)
+  return h >>> 0
+}
+function fakePreview(seed: number, w: number, h: number) {
+  const hue = seed % 360
+  const hue2 = (hue + 60) % 360
+  const r = Math.min(w, h) / 4
+  const dur = 1.2 + (seed % 7) / 5
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 70% 32%)"/><stop offset="1" stop-color="hsl(${hue2} 70% 18%)"/></linearGradient></defs>
+<rect width="${w}" height="${h}" fill="url(#g)"/>
+<circle cx="${w / 2}" cy="${h / 2}" r="${r}" fill="hsl(${hue2} 90% 70%)" opacity=".9">
+<animate attributeName="cy" values="${h / 2 - r / 2};${h / 2 + r / 2};${h / 2 - r / 2}" dur="${dur}s" repeatCount="indefinite"/>
+<animate attributeName="r" values="${r};${r * 0.7};${r}" dur="${dur}s" repeatCount="indefinite"/></circle>
+<rect x="${w / 2 - r * 1.6}" y="${h - r / 2 - 6}" width="${r * 3.2}" height="4" rx="2" fill="#000" opacity=".25"/></svg>`
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+}
+function fakeGifs(provider: GifProvider, q: string, offset: number): GifPage {
+  const total = 60
+  const results: GifHit[] = []
+  for (let i = offset; i < Math.min(offset + 25, total); i++) {
+    const seed = hash(`${provider}:${q}:${i}`)
+    const word = q || WORDS[seed % WORDS.length]
+    const [w, h] = [[200, 113], [200, 200], [200, 150], [200, 267], [200, 112]][seed % 5]
+    const id = seed.toString(36) + i.toString(36)
+    const slug = word.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "gif"
+    results.push({
+      id,
+      title: `${word[0].toUpperCase()}${word.slice(1)} ${["GIF", "Reaction", "Loop", "Mood"][seed % 4]}`,
+      url: provider === "giphy" ? `https://giphy.com/gifs/${id}` : `https://media.tenor.com/${id}AAAAC/${slug}.gif`,
+      preview: fakePreview(seed, w, h),
+      width: w,
+      height: h,
+    })
+  }
+  return { results, next: offset + 25 < total ? String(offset + 25) : null }
 }
 
 function pushLog(level: LogLine["level"], msg: string) {
@@ -273,7 +322,15 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     case "PUT /config":
       return save(b.config as Config, false)
     case "POST /config/validate": {
-      const err = validate(b.config as Config)
+      let cfg = b.config as Config
+      if (typeof b.yaml === "string") {
+        try {
+          cfg = { ...defaultConfig(), ...(parse(b.yaml) as Config) }
+        } catch (e) {
+          return json(200, { ok: false, error: `parse yaml: ${(e as Error).message}` })
+        }
+      }
+      const err = validate(cfg)
       return json(200, err ? { ok: false, error: err } : { ok: true })
     }
     case "GET /config/yaml":
@@ -341,6 +398,22 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     case "POST /spotify/logout":
       state.spotifyLoggedIn = false
       return json(200, { ok: true })
+    case "GET /gifs/providers":
+      return json(200, { giphy: secretSet("gif_search.giphy_key"), tenor: secretSet("gif_search.tenor_key") })
+    case "GET /gifs/search":
+    case "GET /gifs/trending": {
+      const provider = url.searchParams.get("provider") as GifProvider
+      if (provider !== "giphy" && provider !== "tenor") return json(400, { error: "provider must be giphy or tenor" })
+      if (!secretSet(`gif_search.${provider}_key`))
+        return json(400, { error: `No ${provider === "giphy" ? "GIPHY" : "Tenor"} API key: add one under GIF search and save` })
+      const q = (url.searchParams.get("q") ?? "").trim()
+      if (p === "/gifs/search" && (q.length < 1 || q.length > 100)) return json(400, { error: "q must be 1 to 100 characters" })
+      return json(200, fakeGifs(provider, p === "/gifs/search" ? q : "", Number(url.searchParams.get("offset") ?? 0)))
+    }
+    case "GET /gifs/trending-terms":
+      return json(200, {
+        terms: ["happy", "good morning", "dance", "cat", "thank you", "excited", "love", "party", "wow", "monday"],
+      })
     case "GET /update":
       return json(200, state.update)
     case "POST /update": {

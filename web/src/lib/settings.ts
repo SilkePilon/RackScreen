@@ -18,6 +18,7 @@ const S = "/integrations/sky"
 const M = "/integrations/media"
 const SP = "/integrations/spotify"
 const G = "/integrations/github"
+const GF = "/integrations/gifs"
 const D = "/display"
 const SH = "/shows"
 const SYS = "/system"
@@ -399,6 +400,29 @@ export const SETTINGS: Record<string, SettingMeta> = {
     page: SH,
     section: "Schedule",
     def: undefined,
+  },
+
+  "gif_search.giphy_key": {
+    title: "GIPHY API key",
+    description: "Free at developers.giphy.com: create an app and pick API.",
+    page: GF,
+    section: "Search keys",
+    keywords: "gif search giphy key",
+  },
+  "gif_search.tenor_key": {
+    title: "Tenor API key",
+    description: "A Google Cloud API key with the Tenor API enabled.",
+    page: GF,
+    section: "Search keys",
+    keywords: "gif search tenor google key",
+  },
+  "gif_search.rating": {
+    title: "Content rating",
+    description: "The most a search result may be rated.",
+    page: GF,
+    section: "Search keys",
+    def: "g",
+    keywords: "gif search safe nsfw filter",
   },
 
   "web.password": {

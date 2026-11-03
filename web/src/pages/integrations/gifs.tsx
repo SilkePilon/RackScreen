@@ -1,8 +1,19 @@
 import * as React from "react"
-import { ExternalLinkIcon, ImageIcon, ImagePlayIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  ExternalLinkIcon,
+  ImageIcon,
+  ImagePlayIcon,
+  LinkIcon,
+  PencilIcon,
+  PlusIcon,
+  SearchIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { toast } from "sonner"
 
-import { HeaderActions, PageBody, PageIntro } from "@/components/page"
-import { RowSkeleton, Section, SettingsCard } from "@/components/settings"
+import { PageBody, PageIntro } from "@/components/page"
+import { Segmented } from "@/components/segmented"
+import { RowSkeleton, SecretRow, Section, SelectRow, SettingsCard } from "@/components/settings"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,31 +35,75 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDraft } from "@/lib/draft"
-import { classifyLink, GIF_NAME } from "@/lib/gif"
+import { classifyLink, gifNameError } from "@/lib/gif"
 import type { Config, GifCfg } from "@/lib/types"
+import { addGif, GifSearch, ScreenSelect } from "@/pages/integrations/gif-search"
+
+const RATINGS = [
+  { value: "g", label: "G · everyone" },
+  { value: "pg", label: "PG" },
+  { value: "pg-13", label: "PG-13" },
+  { value: "r", label: "R" },
+]
 
 export default function Gifs() {
   const d = useDraft()
-  const [editing, setEditing] = React.useState<{ index: number | null } | null>(null)
+  const [editing, setEditing] = React.useState<number | null>(null)
+  const [mode, setMode] = React.useState<"search" | "paste">("search")
   const gifs = d.draft?.gifs ?? []
   return (
     <PageBody>
-      <HeaderActions>
-        <Button size="sm" variant="ghost" onClick={() => setEditing({ index: null })} disabled={!d.ready}>
-          <PlusIcon data-icon="inline-start" />
-          Add GIF
-        </Button>
-      </HeaderActions>
       <PageIntro title="GIFs">
-        Paste a GIPHY or Tenor link, or any https link ending in .gif. A screen shows it as the role{" "}
+        Search GIPHY and Tenor, or paste any https link ending in .gif. A screen shows a GIF as the role{" "}
         <code className="font-mono text-xs">gif:&lt;name&gt;</code>. Each GIF a screen uses takes up to about 35 MB
         of memory on the Pi.
       </PageIntro>
+      <Section
+        title="Add a GIF"
+        description={
+          mode === "search"
+            ? "Pick one to name it and put it on a screen."
+            : "GIPHY, Tenor, or any https link ending in .gif."
+        }
+        action={
+          <Segmented
+            label="How to add"
+            value={mode}
+            onChange={setMode}
+            options={[
+              {
+                value: "search",
+                label: (
+                  <span className="flex items-center gap-1.5">
+                    <SearchIcon className="size-3.5" />
+                    Search
+                  </span>
+                ),
+              },
+              {
+                value: "paste",
+                label: (
+                  <span className="flex items-center gap-1.5">
+                    <LinkIcon className="size-3.5" />
+                    Paste link
+                  </span>
+                ),
+              },
+            ]}
+          />
+        }
+      >
+        {!d.ready ? (
+          <RowSkeleton count={1} />
+        ) : (
+          <SettingsCard>{mode === "search" ? <GifSearch /> : <PasteForm />}</SettingsCard>
+        )}
+      </Section>
       {!d.ready ? (
         <RowSkeleton count={2} />
       ) : gifs.length === 0 ? (
@@ -58,30 +113,139 @@ export default function Gifs() {
               <ImagePlayIcon />
             </EmptyMedia>
             <EmptyTitle>No GIFs yet</EmptyTitle>
-            <EmptyDescription>Add one, then pick it as a role on the Screens page.</EmptyDescription>
+            <EmptyDescription>Search or paste one above, then pick it as a role on the Screens page.</EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <Button onClick={() => setEditing({ index: null })}>
-              <PlusIcon data-icon="inline-start" />
-              Add a GIF
-            </Button>
-          </EmptyContent>
         </Empty>
       ) : (
         <Section title="Your GIFs" description={`${gifs.length} ${gifs.length === 1 ? "link" : "links"}`}>
           <SettingsCard>
             {gifs.map((g, i) => (
-              <GifRow key={`${g.name}-${i}`} gif={g} index={i} onEdit={() => setEditing({ index: i })} />
+              <GifRow key={`${g.name}-${i}`} gif={g} index={i} onEdit={() => setEditing(i)} />
             ))}
           </SettingsCard>
         </Section>
       )}
-      <GifDialog
-        open={!!editing}
-        index={editing?.index ?? null}
-        onOpenChange={(o) => !o && setEditing(null)}
-      />
+      <Section
+        title="Search keys"
+        id="search-keys"
+        description="Free keys for the search above. The Pi makes the calls; the keys never reach this browser."
+      >
+        {!d.ready ? (
+          <RowSkeleton count={3} />
+        ) : (
+          <SettingsCard>
+            <SecretRow id="gif_search.giphy_key" />
+            <SecretRow id="gif_search.tenor_key" />
+            <SelectRow id="gif_search.rating" options={RATINGS} />
+          </SettingsCard>
+        )}
+      </Section>
+      <GifDialog open={editing !== null} index={editing ?? 0} onOpenChange={(o) => !o && setEditing(null)} />
     </PageBody>
+  )
+}
+
+function PasteForm() {
+  const d = useDraft()
+  const gifs = d.draft?.gifs ?? []
+  const [name, setName] = React.useState("")
+  const [url, setUrl] = React.useState("")
+  const [screen, setScreen] = React.useState<number | null>(null)
+  const [touched, setTouched] = React.useState(false)
+  const n = name.trim()
+  const nameErr = gifNameError(n, gifs, null)
+  const link = classifyLink(url)
+  const dupe = gifs.find((g) => g.url.trim() === url.trim())
+  const urlErr = !url.trim()
+    ? "Paste a link."
+    : !link.ok
+      ? link.error
+      : dupe
+        ? `${dupe.name} already has this link.`
+        : null
+  const preview = link.ok ? link.preview : null
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setTouched(true)
+    if (nameErr || urlErr) return
+    d.update((c) => addGif(c, { name: n, url: url.trim() }, screen))
+    toast.success(`Added ${n}`, {
+      description: screen === null ? "Save to keep it." : `On screen ${screen + 1} once you save.`,
+    })
+    setName("")
+    setUrl("")
+    setScreen(null)
+    setTouched(false)
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-5 p-5">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+        <div className="flex size-20 shrink-0 items-center justify-center self-center overflow-hidden rounded-full bg-black ring-1 ring-border sm:self-start">
+          {preview ? (
+            <img src={preview} alt="Preview" referrerPolicy="no-referrer" className="size-full object-cover" />
+          ) : (
+            <ImageIcon className="size-5 text-muted-foreground" />
+          )}
+        </div>
+        <FieldGroup className="flex-1">
+          <Field data-invalid={(touched && !!urlErr) || (!!url && !link.ok) || undefined}>
+            <FieldLabel htmlFor="paste-url">Link</FieldLabel>
+            <Input
+              id="paste-url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://giphy.com/gifs/…"
+              aria-invalid={(touched && !!urlErr) || (!!url && !link.ok) || undefined}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            {(touched || (url && !link.ok)) && urlErr ? (
+              <FieldError>{urlErr}</FieldError>
+            ) : (
+              <FieldDescription>
+                {link.ok && !preview
+                  ? "Tenor pages are resolved on the Pi; no preview here."
+                  : "GIPHY, Tenor, or any https link ending in .gif."}
+              </FieldDescription>
+            )}
+          </Field>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field data-invalid={(touched && !!nameErr) || undefined}>
+              <FieldLabel htmlFor="paste-name">Name</FieldLabel>
+              <Input
+                id="paste-name"
+                value={name}
+                onChange={(e) => setName(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+                placeholder="party"
+                className="font-mono"
+                aria-invalid={(touched && !!nameErr) || undefined}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              {touched && nameErr ? (
+                <FieldError>{nameErr}</FieldError>
+              ) : (
+                <FieldDescription>
+                  The role is <span className="font-mono">gif:{n || "name"}</span>.
+                </FieldDescription>
+              )}
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="paste-screen">Screen</FieldLabel>
+              <ScreenSelect id="paste-screen" value={screen} onChange={setScreen} />
+            </Field>
+          </div>
+        </FieldGroup>
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit">
+          <PlusIcon data-icon="inline-start" />
+          Add GIF
+        </Button>
+      </div>
+    </form>
   )
 }
 
@@ -191,12 +355,12 @@ function GifDialog({
   onOpenChange,
 }: {
   open: boolean
-  index: number | null
+  index: number
   onOpenChange: (o: boolean) => void
 }) {
   const d = useDraft()
   const gifs = d.draft?.gifs ?? []
-  const current = index !== null ? gifs[index] : undefined
+  const current = open ? gifs[index] : undefined
   const [name, setName] = React.useState("")
   const [url, setUrl] = React.useState("")
   const [touched, setTouched] = React.useState(false)
@@ -210,13 +374,7 @@ function GifDialog({
   }
 
   const n = name.trim()
-  const nameErr = !n
-    ? "Give it a name."
-    : !GIF_NAME.test(n)
-      ? "Lowercase letters, digits and - only."
-      : gifs.some((g, i) => g.name === n && i !== index)
-        ? "Another GIF has this name."
-        : null
+  const nameErr = gifNameError(n, gifs, index)
   const link = classifyLink(url)
   const dupe = gifs.find((g, i) => i !== index && g.url.trim() === url.trim())
   const urlErr = !url.trim()
@@ -231,12 +389,10 @@ function GifDialog({
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
     setTouched(true)
-    if (nameErr || urlErr) return
+    if (nameErr || urlErr || !current) return
     d.update((c) => {
       const list = [...(c.gifs ?? [])]
-      const next = { name: n, url: url.trim() }
-      if (index === null) list.push(next)
-      else list[index] = next
+      list[index] = { name: n, url: url.trim() }
       const renamed = current && current.name !== n
       return {
         ...c,
@@ -257,10 +413,8 @@ function GifDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={submit} className="flex flex-col gap-5">
           <DialogHeader>
-            <DialogTitle>{current ? `Edit ${current.name}` : "Add a GIF"}</DialogTitle>
-            <DialogDescription>
-              {current ? "Renaming updates every screen that shows it." : "Then add it to a screen as a role."}
-            </DialogDescription>
+            <DialogTitle>Edit {current?.name}</DialogTitle>
+            <DialogDescription>Renaming updates every screen that shows it.</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field data-invalid={(touched && !!nameErr) || undefined}>
@@ -320,7 +474,7 @@ function GifDialog({
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">{current ? "Done" : "Add GIF"}</Button>
+            <Button type="submit">Done</Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -2,6 +2,7 @@ import * as React from "react"
 import { useNavigate } from "react-router"
 import {
   CornerDownLeftIcon,
+  ImagePlayIcon,
   MoonIcon,
   PlayIcon,
   RotateCwIcon,
@@ -119,6 +120,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             ))}
           </CommandGroup>
           <CommandGroup heading="Actions">
+            <CommandItem
+              value="search gifs giphy tenor find animation add gif"
+              onSelect={() => run(() => navigate("/integrations/gifs#gif-search"))}
+            >
+              <ImagePlayIcon />
+              Search GIFs
+            </CommandItem>
             <CommandItem value="identify panels show numbers" onSelect={() => run(() => identify.mutate(undefined))}>
               <ScanEyeIcon />
               Identify panels
