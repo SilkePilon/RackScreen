@@ -13,7 +13,6 @@ use rackscreen_core::gif::{
     MAX_FRAMES,
 };
 
-use crate::http::client;
 use crate::SourceCtx;
 
 /// Downloads stop here.
@@ -26,6 +25,54 @@ pub const MAX_CANVAS_PX: u64 = 4_000_000;
 pub const RETRY: Duration = Duration::from_secs(3600);
 /// One download may take this long (the shared client's 10 s is for APIs).
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// A GIF download follows at most this many redirects.
+pub const MAX_REDIRECTS: usize = 5;
+
+/// A GIF is only fetched over https from a public host: never a local,
+/// private or link-local address (checked after the URL parser has
+/// normalised the host, so `https://2130706433/` is 127.0.0.1 too).
+pub fn check_url(url: &reqwest::Url) -> std::result::Result<(), String> {
+    if url.scheme() != "https" {
+        return Err(format!("{url}: GIFs are only fetched over https"));
+    }
+    // `host_str` is normalised: IPv4 in dotted form, IPv6 in brackets
+    match rackscreen_core::gif::host_refusal(url.host_str().unwrap_or("")) {
+        Some(why) => Err(format!("{url}: {why}")),
+        None => Ok(()),
+    }
+}
+
+/// Whether a GIF request may follow its `hops`-th redirect to `next`:
+/// at most `MAX_REDIRECTS`, and only to a URL `check_url` allows.
+pub fn redirect_check(next: &reqwest::Url, hops: usize) -> std::result::Result<(), String> {
+    if hops > MAX_REDIRECTS {
+        return Err(format!("more than {MAX_REDIRECTS} redirects"));
+    }
+    check_url(next).map_err(|e| format!("redirect refused: {e}"))
+}
+
+/// The client for GIF downloads and Tenor pages: the shared one's user
+/// agent, with redirects held to `redirect_check`. The shared client for
+/// the other sources is left alone.
+fn gif_client() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            reqwest::Client::builder()
+                .timeout(DOWNLOAD_TIMEOUT)
+                .user_agent(concat!("rackscreen/", env!("CARGO_PKG_VERSION")))
+                .redirect(reqwest::redirect::Policy::custom(
+                    |attempt| match redirect_check(attempt.url(), attempt.previous().len()) {
+                        Ok(()) => attempt.follow(),
+                        Err(e) => attempt.error(e),
+                    },
+                ))
+                .build()
+                .expect("reqwest client")
+        })
+        .clone()
+}
 
 /// One GIF a screen uses: its index in the config's `gifs:` list, its name
 /// (for the log) and the pasted link.
@@ -255,8 +302,10 @@ fn cover(canvas: &[u8], w: u32, h: u32) -> Vec<u8> {
 
 /// Fetch `url` asking for `accept`, refusing anything larger than `max` bytes.
 async fn fetch_capped(url: &str, accept: &str, max: usize) -> Result<Vec<u8>> {
-    let mut resp = client()
-        .get(url)
+    let parsed = reqwest::Url::parse(url).with_context(|| format!("bad link {url}"))?;
+    check_url(&parsed).map_err(|e| anyhow!(e))?;
+    let mut resp = gif_client()
+        .get(parsed)
         .header(reqwest::header::ACCEPT, accept)
         .timeout(DOWNLOAD_TIMEOUT)
         .send()
@@ -462,6 +511,55 @@ mod tests {
             .as_deref(),
             Some("https://a.example/x.gif?a=1&b=2")
         );
+    }
+
+    fn url(s: &str) -> reqwest::Url {
+        reqwest::Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn urls_must_be_https_to_a_public_host() {
+        assert!(check_url(&url("https://i.giphy.com/AbC.gif")).is_ok());
+        assert!(check_url(&url("https://8.8.8.8/x.gif")).is_ok());
+        for bad in [
+            "http://i.giphy.com/AbC.gif",
+            "ftp://i.giphy.com/AbC.gif",
+            "https://192.168.1.5/x.gif",
+            "https://127.0.0.1/x.gif",
+            "https://[::1]/x.gif",
+            "https://169.254.169.254/latest",
+            "https://localhost/x.gif",
+            // the URL parser normalises these to 127.0.0.1
+            "https://2130706433/x.gif",
+            "https://0x7f.1/x.gif",
+        ] {
+            assert!(check_url(&url(bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn redirects_stay_https_to_public_hosts_for_five_hops() {
+        let ok = url("https://media.tenor.com/x.gif");
+        assert!(redirect_check(&ok, 1).is_ok());
+        assert!(redirect_check(&ok, MAX_REDIRECTS).is_ok());
+        let e = redirect_check(&ok, MAX_REDIRECTS + 1).unwrap_err();
+        assert!(e.contains("redirects"), "{e}");
+        let e = redirect_check(&url("http://media.tenor.com/x.gif"), 1).unwrap_err();
+        assert!(e.contains("https"), "{e}");
+        let e = redirect_check(&url("https://10.0.0.1/x.gif"), 1).unwrap_err();
+        assert!(e.contains("10.0.0.1"), "{e}");
+        assert!(redirect_check(&url("https://127.0.0.1/x.gif"), 1).is_err());
+        assert!(redirect_check(&url("https://[fe80::1]/x.gif"), 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_private_gif_url_is_refused_before_any_request() {
+        // e.g. what a Tenor page pointed at: checked like the pasted link
+        for bad in ["https://192.168.1.5/x.gif", "http://media.tenor.com/x.gif"] {
+            let e = fetch_capped(bad, "image/gif", 1024).await.unwrap_err();
+            let e = format!("{e:#}");
+            assert!(e.contains("internet") || e.contains("https"), "{e}");
+        }
     }
 
     #[test]

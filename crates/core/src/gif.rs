@@ -152,6 +152,9 @@ pub fn classify_link(url: &str) -> Result<GifLink, String> {
         .strip_prefix("https://")
         .ok_or("the link must start with https://")?;
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    if let Some(why) = host_refusal(host) {
+        return Err(why);
+    }
     let host = host.to_ascii_lowercase();
     let host = host.strip_prefix("www.").unwrap_or(&host);
     let path = path.split(['?', '#']).next().unwrap_or("");
@@ -192,6 +195,61 @@ pub fn classify_link(url: &str) -> Result<GifLink, String> {
         return Ok(GifLink::Direct(url.to_string()));
     }
     Err("not a GIPHY or Tenor link, or an https link ending in .gif".into())
+}
+
+/// An IP a GIF must never come from: loopback, private, link-local,
+/// carrier-grade NAT, unspecified or broadcast (an IPv4-mapped IPv6 address
+/// counts as its IPv4 one). GIFs come from the internet.
+pub fn refused_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || (a == 100 && (64..128).contains(&b))
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return refused_ip(IpAddr::V4(v4));
+            }
+            let first = v6.segments()[0];
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Why a GIF may not be fetched from `host` (as it appears in a URL, maybe
+/// with `user@` and `:port`), or `None` when it may: an IP literal that
+/// `refused_ip`, `localhost` or an empty host.
+pub fn host_refusal(host: &str) -> Option<String> {
+    let host = host.rsplit('@').next().unwrap_or(host);
+    let bare = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(v6),
+        None => host.split(':').next().unwrap_or(host),
+    };
+    let lower = bare.to_ascii_lowercase();
+    let lower = lower.trim_end_matches('.');
+    if lower.is_empty() {
+        return Some("the link has no host".into());
+    }
+    if lower == "localhost" || lower.ends_with(".localhost") {
+        return Some(format!(
+            "{bare} is this machine; GIFs must come from the internet"
+        ));
+    }
+    match lower.parse::<std::net::IpAddr>() {
+        Ok(ip) if refused_ip(ip) => Some(format!(
+            "{bare} is a local or private address; GIFs must come from the internet"
+        )),
+        _ => None,
+    }
 }
 
 /// GIF names: lowercase letters, digits and `-`, not empty.
@@ -340,6 +398,65 @@ mod tests {
         ] {
             assert!(classify_link(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn private_loopback_and_link_local_ips_are_refused() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.1.5",
+            "169.254.1.1",
+            "0.0.0.0",
+            "100.64.0.1",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "fe80::1",
+            "fd00::1",
+            "::ffff:192.168.1.5",
+        ] {
+            assert!(refused_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["1.1.1.1", "8.8.8.8", "2606:4700::1111", "172.32.0.1"] {
+            assert!(!refused_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn hosts_are_checked_without_port_or_user() {
+        assert!(host_refusal("giphy.com").is_none());
+        assert!(host_refusal("media.tenor.com:443").is_none());
+        assert!(host_refusal("8.8.8.8").is_none());
+        for h in [
+            "192.168.1.5",
+            "192.168.1.5:8443",
+            "u:p@10.0.0.1",
+            "[::1]",
+            "[fe80::1]:443",
+            "localhost",
+            "LOCALHOST:80",
+            "x.localhost",
+            "",
+        ] {
+            let e = host_refusal(h).unwrap_or_else(|| panic!("{h} allowed"));
+            assert!(!e.is_empty(), "{h}");
+        }
+    }
+
+    #[test]
+    fn links_to_private_hosts_are_refused() {
+        for url in [
+            "https://192.168.1.5/x.gif",
+            "https://127.0.0.1:8443/x.gif",
+            "https://[::1]/x.gif",
+            "https://localhost/x.gif",
+        ] {
+            let e = classify_link(url).unwrap_err();
+            assert!(e.contains("internet"), "{url}: {e}");
+        }
+        assert!(classify_link("https://8.8.8.8/x.gif").is_ok());
     }
 
     #[test]
