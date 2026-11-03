@@ -24,6 +24,10 @@ pub mod qbittorrent;
 pub mod spotify;
 pub mod tunnel;
 
+/// Images with more pixels than this are refused from their header, before
+/// any pixel is decoded: a GIF canvas, an album cover. 4 Mpx of RGBA is 16 MB.
+pub const MAX_IMAGE_PX: u64 = 4_000_000;
+
 pub type EventTx = std::sync::mpsc::Sender<Event>;
 
 #[derive(Clone)]

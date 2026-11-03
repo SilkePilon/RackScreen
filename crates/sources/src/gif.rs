@@ -13,6 +13,7 @@ use rackscreen_core::gif::{
     MAX_FRAMES,
 };
 
+use crate::http::blocking;
 use crate::owned_fs::{create_dir_all_owned, write_new_owned, Owner};
 use crate::SourceCtx;
 
@@ -21,7 +22,7 @@ pub const MAX_DOWNLOAD_BYTES: usize = 20 * 1024 * 1024;
 /// A Tenor page is read up to this much.
 const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// GIFs with a larger canvas are refused: the canvas alone would be 16 MB.
-pub const MAX_CANVAS_PX: u64 = 4_000_000;
+pub const MAX_CANVAS_PX: u64 = crate::MAX_IMAGE_PX;
 /// The wait before trying a GIF again after its `failures`-th failed
 /// download in a row: 1 min, 5 min, 15 min, then hourly. A Pi that boots
 /// before its network is up gets its GIFs within a minute or so.
@@ -39,12 +40,12 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 /// A GIF download follows at most this many redirects.
 pub const MAX_REDIRECTS: usize = 5;
 
-/// A GIF is only fetched over https from a public host: never a local,
-/// private or link-local address (checked after the URL parser has
-/// normalised the host, so `https://2130706433/` is 127.0.0.1 too).
+/// A GIF or a Spotify cover is only fetched over https from a public host:
+/// never a local, private or link-local address (checked after the URL
+/// parser has normalised the host, so `https://2130706433/` is 127.0.0.1 too).
 pub fn check_url(url: &reqwest::Url) -> std::result::Result<(), String> {
     if url.scheme() != "https" {
-        return Err(format!("{url}: GIFs are only fetched over https"));
+        return Err(format!("{url}: images are only fetched over https"));
     }
     // `host_str` is normalised: IPv4 in dotted form, IPv6 in brackets
     match rackscreen_core::gif::host_refusal(url.host_str().unwrap_or("")) {
@@ -348,7 +349,7 @@ fn cover(canvas: &[u8], w: u32, h: u32) -> Vec<u8> {
 async fn fetch_capped(url: &str, accept: &str, max: usize) -> Result<Vec<u8>> {
     let parsed = reqwest::Url::parse(url).with_context(|| format!("bad link {url}"))?;
     check_url(&parsed).map_err(|e| anyhow!(e))?;
-    let mut resp = gif_client()
+    let resp = gif_client()
         .get(parsed)
         .header(reqwest::header::ACCEPT, accept)
         .timeout(DOWNLOAD_TIMEOUT)
@@ -357,24 +358,7 @@ async fn fetch_capped(url: &str, accept: &str, max: usize) -> Result<Vec<u8>> {
         .with_context(|| format!("GET {url}"))?
         .error_for_status()
         .with_context(|| format!("GET {url}"))?;
-    if resp.content_length().is_some_and(|n| n as usize > max) {
-        bail!("{url} is larger than {} MB", max / (1024 * 1024));
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = resp.chunk().await.with_context(|| format!("read {url}"))? {
-        body.extend_from_slice(&chunk);
-        if body.len() > max {
-            bail!("{url} is larger than {} MB", max / (1024 * 1024));
-        }
-    }
-    Ok(body)
-}
-
-/// Run blocking file or parse work off the async threads.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .context("blocking task")
+    crate::http::read_capped(resp, max, url).await
 }
 
 /// The `.gif` URL behind a pasted link; a Tenor page is fetched for it.

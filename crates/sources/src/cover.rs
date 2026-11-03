@@ -1,31 +1,67 @@
-//! Album art: decode a JPEG or PNG, crop it square and scale it to the
-//! screen's cover size, and keep the last few in memory so an album is
-//! downloaded once.
+//! Album art: download it (capped), decode a JPEG or PNG, crop it square
+//! and scale it to the screen's cover size, and keep the last few in memory
+//! so an album is downloaded once.
 
-use anyhow::{bail, Context, Result};
+use std::time::Duration;
+
+use anyhow::{anyhow, bail, Context, Result};
 use rackscreen_core::event::{Cover, CoverRef};
 use rackscreen_core::music::COVER_PX;
 
+use crate::MAX_IMAGE_PX;
+
 /// Covers kept in memory, newest last.
 pub const CACHE_LEN: usize = 8;
+/// A cover download stops here; a 640 px album JPEG is about 100 kB.
+pub const MAX_COVER_BYTES: usize = 2 * 1024 * 1024;
 
-/// Decode JPEG or PNG bytes to `(width, height, straight RGBA)`.
-pub fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+fn jpeg_decoder(bytes: &[u8]) -> zune_jpeg::JpegDecoder<std::io::Cursor<&[u8]>> {
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    use zune_jpeg::zune_core::options::DecoderOptions;
+    // strict: a truncated or damaged file is an error, not a grey half
+    let opts = DecoderOptions::default()
+        .jpeg_set_out_colorspace(ColorSpace::RGBA)
+        .set_strict_mode(true);
+    zune_jpeg::JpegDecoder::new_with_options(std::io::Cursor::new(bytes), opts)
+}
+
+/// Width and height from the image header, without decoding any pixels.
+pub fn dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
     if bytes.starts_with(&[0xFF, 0xD8]) {
-        decode_jpeg(bytes)
+        let mut d = jpeg_decoder(bytes);
+        d.decode_headers().map_err(|e| anyhow!("jpeg: {e:?}"))?;
+        let (w, h) = d.dimensions().context("jpeg: no dimensions")?;
+        Ok((w as u32, h as u32))
     } else if bytes.starts_with(b"\x89PNG") {
-        decode_png(bytes)
+        let r = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .context("png header")?;
+        let info = r.info();
+        Ok((info.width, info.height))
     } else {
         bail!("cover is neither JPEG nor PNG")
     }
 }
 
+/// Decode JPEG or PNG bytes to `(width, height, straight RGBA)`. An image
+/// over `MAX_IMAGE_PX` is refused from its header.
+pub fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    let (w, h) = dimensions(bytes)?;
+    anyhow::ensure!(w > 0 && h > 0, "cover is empty");
+    anyhow::ensure!(
+        w as u64 * h as u64 <= MAX_IMAGE_PX,
+        "cover {w}x{h} is too large"
+    );
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        decode_jpeg(bytes)
+    } else {
+        decode_png(bytes)
+    }
+}
+
 fn decode_jpeg(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
-    use zune_jpeg::zune_core::colorspace::ColorSpace;
-    use zune_jpeg::zune_core::options::DecoderOptions;
-    let opts = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
-    let mut d = zune_jpeg::JpegDecoder::new_with_options(std::io::Cursor::new(bytes), opts);
-    let rgba = d.decode().map_err(|e| anyhow::anyhow!("jpeg: {e:?}"))?;
+    let mut d = jpeg_decoder(bytes);
+    let rgba = d.decode().map_err(|e| anyhow!("jpeg: {e:?}"))?;
     let (w, h) = d.dimensions().context("jpeg: no dimensions")?;
     anyhow::ensure!(rgba.len() == w * h * 4, "jpeg: unexpected output size");
     Ok((w as u32, h as u32, rgba))
@@ -130,20 +166,20 @@ impl CoverCache {
         self.items.is_empty()
     }
 
-    /// The cover for `key`: from memory, else downloaded with `req` once.
-    /// A failed download is logged and gives `None` (retried next poll).
+    /// The cover for `key`: from memory, else downloaded with `req` once
+    /// (at most `MAX_COVER_BYTES`) and decoded off the async threads. A
+    /// failed download or decode is logged and gives `None`.
     pub async fn fetch(&mut self, key: &str, req: reqwest::RequestBuilder) -> Option<CoverRef> {
         if let Some(c) = self.get(key) {
             return Some(c);
         }
-        let bytes = match req.send().await.and_then(|r| r.error_for_status()) {
-            Ok(r) => r.bytes().await.ok()?,
-            Err(e) => {
-                tracing::debug!("cover {key}: {e}");
-                return None;
-            }
-        };
-        match cover_from_bytes(key, &bytes) {
+        let got = async {
+            let bytes = download(req, MAX_COVER_BYTES).await?;
+            let k = key.to_string();
+            crate::http::blocking(move || cover_from_bytes(&k, &bytes)).await?
+        }
+        .await;
+        match got {
             Ok(c) => Some(self.insert(c)),
             Err(e) => {
                 tracing::debug!("cover {key}: {e:#}");
@@ -151,6 +187,48 @@ impl CoverCache {
             }
         }
     }
+}
+
+/// Send `req` and read at most `max` bytes of a successful answer.
+pub async fn download(req: reqwest::RequestBuilder, max: usize) -> Result<Vec<u8>> {
+    let resp = req
+        .send()
+        .await
+        .context("cover request")?
+        .error_for_status()
+        .context("cover request")?;
+    let what = resp.url().to_string();
+    crate::http::read_capped(resp, max, &what).await
+}
+
+/// A request for a Spotify album image: https to a public host only, and
+/// every redirect checked the same way (`gif::check_url` rules).
+pub fn spotify_request(url: &str) -> Result<reqwest::RequestBuilder> {
+    let parsed = reqwest::Url::parse(url).with_context(|| format!("bad cover link {url}"))?;
+    crate::gif::check_url(&parsed).map_err(|e| anyhow!(e))?;
+    Ok(cover_client().get(parsed))
+}
+
+/// The client for Spotify covers: the shared one's user agent and timeout,
+/// with redirects held to `gif::redirect_check`.
+fn cover_client() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .user_agent(concat!("rackscreen/", env!("CARGO_PKG_VERSION")))
+                .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                    match crate::gif::redirect_check(attempt.url(), attempt.previous().len()) {
+                        Ok(()) => attempt.follow(),
+                        Err(e) => attempt.error(e),
+                    }
+                }))
+                .build()
+                .expect("reqwest client")
+        })
+        .clone()
 }
 
 #[cfg(test)]
@@ -220,6 +298,156 @@ mod tests {
         let at = |x: u32| &c.rgba[((42 * 84 + x) * 4) as usize..][..3];
         assert!(at(5)[0] > 150, "red on the left of the crop");
         assert!(at(78)[2] > 150, "blue on the right of the crop");
+    }
+
+    const TRUNCATED_JPEG: &[u8] = include_bytes!("../tests/fixtures/cover-truncated.jpg");
+    const TRUNCATED_PNG: &[u8] = include_bytes!("../tests/fixtures/cover-truncated.png");
+    const GARBAGE: &[u8] = include_bytes!("../tests/fixtures/cover-garbage.bin");
+
+    #[test]
+    fn truncated_and_garbage_covers_are_errors() {
+        for (name, bytes) in [
+            ("truncated jpeg", TRUNCATED_JPEG),
+            ("truncated png", TRUNCATED_PNG),
+            ("garbage", GARBAGE),
+            ("empty", &[][..]),
+            ("jpeg magic only", &[0xFF, 0xD8][..]),
+            ("png magic only", &b"\x89PNG"[..]),
+        ] {
+            assert!(decode(bytes).is_err(), "{name}");
+            assert!(cover_from_bytes("k", bytes).is_err(), "{name}");
+        }
+    }
+
+    /// The fixture JPEG with its frame header claiming `w × h`.
+    fn jpeg_claiming(w: u16, h: u16) -> Vec<u8> {
+        let mut b = JPEG.to_vec();
+        let sof = b
+            .windows(2)
+            .position(|m| m[0] == 0xFF && (0xC0..=0xC2).contains(&m[1]))
+            .expect("a frame header");
+        b[sof + 5..sof + 7].copy_from_slice(&h.to_be_bytes());
+        b[sof + 7..sof + 9].copy_from_slice(&w.to_be_bytes());
+        b
+    }
+
+    #[test]
+    fn header_sizes_are_read_and_big_images_refused_before_decoding() {
+        assert_eq!(dimensions(JPEG).unwrap(), (200, 150));
+        let gray = png_bytes(3, 2, png::ColorType::Grayscale, &[0; 6]);
+        assert_eq!(dimensions(&gray).unwrap(), (3, 2));
+        let big = jpeg_claiming(4000, 2000);
+        assert_eq!(dimensions(&big).unwrap(), (4000, 2000));
+        let e = decode(&big).unwrap_err().to_string();
+        assert!(e.contains("too large"), "{e}");
+        let big = png_bytes(2001, 2000, png::ColorType::Grayscale, &vec![0; 2001 * 2000]);
+        let e = decode(&big).unwrap_err().to_string();
+        assert!(e.contains("too large"), "{e}");
+        assert!(decode(&png_bytes(
+            2000,
+            2000,
+            png::ColorType::Grayscale,
+            &vec![0; 4_000_000]
+        ))
+        .is_ok());
+        assert_eq!(crate::MAX_IMAGE_PX, 4_000_000);
+        assert_eq!(crate::gif::MAX_CANVAS_PX, crate::MAX_IMAGE_PX, "one limit");
+    }
+
+    #[test]
+    fn spotify_cover_links_must_be_https_on_a_public_host() {
+        assert!(spotify_request("https://i.scdn.co/image/ab67616d").is_ok());
+        for bad in [
+            "http://i.scdn.co/image/ab67616d",
+            "https://127.0.0.1/x.jpg",
+            "https://192.168.1.5/x.jpg",
+            "https://localhost/x.jpg",
+            "not a url",
+        ] {
+            assert!(spotify_request(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// A one-route HTTP server on 127.0.0.1 that answers every request with
+    /// `body` (chunked when asked) and counts the requests.
+    async fn serve(body: Vec<u8>, chunked: bool) -> (String, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/cover", listener.local_addr().unwrap());
+        let hits = Arc::new(AtomicUsize::new(0));
+        let count = hits.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                count.fetch_add(1, Ordering::SeqCst);
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut req = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => req.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let head = if chunked {
+                        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                            .to_string()
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                    };
+                    if sock.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    if chunked {
+                        for part in body.chunks(64 * 1024) {
+                            let size = format!("{:x}\r\n", part.len());
+                            let ok = sock.write_all(size.as_bytes()).await.is_ok()
+                                && sock.write_all(part).await.is_ok()
+                                && sock.write_all(b"\r\n").await.is_ok();
+                            if !ok {
+                                return;
+                            }
+                        }
+                        let _ = sock.write_all(b"0\r\n\r\n").await;
+                    } else {
+                        let _ = sock.write_all(&body).await;
+                    }
+                });
+            }
+        });
+        (url, hits)
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn downloads_stop_at_two_megabytes() {
+        let big = vec![0u8; MAX_COVER_BYTES + 1];
+        for chunked in [false, true] {
+            let (url, _) = serve(big.clone(), chunked).await;
+            let e = download(crate::http::client().get(&url), MAX_COVER_BYTES)
+                .await
+                .unwrap_err();
+            assert!(
+                format!("{e:#}").contains("larger than"),
+                "chunked {chunked}: {e:#}"
+            );
+        }
+        let (url, _) = serve(JPEG.to_vec(), true).await;
+        let got = download(crate::http::client().get(&url), MAX_COVER_BYTES)
+            .await
+            .unwrap();
+        assert_eq!(got, JPEG);
+        let mut cache = CoverCache::default();
+        let c = cache.fetch("ok", crate::http::client().get(&url)).await;
+        assert_eq!(c.unwrap().0.size, COVER_PX, "decoded off the runtime");
     }
 
     #[test]

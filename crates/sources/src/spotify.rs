@@ -535,7 +535,13 @@ async fn poll_once(
         return Ok((None, next_poll(false, None)));
     };
     let cover = match (&item.cover_key, &item.cover_url) {
-        (Some(key), Some(url)) => covers.fetch(key, client().get(url)).await,
+        (Some(key), Some(url)) => match crate::cover::spotify_request(url) {
+            Ok(req) => covers.fetch(key, req).await,
+            Err(e) => {
+                tracing::debug!("cover {key}: {e:#}");
+                None
+            }
+        },
         _ => None,
     };
     let playing = item.playing;
