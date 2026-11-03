@@ -38,10 +38,20 @@ struct Slot {
     control: Option<DisplayCmd>,
 }
 
+/// Push timings recorded by the display thread; read and reset by the stats logger.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PushStats {
+    pub frames: u32,
+    pub total_ms: f64,
+    pub max_ms: f64,
+    pub bytes: u64,
+}
+
 /// Per-screen mailbox between the render loop and one display thread.
 #[derive(Clone)]
 pub struct Mailbox {
     inner: Arc<(Mutex<Slot>, Condvar)>,
+    stats: Arc<Mutex<PushStats>>,
 }
 
 impl Default for Mailbox {
@@ -54,7 +64,20 @@ impl Mailbox {
     pub fn new() -> Self {
         Self {
             inner: Arc::new((Mutex::new(Slot::default()), Condvar::new())),
+            stats: Arc::new(Mutex::new(PushStats::default())),
         }
+    }
+
+    pub fn record_push(&self, ms: f64, bytes: u64) {
+        let mut s = self.stats.lock().unwrap();
+        s.frames += 1;
+        s.total_ms += ms;
+        s.max_ms = s.max_ms.max(ms);
+        s.bytes += bytes;
+    }
+
+    pub fn take_push_stats(&self) -> PushStats {
+        std::mem::take(&mut *self.stats.lock().unwrap())
     }
 
     pub fn put(&self, cmd: DisplayCmd) {
@@ -105,7 +128,15 @@ pub fn spawn_display_thread(
         .name(format!("display-{name}"))
         .spawn(move || loop {
             let result = match mailbox.take() {
-                DisplayCmd::Frame(px, rect) => display.push(&px, rect),
+                DisplayCmd::Frame(px, rect) => {
+                    let t0 = std::time::Instant::now();
+                    let r = display.push(&px, rect);
+                    mailbox.record_push(
+                        t0.elapsed().as_secs_f64() * 1000.0,
+                        rect.w as u64 * rect.h as u64 * 2,
+                    );
+                    r
+                }
                 DisplayCmd::Sleep => display.sleep(),
                 DisplayCmd::Wake => display.wake(),
                 DisplayCmd::Quit => {
@@ -202,6 +233,19 @@ mod tests {
         mb.put(DisplayCmd::Quit);
         assert!(matches!(mb.take(), DisplayCmd::Quit));
         assert!(matches!(mb.take(), DisplayCmd::Frame(..)));
+    }
+
+    #[test]
+    fn push_stats_accumulate_and_reset() {
+        let mb = Mailbox::new();
+        mb.record_push(2.0, 100);
+        mb.record_push(4.0, 300);
+        let s = mb.take_push_stats();
+        assert_eq!(
+            (s.frames, s.total_ms, s.max_ms, s.bytes),
+            (2, 6.0, 4.0, 400)
+        );
+        assert_eq!(mb.take_push_stats(), PushStats::default());
     }
 
     #[test]

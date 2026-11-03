@@ -14,9 +14,7 @@ use rackscreen_render::renderer::Renderer;
 const BUDGET_MS: f64 = 1.0;
 const ITERATIONS: u32 = 200;
 
-#[test]
-#[ignore]
-fn every_role_under_a_millisecond() {
+fn bench_model() -> Model {
     let mut m = Model::new(Thresholds::default());
     m.apply(
         Event::Link {
@@ -62,6 +60,13 @@ fn every_role_under_a_millisecond() {
         0.0,
     );
     m.tick(0.0);
+    m
+}
+
+#[test]
+#[ignore]
+fn every_role_under_a_millisecond() {
+    let m = bench_model();
     let mut r = Renderer::new().unwrap();
     let mut px = new_pixmap();
     let mut worst = (Role::Cpu, 0.0f64);
@@ -99,4 +104,31 @@ fn every_role_under_a_millisecond() {
     println!("{:<12} {ms:.3} ms", "slide");
     assert!(ms < 2.0 * BUDGET_MS, "mid-slide frame {ms:.3} ms");
     assert!(worst.1 < BUDGET_MS, "{:?} takes {:.3} ms", worst.0, worst.1);
+}
+
+/// Render + orient + diff + pack per frame for a moving screen (cpu, the
+/// hero rolls) and a slide frame: the numbers the Pi stats should match.
+#[test]
+#[ignore]
+fn pipeline_per_frame() {
+    use rackscreen_render::frame::{dirty_rect, pack_rgb565, Orient};
+    let m = bench_model();
+    let mut r = Renderer::new().unwrap();
+    let orient = Orient::new(270, false);
+    let mut cur = new_pixmap();
+    let mut oriented = new_pixmap();
+    let mut prev = new_pixmap();
+    let mut ui = ScreenUi::new();
+    let t0 = Instant::now();
+    for i in 0..ITERATIONS {
+        let now = i as f64 / 60.0;
+        r.render(&m.scene_for_role(Role::Cpu, now, &mut ui), &mut cur);
+        orient.apply(&cur, &mut oriented);
+        if let Some(rect) = dirty_rect(&prev, &oriented) {
+            let _ = pack_rgb565(&oriented, rect, 1.0);
+        }
+        std::mem::swap(&mut prev, &mut oriented);
+    }
+    let ms = t0.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;
+    println!("{:<12} {ms:.3} ms", "pipeline");
 }

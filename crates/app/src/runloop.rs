@@ -203,6 +203,7 @@ impl RenderLoop {
         let tick = Duration::from_secs_f64(1.0 / self.fps.max(1) as f64);
         let mut asleep = false;
         let mut fade_started: Option<Secs> = None;
+        let mut stats = crate::stats::FrameStats::new(self.screens.len(), 60.0, 0.0);
 
         while !self.stop.load(Ordering::Relaxed) {
             let t0 = Instant::now();
@@ -249,13 +250,29 @@ impl RenderLoop {
                 None
             };
 
-            for s in &mut self.screens {
+            for (i, s) in self.screens.iter_mut().enumerate() {
+                let t = Instant::now();
                 let scene = model.scene(s.index, now, &mut s.ui);
+                let t_build = t.elapsed();
+                let t = Instant::now();
                 renderer.render(&scene, &mut s.cur);
                 if let Some(f) = fade {
                     darken(&mut s.cur, 1.0 - f);
                 }
+                let t_render = t.elapsed();
+                let t = Instant::now();
                 s.flush();
+                let t_flush = t.elapsed();
+                let st = stats.screen(i);
+                st.build.push(t_build.as_secs_f32() * 1000.0);
+                st.render.push(t_render.as_secs_f32() * 1000.0);
+                st.flush.push(t_flush.as_secs_f32() * 1000.0);
+            }
+            if stats.due(now) {
+                for (i, s) in self.screens.iter().enumerate() {
+                    tracing::info!("{}", stats.line(i, s.mailbox.take_push_stats(), 60.0));
+                }
+                stats.reset(now);
             }
 
             if fade == Some(1.0) {
