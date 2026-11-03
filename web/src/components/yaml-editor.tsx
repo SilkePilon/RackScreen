@@ -20,7 +20,8 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage } from "@/lib/api"
-import { restartMessage, useDraft } from "@/lib/draft"
+import { useDraft } from "@/lib/draft"
+import { announceSave } from "@/lib/restart"
 import { cn } from "@/lib/utils"
 
 const highlight = HighlightStyle.define([
@@ -142,8 +143,9 @@ export default function YamlEditor() {
     setBusy("save")
     try {
       const r = await api.saveYaml(text())
+      const before = d.saved
       d.adopt({ config: r.config, secrets: r.secrets })
-      toast.success(restartMessage(r.restart))
+      announceSave(r, before)
       setDirty(false)
       await load()
     } catch (e) {

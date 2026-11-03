@@ -202,6 +202,7 @@ function save(incoming: Config, fromYaml: boolean) {
   state.config = c
   const restart = webChanged ? "process" : "monitor"
   if (webChanged) {
+    state.started = Math.floor(Date.now() / 1000) + 4
     state.offline = true
     setTimeout(() => (state.offline = false), 4000)
   } else {

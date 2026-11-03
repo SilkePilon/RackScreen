@@ -44,7 +44,8 @@ import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage } from "@/lib/api"
-import { restartMessage, useDraft } from "@/lib/draft"
+import { useDraft } from "@/lib/draft"
+import { announceSave } from "@/lib/restart"
 import { keys, useAuth, useControl, useInfo, useStatus, useUpdate } from "@/lib/queries"
 
 const YamlEditor = React.lazy(() => import("@/components/yaml-editor"))
@@ -240,8 +241,9 @@ function ConfigSection() {
     setUploading(true)
     try {
       const r = await api.saveYaml(pending.text)
+      const before = d.saved
       d.adopt({ config: r.config, secrets: r.secrets })
-      toast.success(`Restored ${pending.name}`, { description: restartMessage(r.restart) })
+      announceSave(r, before, `Restored ${pending.name}`)
       setPending(null)
     } catch (e) {
       toast.error("Not restored", { description: errorMessage(e) })
