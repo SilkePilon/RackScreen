@@ -70,6 +70,9 @@ impl Renderer {
         for d in &scene.items[start..] {
             self.painter.draw_item(px, d);
         }
+        if scene.fade < 1.0 {
+            crate::frame::darken(px, scene.fade);
+        }
     }
 
     /// One half of a slide: drawn without its `Clear` into the transparent
@@ -386,6 +389,30 @@ mod tests {
             plain.render(&flat, &mut b);
             assert_eq!(a.data(), b.data(), "hero at {x}");
         }
+    }
+
+    #[test]
+    fn scene_fade_darkens_the_whole_frame() {
+        let mut r = Renderer::new().unwrap();
+        let mut s = based_scene(50.0);
+        let mut full = new_pixmap();
+        r.render(&s, &mut full);
+        s.fade = 0.5;
+        let mut half = new_pixmap();
+        r.render(&s, &mut half);
+        for (a, b) in full.data().chunks_exact(4).zip(half.data().chunks_exact(4)) {
+            for c in 0..3 {
+                assert_eq!(b[c], (a[c] as f32 * 0.5) as u8);
+            }
+        }
+        s.fade = 0.0;
+        r.render(&s, &mut half);
+        assert!(half.data().chunks_exact(4).all(|p| p[..3] == [0, 0, 0]));
+        // the cached base raster was not darkened
+        s.fade = 1.0;
+        let mut again = new_pixmap();
+        r.render(&s, &mut again);
+        assert_eq!(again.data(), full.data());
     }
 
     #[test]

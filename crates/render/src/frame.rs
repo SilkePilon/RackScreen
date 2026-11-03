@@ -293,6 +293,19 @@ pub fn brightness_lut(brightness: f32) -> [u8; 256] {
     std::array::from_fn(|v| (v as f32 * k) as u8)
 }
 
+/// Multiply every colour channel by `k` (0 = black, 1 = unchanged); alpha stays.
+pub fn darken(px: &mut Pixmap, k: f32) {
+    if k >= 1.0 {
+        return;
+    }
+    let lut = brightness_lut(k);
+    for p in px.data_mut().chunks_exact_mut(4) {
+        p[0] = lut[p[0] as usize];
+        p[1] = lut[p[1] as usize];
+        p[2] = lut[p[2] as usize];
+    }
+}
+
 /// Big-endian RGB565 of panel-space `rects`, read from the unrotated `src`
 /// through `orient`; the bytes of each rect follow the previous one.
 pub fn pack_oriented(src: &Pixmap, orient: &Orient, rects: &[Rect], lut: &[u8; 256]) -> Vec<u8> {
@@ -462,6 +475,20 @@ mod tests {
                 h: 6
             }
         );
+    }
+
+    #[test]
+    fn darken_scales_channels_and_keeps_alpha() {
+        let mut p = Pixmap::new(2, 1).unwrap();
+        p.fill(tiny_skia::Color::WHITE);
+        darken(&mut p, 0.5);
+        assert_eq!(&p.data()[..4], &[127, 127, 127, 255]);
+        darken(&mut p, 0.0);
+        assert_eq!(&p.data()[..4], &[0, 0, 0, 255]);
+        let mut q = noise(8, 3);
+        let before = q.data().to_vec();
+        darken(&mut q, 1.0);
+        assert_eq!(q.data(), &before[..], "k = 1 is a no-op");
     }
 
     fn noise(size: u32, seed: u32) -> Pixmap {

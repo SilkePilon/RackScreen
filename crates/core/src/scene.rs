@@ -129,6 +129,9 @@ pub struct Scene {
     /// `items[..base_len]` rarely change (clear, ring track, title, card
     /// background); the renderer may reuse a cached raster of them.
     pub base_len: usize,
+    /// Brightness of the whole frame, 1.0 = normal; below 1 during a screen
+    /// change (crossfade via black).
+    pub fade: f32,
 }
 
 impl Default for Scene {
@@ -143,6 +146,7 @@ impl Scene {
             items: vec![Drawable::Clear(BLACK)],
             slide: None,
             base_len: 0,
+            fade: 1.0,
         }
     }
     pub fn push(&mut self, d: Drawable) {
