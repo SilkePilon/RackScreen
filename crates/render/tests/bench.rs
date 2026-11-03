@@ -107,29 +107,77 @@ fn every_role_under_a_millisecond() {
     assert!(worst.1 < BUDGET_MS, "{:?} takes {:.3} ms", worst.0, worst.1);
 }
 
-/// Render + orient + diff + pack per frame for a moving screen (cpu, the
-/// hero rolls) and a slide frame: the numbers the Pi stats should match.
+fn metrics(cpu_pct: f32) -> Event {
+    Event::Metrics {
+        cpu_pct,
+        mem_pct: 67.0,
+        mem_used_gb: 10.7,
+        mem_total_gb: 16.0,
+        hot_cpu: None,
+        hot_mem: None,
+    }
+}
+
+/// The shipped per-frame path of one screen worker, for the cpu screen with
+/// a new cpu value every 30 frames (the hero rolls): render into `cur`, then
+/// flush the way `ScreenFrames::flush` does: `dirty_rects` on the unrotated
+/// frames, rects mapped to the panel, `pack_oriented` straight from `cur`
+/// (no oriented copy), then swap `prev` and `cur`. The panel push itself is
+/// not timed. `render` and `flush` are the numbers the Pi stats log.
 #[test]
 #[ignore]
 fn pipeline_per_frame() {
-    use rackscreen_render::frame::{dirty_rect, pack_rgb565, Orient};
-    let m = bench_model();
+    use rackscreen_render::frame::{brightness_lut, dirty_rects, pack_oriented, Orient};
+    let mut m = bench_model();
     let mut r = Renderer::new().unwrap();
     let orient = Orient::new(270, false);
+    let lut = brightness_lut(1.0);
     let mut cur = new_pixmap();
-    let mut oriented = new_pixmap();
     let mut prev = new_pixmap();
     let mut ui = ScreenUi::new();
-    let t0 = Instant::now();
-    for i in 0..ITERATIONS {
+    let mut frame = |i: u32, m: &mut Model, timed: bool| -> (f64, f64, bool) {
         let now = i as f64 / 60.0;
-        r.render(&m.scene_for_role(Role::Cpu, now, &mut ui), &mut cur);
-        orient.apply(&cur, &mut oriented);
-        if let Some(rect) = dirty_rect(&prev, &oriented) {
-            let _ = pack_rgb565(&oriented, rect, 1.0);
+        if i.is_multiple_of(30) {
+            m.apply(metrics(20.0 + (i / 30 % 7) as f32 * 11.0), now);
         }
-        std::mem::swap(&mut prev, &mut oriented);
+        m.tick(now);
+        let t0 = Instant::now();
+        r.render(&m.scene_for_role(Role::Cpu, now, &mut ui), &mut cur);
+        let t1 = Instant::now();
+        let rects: Vec<_> = dirty_rects(&prev, &cur)
+            .into_iter()
+            .map(|rc| orient.map_rect(rc))
+            .collect();
+        let changed = !rects.is_empty();
+        if changed {
+            std::hint::black_box(pack_oriented(&cur, &orient, &rects, &lut));
+        }
+        std::mem::swap(&mut prev, &mut cur);
+        let t2 = Instant::now();
+        if !timed {
+            return (0.0, 0.0, changed);
+        }
+        (
+            (t1 - t0).as_secs_f64() * 1000.0,
+            (t2 - t1).as_secs_f64() * 1000.0,
+            changed,
+        )
+    };
+    // warm-up: glyph caches, the base layer, the first full diff
+    for i in 0..ITERATIONS {
+        frame(i, &mut m, false);
     }
-    let ms = t0.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;
-    println!("{:<12} {ms:.3} ms", "pipeline");
+    let (mut render, mut flush, mut pushed) = (0.0, 0.0, 0);
+    for i in ITERATIONS..2 * ITERATIONS {
+        let (a, b, changed) = frame(i, &mut m, true);
+        render += a;
+        flush += b;
+        pushed += changed as u32;
+    }
+    let n = ITERATIONS as f64;
+    println!("{:<12} {:.3} ms", "render", render / n);
+    println!("{:<12} {:.3} ms", "flush", flush / n);
+    println!("{:<12} {:.3} ms", "pipeline", (render + flush) / n);
+    println!("{:<12} {pushed}/{ITERATIONS}", "changed");
+    assert!(pushed > 0, "the cpu screen never changed");
 }
