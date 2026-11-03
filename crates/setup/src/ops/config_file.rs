@@ -70,8 +70,9 @@ impl Preset {
 }
 
 pub fn set_screen_roles(cfg: &mut Config, index: usize, roles: &[Role], cycle_secs: u64) {
+    let names: Vec<String> = roles.iter().map(|r| cfg.role_name(*r)).collect();
     if let Some(s) = cfg.screens.get_mut(index) {
-        s.roles = roles.iter().map(|r| r.name().to_string()).collect();
+        s.roles = names;
         s.cycle_secs = cycle_secs.clamp(3, 300);
     }
 }
@@ -128,6 +129,22 @@ mod tests {
         assert_eq!(c.screens[0].roles, vec!["cpu".to_string(), "mem".into()]);
         assert_eq!(c.screens[0].cycle_secs, 300);
         set_screen_roles(&mut c, 99, &[Role::Cpu], 15);
+    }
+
+    #[test]
+    fn gif_roles_are_written_by_name() {
+        use rackscreen_app::config::GifCfg;
+        let mut c = Config::default();
+        c.gifs.push(GifCfg {
+            name: "party".into(),
+            url: "https://giphy.com/gifs/AbCdEf123".into(),
+        });
+        set_screen_roles(&mut c, 1, &[Role::Gif(0), Role::Cpu], 15);
+        assert_eq!(
+            c.screens[1].roles,
+            vec!["gif:party".to_string(), "cpu".into()]
+        );
+        c.validate().unwrap();
     }
 
     #[test]

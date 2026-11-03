@@ -51,13 +51,15 @@ pub struct Editor {
     picker: Option<Picker>,
     /// `display.one_at_a_time`: only one screen changes at a time.
     one_at_a_time: bool,
+    /// Names of the config's `gifs:`; `Role::Gif(i)` is `gif:<gif_names[i]>`.
+    gif_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Picker {
     /// Ordered roles of the screen being edited.
     pub chosen: Vec<Role>,
-    /// Cursor over `Role::ALL`.
+    /// Cursor over `Editor::pickable`: `Role::ALL`, then the GIFs.
     pub cursor: usize,
 }
 
@@ -68,6 +70,27 @@ impl Editor {
             selected: 0,
             picker: None,
             one_at_a_time: true,
+            gif_names: Vec::new(),
+        }
+    }
+    /// The config's GIF names, in `gifs:` order, so they can be picked.
+    pub fn with_gifs(mut self, names: Vec<String>) -> Editor {
+        self.gif_names = names;
+        self
+    }
+    /// Every role the picker offers: the built-in ones, then each GIF.
+    pub fn pickable(&self) -> Vec<Role> {
+        let gifs = (0..self.gif_names.len().min(u16::MAX as usize)).map(|i| Role::Gif(i as u16));
+        Role::ALL.iter().copied().chain(gifs).collect()
+    }
+    /// A role's name in the config: `gif:<name>` for a GIF.
+    pub fn role_name(&self, r: Role) -> String {
+        match r {
+            Role::Gif(i) => format!(
+                "gif:{}",
+                self.gif_names.get(i as usize).map_or("?", String::as_str)
+            ),
+            r => r.name().to_string(),
         }
     }
     pub fn one_at_a_time(&self) -> bool {
@@ -104,14 +127,15 @@ impl Editor {
     }
     pub fn picker_move(&mut self, delta: i32) {
         if let Some(p) = &mut self.picker {
-            let n = Role::ALL.len() as i32;
+            let n = (Role::ALL.len() + self.gif_names.len()) as i32;
             p.cursor = ((p.cursor as i32 + delta).rem_euclid(n)) as usize;
         }
     }
     /// Space: add the role under the cursor (at the end) or remove it.
     pub fn picker_toggle(&mut self) {
+        let all = self.pickable();
         if let Some(p) = &mut self.picker {
-            let role = Role::ALL[p.cursor];
+            let role = all[p.cursor];
             if let Some(i) = p.chosen.iter().position(|r| *r == role) {
                 p.chosen.remove(i);
             } else {
@@ -121,8 +145,9 @@ impl Editor {
     }
     /// J/K: move the role under the cursor within the chosen order.
     pub fn picker_shift(&mut self, delta: i32) {
+        let all = self.pickable();
         if let Some(p) = &mut self.picker {
-            let role = Role::ALL[p.cursor];
+            let role = all[p.cursor];
             if let Some(i) = p.chosen.iter().position(|r| *r == role) {
                 let j = (i as i32 + delta).clamp(0, p.chosen.len() as i32 - 1) as usize;
                 p.chosen.swap(i, j);
@@ -180,7 +205,12 @@ pub struct Screens {
 fn rows_from(cfg: &Config) -> Vec<(Vec<Role>, u64)> {
     cfg.screens
         .iter()
-        .map(|s| (s.roles().unwrap_or_else(|_| vec![Role::Cpu]), s.cycle_secs))
+        .map(|s| {
+            (
+                cfg.screen_roles(s).unwrap_or_else(|_| vec![Role::Cpu]),
+                s.cycle_secs,
+            )
+        })
         .collect()
 }
 
@@ -197,6 +227,7 @@ impl Screens {
         }));
         if let Ok(c) = &cfg {
             editor.set_one_at_a_time(c.display.one_at_a_time);
+            editor = editor.with_gifs(c.gifs.iter().map(|g| g.name.clone()).collect());
         }
         Screens {
             error: cfg.as_ref().err().cloned(),
@@ -427,7 +458,8 @@ impl Screen for Screens {
             if sel {
                 sel_row = Some(lines.len() as u16);
             }
-            let names: Vec<&str> = rs.iter().map(|r| r.name()).collect();
+            let names: Vec<String> = rs.iter().map(|r| self.editor.role_name(*r)).collect();
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
             let wrapped = wrap_roles(&names, roles_w);
             let timing = if rs.len() > 1 {
                 format!("every {secs} s")
@@ -508,7 +540,8 @@ impl Screen for Screens {
             // `Role::ALL` is taller than the pane on a small terminal: scroll with the cursor.
             let visible = (roles.height as usize).saturating_sub(1).max(1);
             let first = (p.cursor + 1).saturating_sub(visible);
-            for (i, r) in Role::ALL.iter().enumerate().skip(first).take(visible) {
+            let pickable = self.editor.pickable();
+            for (i, r) in pickable.iter().enumerate().skip(first).take(visible) {
                 let on = p.chosen.iter().position(|x| x == r);
                 let mark = match on {
                     Some(k) => format!("{}{}", g.done, k + 1),
@@ -530,7 +563,7 @@ impl Screen for Screens {
                         },
                     ),
                     Span::styled(
-                        format!("{:<14}", r.name()),
+                        format!("{:<14}", self.editor.role_name(*r)),
                         if cur { th.selected() } else { th.normal() },
                     ),
                 ];
@@ -554,9 +587,10 @@ impl Screen for Screens {
             body.push(Line::from(Span::styled(
                 format!(
                     "    {}",
-                    Role::ALL
-                        .iter()
-                        .map(|r| r.name())
+                    self.editor
+                        .pickable()
+                        .into_iter()
+                        .map(|r| self.editor.role_name(r))
                         .collect::<Vec<_>>()
                         .join("  ")
                 ),
@@ -841,6 +875,40 @@ mod tests {
             text.contains("▸ ○  jellyfin"),
             "scrolled to the cursor: {text}"
         );
+    }
+
+    #[test]
+    fn gif_roles_are_pickable_shown_and_saved_by_name() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = test_shared(dir.path());
+        let mut cfg = Config::default();
+        cfg.gifs.push(rackscreen_app::config::GifCfg {
+            name: "party".into(),
+            url: "https://giphy.com/gifs/AbCdEf123".into(),
+        });
+        cfg.screens[1].roles = vec!["mem".into(), "gif:party".into()];
+        save_config(&cfg, &sh.ctx.config_path).unwrap();
+        let mut s = Screens::new(&sh);
+        assert_eq!(s.editor.rows()[1].0, vec![Role::Mem, Role::Gif(0)]);
+        let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(text.contains("mem › gif:party"), "{text}");
+        // pick the GIF for screen 1 too: it is listed after the built-in roles
+        s.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        s.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
+        term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(text.contains("▸ ○  gif:party"), "{text}");
+        s.handle(KeyEvent::from(KeyCode::Char(' ')), &mut sh, 0.0);
+        s.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert_eq!(s.editor.rows()[0].0, vec![Role::Cpu, Role::Gif(0)]);
+        s.handle(KeyEvent::from(KeyCode::Char('s')), &mut sh, 0.0);
+        let saved = Config::load_or_default(&sh.ctx.config_path).unwrap();
+        assert_eq!(saved.screens[0].roles, vec!["cpu", "gif:party"]);
+        assert_eq!(saved.screens[1].roles, vec!["mem", "gif:party"]);
     }
 
     #[test]

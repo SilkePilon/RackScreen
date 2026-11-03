@@ -84,7 +84,8 @@ pub fn fit_roles(names: &[&str], width: usize) -> String {
 }
 
 pub struct Home {
-    rows: Vec<(Vec<Role>, u64)>,
+    /// Each screen's role names (`gif:<name>` for a GIF) and dwell.
+    rows: Vec<(Vec<String>, u64)>,
     snap: Option<Snapshot>,
     rx: Option<Receiver<Snapshot>>,
 }
@@ -95,7 +96,11 @@ impl Home {
             .map(|c| {
                 c.screens
                     .iter()
-                    .map(|s| (s.roles().unwrap_or_default(), s.cycle_secs))
+                    .map(|s| {
+                        let roles = c.screen_roles(s).unwrap_or_default();
+                        let names = roles.into_iter().map(|r| c.role_name(r)).collect();
+                        (names, s.cycle_secs)
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -127,7 +132,10 @@ impl Home {
     /// A Home with fixed data and no collector thread (tests).
     pub fn with_snapshot(rows: Vec<(Vec<Role>, u64)>, snap: Option<Snapshot>) -> Home {
         Home {
-            rows,
+            rows: rows
+                .into_iter()
+                .map(|(rs, secs)| (rs.iter().map(|r| r.name().to_string()).collect(), secs))
+                .collect(),
             snap,
             rx: None,
         }
@@ -271,7 +279,7 @@ impl Screen for Home {
         let timing_w = 8;
         let roles_w = (area.width as usize).saturating_sub(2 + LABEL_W + 3 + timing_w + 2);
         for (i, (roles, secs)) in self.rows.iter().enumerate() {
-            let names: Vec<&str> = roles.iter().map(|r| r.name()).collect();
+            let names: Vec<&str> = roles.iter().map(String::as_str).collect();
             let (shown, dropped) = fit_roles_parts(&names, roles_w);
             let timing = if roles.len() > 1 {
                 format!("{secs} s")
@@ -448,6 +456,22 @@ mod tests {
             !t.contains("12:00:31 rain"),
             "only the last three log lines"
         );
+    }
+
+    #[test]
+    fn home_names_gif_roles_from_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared();
+        sh.ctx.config_path = dir.path().join("c.yaml");
+        let mut cfg = Config::default();
+        cfg.gifs.push(rackscreen_app::config::GifCfg {
+            name: "party".into(),
+            url: "https://giphy.com/gifs/AbCdEf123".into(),
+        });
+        cfg.screens[0].roles = vec!["cpu".into(), "gif:party".into()];
+        crate::ops::config_file::save_config(&cfg, &sh.ctx.config_path).unwrap();
+        let home = Home::new(&sh);
+        assert_eq!(home.rows[0].0, vec!["cpu", "gif:party"]);
     }
 
     #[test]
