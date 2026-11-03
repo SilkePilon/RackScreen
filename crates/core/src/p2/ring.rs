@@ -1,11 +1,11 @@
-//! Ring kinds (fill, parts, discrete segments, bands with a marker) drawn as
+//! Ring kinds (fill, parts, discrete segments, bands with one lit) drawn as
 //! round-capped arcs over a `TRACK` arc.
 
 use crate::p2::layout::{RING_R, RING_START_DEG, RING_SWEEP_DEG, RING_W};
 use crate::scene::Drawable;
 use crate::theme::layout::{CX, CY};
-use crate::theme::p2::{TEXT, TRACK};
-use crate::theme::{Color, BLACK};
+use crate::theme::p2::TRACK;
+use crate::theme::Color;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RingKind {
@@ -17,7 +17,7 @@ pub enum RingKind {
     Parts(Vec<(f32, Color)>),
     /// `n` equal segments, each its own colour (`TRACK` for off).
     Discrete(Vec<Color>),
-    /// `n` equal bands, the one holding `frac` at full alpha, a marker at `frac`.
+    /// `n` equal bands; the one holding `frac` at full alpha, the rest dimmed.
     Bands { colors: Vec<Color>, frac: f32 },
 }
 
@@ -141,33 +141,6 @@ impl RingSpec {
                     let i = i as f32;
                     out.extend(self.arc(i / n + gap / 2.0, (i + 1.0) / n - gap / 2.0, *c, alpha));
                 }
-                let (mx, my) = self.point(fr);
-                out.push(Drawable::Ellipse {
-                    cx: mx,
-                    cy: my,
-                    rx: 0.95 * self.width,
-                    ry: 0.95 * self.width,
-                    color: BLACK,
-                    alpha: 1.0,
-                });
-                out.push(Drawable::Ellipse {
-                    cx: mx,
-                    cy: my,
-                    rx: 0.5 * self.width,
-                    ry: 0.5 * self.width,
-                    color: TEXT,
-                    alpha: 1.0,
-                });
-                out.push(Drawable::Arc {
-                    cx: mx,
-                    cy: my,
-                    r: 0.95 * self.width,
-                    width: 2.5,
-                    start_deg: 0.0,
-                    sweep_deg: 360.0,
-                    color: colors[cur],
-                    alpha: 1.0,
-                });
             }
         }
         out
@@ -183,7 +156,7 @@ impl RingSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::p2::layout::{EDGE_R, RING_START_DEG, RING_SWEEP_DEG, RING_W};
+    use crate::p2::layout::{EDGE_R, RING_START_DEG, RING_SWEEP_DEG};
     use crate::theme::p2::{BLUE, CRIT, OK, TRACK, WARN};
 
     fn arcs(spec: &RingSpec) -> Vec<(f32, f32, Color, f32)> {
@@ -266,29 +239,22 @@ mod tests {
     }
 
     #[test]
-    fn bands_dim_all_but_the_current_and_place_a_marker() {
+    fn bands_light_the_current_band_and_dim_the_rest() {
         let colors = vec![OK, WARN, CRIT];
         let spec = RingSpec::bands(colors.clone(), 0.5);
         let a = arcs(&spec);
-        // track, 3 bands, then the marker ring (a full 360 arc)
-        assert_eq!(a.len(), 5);
-        assert_eq!(a[1].3, 0.3);
-        assert_eq!(a[2].3, 1.0, "band 1 holds 0.5");
-        assert_eq!(a[3].3, 0.3);
-        assert_eq!((a[4].1, a[4].2), (360.0, WARN));
-        let (mx, my) = spec.point(0.5);
-        let ell: Vec<(f32, f32, f32)> = spec
-            .drawables()
-            .into_iter()
-            .filter_map(|d| match d {
-                Drawable::Ellipse { cx, cy, rx, .. } => Some((cx, cy, rx)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(ell.len(), 2);
-        assert!((ell[0].0 - mx).abs() < 1e-4 && (ell[0].1 - my).abs() < 1e-4);
-        assert!((ell[0].2 - 0.95 * RING_W).abs() < 1e-4 && (ell[1].2 - 0.5 * RING_W).abs() < 1e-4);
-        assert!(((mx - 120.0).powi(2) + (my - 120.0).powi(2)).sqrt() + 0.95 * RING_W <= EDGE_R);
+        // track, then the 3 bands; no marker
+        assert_eq!(a.len(), 4);
+        assert_eq!(a[1].3, DIM_BAND_ALPHA);
+        assert_eq!((a[2].2, a[2].3), (WARN, 1.0), "band 1 holds 0.5");
+        assert_eq!(a[3].3, DIM_BAND_ALPHA);
+        assert!(
+            !spec
+                .drawables()
+                .iter()
+                .any(|d| matches!(d, Drawable::Ellipse { .. })),
+            "no dot on a band ring"
+        );
         let top = arcs(&RingSpec::bands(colors, 1.5));
         assert_eq!(top[3].3, 1.0, "clamps into the last band");
     }
