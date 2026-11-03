@@ -16,7 +16,7 @@
   <a href="#install">Install</a> &nbsp;·&nbsp;
   <a href="#screens">Screens</a> &nbsp;·&nbsp;
   <a href="#shows">Shows</a> &nbsp;·&nbsp;
-  <a href="#setup-tui">Setup TUI</a> &nbsp;·&nbsp;
+  <a href="#web-ui">Web UI</a> &nbsp;·&nbsp;
   <a href="#electricity-mode">Electricity mode</a> &nbsp;·&nbsp;
   <a href="#sky-roles">Sky roles</a> &nbsp;·&nbsp;
   <a href="#configuration">Configuration</a> &nbsp;·&nbsp;
@@ -172,7 +172,7 @@ shows:
 
     rackscreen play storm      # a show id, or: rackscreen play random
 
-It drops the request in the service user's `~/.local/state/rackscreen/play` (run it as that user, or with `sudo` from their login); the service picks it up within a second. **Configure › Shows** in the setup TUI has the same settings, a checklist of the shows and a **Play now** row.
+It drops the request in the service user's `~/.local/state/rackscreen/play` (run it as that user, or with `sudo` from their login); the service picks it up within a second. The **Shows** page of the web UI has the same settings, every show as a card and a **Play now** button.
 
 ## Install
 
@@ -180,28 +180,28 @@ One line on the Pi, no clone:
 
     curl -fsSL https://github.com/silkepilon/RackScreen/releases/latest/download/install.sh | bash
 
-It downloads the latest `aarch64` release and opens the setup menu. **Install** copies the binary to `/usr/local/bin`, writes `/etc/rackscreen/config.yaml`, installs the `rackscreen@<user>` service and offers to enable SPI in the boot files. The service runs `rackscreen run --config /etc/rackscreen/config.yaml`; later runs of the menu are just `rackscreen` (it asks for sudo).
+It downloads the latest `aarch64` release and runs `sudo rackscreen install`: the binary goes to `/usr/local/bin`, a default `/etc/rackscreen/config.yaml` is written and handed to your user (so the web UI can save it), the `rackscreen@<user>` service is installed and started, a sudoers drop-in lets that user run `rackscreen update` (and nothing else) so the web UI can update itself, and SPI is enabled in the boot files (it asks `y/N` on a terminal; piped from `curl` it just does it). At the end it prints the address of the web UI: open **http://&lt;pi&gt;:8740** and everything else happens there. `rackscreen install` is idempotent; `--yes` skips the boot question and `--no-boot` leaves the boot files alone. `sudo rackscreen uninstall` removes the service, drop-in and binary and keeps the config unless you add `--purge`.
 
 > [!NOTE]
 > Enabling SPI edits the boot files, so reboot the Pi afterwards before the panels light up.
 
-To upgrade, re-run the one-liner, or use **Update** in the TUI, or `sudo rackscreen update`. It downloads the latest release, verifies its SHA-256, swaps `/usr/local/bin/rackscreen` and restarts the service; `rackscreen update --check` only reports (exit 0 up to date, 1 update available, 2 unknown). Your config is left alone either way.
+To upgrade, press **Update** on the web UI's System page, re-run the one-liner, or run `sudo rackscreen update`. It downloads the latest release, verifies its SHA-256, swaps `/usr/local/bin/rackscreen` and restarts the service; `rackscreen update --check` only reports (exit 0 up to date, 1 update available, 2 unknown). Your config is left alone either way.
 
-Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.example.yaml`](config.example.yaml). The kubeconfig defaults to `~/k8s-monitor.yaml` of the service user. Upgrading from v0.1: `~/.config/rackscreen/config.toml` is no longer read, so re-enter your settings via **Configure**.
+Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.example.yaml`](config.example.yaml). The kubeconfig defaults to `~/k8s-monitor.yaml` of the service user. Upgrading from v0.1: `~/.config/rackscreen/config.toml` is no longer read, so re-enter your settings in the web UI.
 
-## Setup TUI
+## Web UI
 
-`rackscreen setup` (what the installer opens) is a ratatui shell: a sidebar on the left with the eight actions, a pane on the right, and a help row at the bottom. `↑↓` move the sidebar bar, `⏎` opens, `Esc` returns to Home (`←` does the same on screens that do not use it themselves; Configure and Calibrate do). Below 72 columns the sidebar folds away and Home shows the menu itself.
+The running service serves a website on port 8740 (`web:` in the config; `bind: 127.0.0.1` keeps it local, `password` asks for a login once per browser). Open **http://&lt;pi&gt;:8740** from any device on the LAN; `rackscreen` with no arguments prints the address. No CDN, no internet needed: the frontend is built into the binary.
 
-- **Home** — a live overview: service state and uptime, boot enablement, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `argocd`, `weather`, `rain`, `github`, `electricity`), what each screen cycles through (long lists end in `+N`), and the last three log lines.
-- **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
-- **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels in a true-colour terminal, assumed unless `TERM` is a plain `xterm`/`screen`/`linux`; set `RACKSCREEN_TRUECOLOR=0` or `1` to force it; otherwise a drawn circle), the other panels are a strip in the info column to the right. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
-- **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
-- **Configure** — every setting in ten groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds, Shows, GIFs, Spotify) listed in the sidebar: `Tab`/`←→` step through them, `1`–`9` and `0` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. Shows has a checklist of the eleven shows (at least one stays on) and **Play now**, which takes a show id or `random` and starts it on the panels. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
-- **Status** — the full service detail, links, boot files and the log tail; `l` for the log view, `r` to restart.
-- **Run here** — run the daemon in the foreground with its logs, without touching the service.
-- **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
-- **Uninstall** — remove the binary, config and service; the boot file lines stay.
+- **Overview** — the four panels mirrored live (what the glass shows, as PNG frames over a WebSocket), each with its current role, cycle progress and a quick role switch; identify (every panel shows its number), play a show, night auto/on/off, restart; summary tiles (cluster CPU, memory, pods, nodes, alerts, weather, now playing, ...), link health and an update banner.
+- **Screens** — per screen the role list (drag to reorder, add from a picker grouped by category with a hint when a role needs a setting), the cycle interval and presets.
+- **Calibrate** — rotate 0/90/180/270 and mirror per screen with the test pattern on the glass; the advanced section has the SPI bus, CS, DC, RST and clock.
+- **Integrations** — Cluster (kubeconfig, Prometheus, Argo CD, qBittorrent), Energy, Sky (location, weather, rain, ISS), Media & Jellyfin, Spotify (client ID and the login flow with a link, a QR code and the paste field), GitHub and GIFs.
+- **Display**, **Shows**, **Logs** (live stream with level filter and search) and **System** (version and one-click update, web password, the raw YAML with validation, config backup and restore, restart).
+
+Saving validates the config, writes it atomically and restarts the monitor in-process (about a second; the panels go dark briefly) while the website stays up. A change to the `web:` block restarts the whole process; systemd brings it back and the page reconnects. Secrets (tokens, API keys, passwords) are never sent to the browser; a field shows whether one is set and can be replaced or cleared.
+
+Everything the UI does is a JSON API under `/api` (`/api/status`, `/api/config`, `/api/control/...`, `/api/live` for frames, `/api/logs/stream` for logs). Non-GET requests need the header `X-RackScreen: 1`; with a password set, a session cookie.
 
 ## Screens and roles
 
@@ -239,9 +239,9 @@ Every screen shows one or more **roles** and cycles through them. Twenty-nine ro
 | `jellyfin` | Jellyfin | time left, ring the position (amber movie, cyan episode, dim when paused), pill direct play / transcoding / paused, card title, episode or year and viewer |
 | `music` | Spotify + Jellyfin | album cover, ring the track's progress (green Spotify, violet Jellyfin, dim when paused), pill time left / paused / played N ago, card song, artist and device |
 
-**Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill the screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), `m` mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
+The **Screens** page of the web UI edits them: drag roles to reorder, add from the picker, set the cycle interval, or apply a preset: cluster (`cpu`, `mem`, `pods`, `health`), electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
-Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
+Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; **Display** in the web UI (or `display.one_at_a_time` in the config) turns that off.
 
 Besides these, a screen can show a GIF: the role `gif:<name>` plays the GIF called `<name>` in the `gifs:` list; see [GIF role](#gif-role). GIFs appear in the role picker after the built-in roles.
 
@@ -297,14 +297,14 @@ Create a fine-grained personal access token at github.com with read access to co
 Jellyfin needs nothing extra: the `jellyfin` settings above also feed the music screen. Spotify needs a free app of your own:
 
 1. Create an app at [developer.spotify.com](https://developer.spotify.com/dashboard) (Web API), and add `http://127.0.0.1:8888/callback` as its redirect URI.
-2. In `rackscreen setup` → **Configure** → **Spotify**, turn on `enabled`, paste the app's client ID into `client id` and save.
-3. Open `log in`: open the address it shows (or scan the QR code with your phone) and log in. The browser then fails to load `127.0.0.1`, which is expected; copy the whole address from its address bar and paste it into the dialog.
+2. On the web UI's **Spotify** page, turn it on, paste the app's client ID and save.
+3. Press **Log in**: open the address it shows (or scan the QR code with your phone) and log in. The browser then fails to load `127.0.0.1`, which is expected; copy the whole address from its address bar and paste it into the field.
 
-The login (Authorization Code with PKCE, no client secret) is written to `~/.local/state/rackscreen/spotify.json` of the service user, mode 0600; the config only holds the client ID. The access token is refreshed on its own. If Spotify ever refuses the login, `log in` says "token expired, log in again". Spotify is polled every 3 s while playing and every 15 s otherwise.
+The login (Authorization Code with PKCE, no client secret) is written to `~/.local/state/rackscreen/spotify.json` of the service user, mode 0600; the config only holds the client ID. The access token is refreshed on its own. If Spotify ever refuses the login, the page says "Token expired, log in again". Spotify is polled every 3 s while playing and every 15 s otherwise.
 
 ## GIF role
 
-`gif:<name>` shows a GIF over the whole panel, with no ring or icon, for the screen's `cycle_secs` like any role, and crossfades in and out like the rest. Add GIFs under **Configure › GIFs** in the setup TUI (`a` add, `⏎` edit, `d` remove; renaming updates the screens that use it, and removing one a screen shows asks to take it off those screens too), or in the config:
+`gif:<name>` shows a GIF over the whole panel, with no ring or icon, for the screen's `cycle_secs` like any role, and crossfades in and out like the rest. Add GIFs on the **GIFs** page of the web UI (it checks the link and previews it), or in the config:
 
 ```yaml
 gifs:
@@ -402,7 +402,7 @@ jellyfin:
 
 spotify:
   enabled: false           # now playing from Spotify on the music role
-  client_id: ""            # your own app at developer.spotify.com; log in with rackscreen setup
+  client_id: ""            # your own app at developer.spotify.com; log in from the web UI
 
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
@@ -410,6 +410,12 @@ shows:
   gap_mm: 25               # bezel gap between two panels
   # list: [freight]        # show ids to pick from (default: every show)
   # order: [0, 1, 2, 3]    # config index of each screen from the left (default: config order)
+
+web:
+  enabled: true            # the web UI the service serves; open http://<pi>:8740
+  bind: 0.0.0.0            # every interface; 127.0.0.1 for local only
+  port: 8740
+  password: ""             # empty = no login; set one when the LAN is shared
 
 # GIFs a screen can show as the role gif:<name>: paste a GIPHY or Tenor link, or
 # any https link ending in .gif. Each GIF a screen uses takes up to ~35 MB of RAM;
@@ -454,6 +460,7 @@ screens:
 - **`shows`** — see [Shows](#shows).
 - **`gifs`** — see [GIF role](#gif-role).
 - **`display`** — global brightness, frame rate, the SPI write chunk and whether screens change one at a time.
+- **`web`** — the web UI: on/off, bind address, port and an optional password.
 - **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
 
 ## Wiring
@@ -467,7 +474,7 @@ BCM numbers, from the config:
 | PODS | 1 | 0 | 23 | 22 |
 | HEALTH | 1 | 1 | 4 | 27 |
 
-If a screen is rotated or mirrored, change `rotate` (0/90/180/270) and `hflip` for that screen in the config; **Calibrate screens** in the setup TUI writes those values for you.
+If a screen is rotated or mirrored, change `rotate` (0/90/180/270) and `hflip` for that screen in the config; the **Calibrate** page of the web UI writes those values for you while the test pattern is on the glass.
 
 RackScreen renders each screen on its own thread at up to 60 fps, skips frames that did not change and sends only the changed regions over SPI. At 50 MHz a full 240×240 frame takes about 18 ms, so a fully changing screen (a transition) runs at roughly 50 fps while its bus partner is idle.
 
@@ -475,10 +482,11 @@ RackScreen renders each screen on its own thread at up to 60 fps, skips frames t
 
 The simulator draws the same scenes in a window, so none of this needs a Pi:
 
-    cargo run -- run --sim                           # fake data, keyboard drives events
+    cargo run -- run --sim                           # fake data, keyboard drives events, web UI on http://localhost:8740
     cargo run -- run --sim --source k8s              # real cluster through the config's kubeconfig
-    cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
-    cargo run -- calibrate --sim --config /tmp/rs.yaml
+    cargo run -- run --sim --config /tmp/rs.yaml --web-port 9000   # a scratch config on another port; --no-web turns the UI off
+
+The frontend lives in `web/` (Vite + React + TypeScript); `npm --prefix web ci && npm --prefix web run build` writes `web/dist`, which `crates/web/build.rs` embeds into the binary on the next `cargo build`. Without a build the binary serves a placeholder page and the API still works. `npm --prefix web run dev` runs the frontend against a running `cargo run -- run --sim` (or with `VITE_MOCK=1` against a mock API, no Pi needed).
 
 Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `m` the download finishes, `k` a restart burst, `b` a mains brownout and back, `j` Jellyfin playing → paused → idle, `s` music: Spotify playing → paused → Jellyfin → idle, `c` a passing CI run, `Esc` quit. `--sim-grid` shows all four panels at once.
 

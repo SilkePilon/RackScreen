@@ -12,6 +12,14 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        if: hashFiles('web/package.json') != ''
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci && npm --prefix web run build
+        if: hashFiles('web/package.json') != ''
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev
       - run: cargo test --workspace --features sim,pi
       - run: cargo clippy --workspace --features sim,pi -- -D warnings
