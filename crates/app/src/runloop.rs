@@ -240,9 +240,13 @@ impl RenderLoop {
                 tracing::info!("night mode over, waking displays");
                 for s in &self.screens {
                     s.mailbox.put(DisplayCmd::Wake);
+                    // pushes from before the night belong to no period
+                    let _ = s.mailbox.take_push_stats();
                 }
                 asleep = false;
                 force_full = true;
+                // the night is not part of the stats period
+                stats.reset(now);
                 // the first frame after waking is not late
                 deadline = Instant::now();
                 model.tick(now);
@@ -281,7 +285,7 @@ impl RenderLoop {
             }
             if stats.due(now) {
                 for (i, s) in self.screens.iter().enumerate() {
-                    tracing::info!("{}", stats.line(i, s.mailbox.take_push_stats(), 60.0));
+                    tracing::info!("{}", stats.line(i, s.mailbox.take_push_stats(), stats.elapsed(now)));
                 }
                 stats.reset(now);
             }

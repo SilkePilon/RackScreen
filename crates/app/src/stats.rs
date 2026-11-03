@@ -69,6 +69,10 @@ impl FrameStats {
     pub fn due(&self, now: Secs) -> bool {
         now - self.since >= self.period
     }
+    /// Seconds since the period started (construction or the last `reset`).
+    pub fn elapsed(&self, now: Secs) -> f64 {
+        now - self.since
+    }
     /// One log line for screen `i`; `secs` is the length of the period.
     pub fn line(&self, i: usize, push: PushStats, secs: f64) -> String {
         let s = &self.screens[i];
@@ -108,7 +112,6 @@ impl FrameStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackscreen_display::PushStats;
 
     #[test]
     fn window_avg_and_p95() {
@@ -132,6 +135,14 @@ mod tests {
         s.reset(60.0);
         assert!(!s.due(100.0));
         assert_eq!(s.screen(1).render.avg(), 0.0);
+    }
+
+    #[test]
+    fn elapsed_follows_reset() {
+        let mut s = FrameStats::new(1, 60.0, 0.0);
+        assert_eq!(s.elapsed(45.0), 45.0);
+        s.reset(100.0);
+        assert_eq!(s.elapsed(130.0), 30.0);
     }
 
     #[test]
