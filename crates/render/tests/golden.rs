@@ -714,6 +714,37 @@ fn no_data_token_location_and_connecting() {
     check("connecting", &px);
 }
 
+/// The GIF role from the sources fixture: loading, playing (frame 1 at
+/// 0.15 s), failed. The playing GIF fills the square; the round panel hides
+/// the corners.
+#[test]
+fn gif_loading_playing_and_failed() {
+    use rackscreen_core::gif::GifRef;
+    use std::sync::Arc;
+    let bytes = std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sources/tests/fixtures/gif-fixture.gif"),
+    )
+    .unwrap();
+    let frames = GifRef(Arc::new(rackscreen_sources::gif::decode(&bytes).unwrap()));
+    let mut m = Model::new(Thresholds::default());
+    check("p2_gif_loading", &render(&m, Role::Gif(0), 0.0));
+    m.apply(
+        Event::GifFailed {
+            index: 1,
+            reason: "test".into(),
+        },
+        0.0,
+    );
+    check("p2_gif_failed", &render(&m, Role::Gif(1), 0.0));
+    m.apply(Event::Gif { index: 0, frames }, 0.0);
+    let mut ui = ScreenUi::new();
+    m.scene_for_role(Role::Gif(0), 10.0, &mut ui);
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    r.render(&m.scene_for_role(Role::Gif(0), 10.15, &mut ui), &mut px);
+    check("p2_gif_playing", &px);
+}
+
 #[test]
 fn night_icon() {
     let mut r = Renderer::new().unwrap();

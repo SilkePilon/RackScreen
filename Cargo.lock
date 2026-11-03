@@ -2588,6 +2588,7 @@ dependencies = [
  "anyhow",
  "fontdue",
  "rackscreen-core",
+ "rackscreen-sources",
  "tiny-skia",
  "usvg",
 ]

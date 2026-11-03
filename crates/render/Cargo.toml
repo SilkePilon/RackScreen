@@ -10,3 +10,6 @@ tiny-skia.workspace = true
 usvg = "0.48"
 fontdue = "0.9"
 anyhow.workspace = true
+
+[dev-dependencies]
+rackscreen-sources = { path = "../sources" }
