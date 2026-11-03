@@ -102,8 +102,8 @@ const RESTART_SEED: [f32; 24] = [
 const WORST_POD: &str = "n8n-worker";
 /// Days up per node (same order as `NODES`); the two short ones rebooted lately.
 const UPTIME_DAYS: [f64; 7] = [79.6, 79.6, 79.6, 82.1, 41.0, 0.375, 4.4];
-/// Fan rpm for the four Pis (`NODES[3..]`).
-const FAN_SEED: [f32; 4] = [4885.0, 4538.0, 6059.0, 5104.0];
+/// Fan power in percent for the four Pis (`NODES[3..]`).
+const FAN_SEED: [f32; 4] = [45.0, 41.0, 54.0, 49.0];
 const MAINS_V: f32 = 234.0;
 const BROWNOUT_V: f32 = 212.0;
 /// 1-minute load and cores per node.
@@ -632,7 +632,7 @@ impl FakeState {
             NODES[3..]
                 .iter()
                 .zip(&self.fans)
-                .map(|((n, _), rpm)| ((*n).to_string(), *rpm))
+                .map(|((n, _), pct)| ((*n).to_string(), *pct))
                 .collect(),
         )
     }
@@ -892,7 +892,7 @@ impl FakeState {
                 *l = (*l + self.rng.f32() * 0.1 - 0.05).max(0.01);
             }
             for f in self.fans.iter_mut() {
-                *f = (*f + self.rng.f32() * 120.0 - 60.0).clamp(3000.0, 7900.0);
+                *f = (*f + self.rng.f32() * 2.0 - 1.0).clamp(35.0, 60.0);
             }
             out.push(self.load());
             out.push(self.fans());
@@ -1638,6 +1638,19 @@ mod tests {
         assert!(ten.iter().any(|e| matches!(e, Event::Jellyfin { .. })));
         assert!(ten.iter().any(|e| matches!(e, Event::Load(_))));
         assert!(ten.iter().any(|e| matches!(e, Event::Fans(_))));
+        let pcts: Vec<f32> = (0..200)
+            .flat_map(|_| s.tick())
+            .filter_map(|e| match e {
+                Event::Fans(f) => Some(f.into_iter().map(|(_, p)| p)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert!(!pcts.is_empty());
+        assert!(
+            pcts.iter().all(|p| (35.0..=60.0).contains(p)),
+            "fan power stays a plausible 35–60 %"
+        );
         assert!(ten.iter().any(|e| matches!(e, Event::Mains { .. })));
         assert!(ten.iter().any(|e| matches!(e, Event::Uptime(_))));
         assert!(ten.iter().any(|e| matches!(e, Event::Restarts { .. })));

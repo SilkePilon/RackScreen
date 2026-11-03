@@ -83,7 +83,7 @@ mod tests {
             ("23:59", None, 0.82, false),   // sun
             ("9999", None, 1.0, false),     // media library, restarts
             ("99.9", None, 1.0, true),      // traffic req/s
-            ("6.1k", None, 1.0, true),      // fans
+            ("100", Some("%"), 1.0, false), // fans
             ("260", Some("V"), 1.0, false), // mains
             ("82", Some("d"), 1.0, false),  // uptime
             ("10.52", None, 0.82, false),   // load from 10 up

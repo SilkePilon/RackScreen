@@ -55,7 +55,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | <img src=".github/media/screens/traffic.gif" alt="WEB TRAFFIC role" width="200"> | <img src=".github/media/screens/restarts.gif" alt="RESTARTS role" width="200"> |
 | **`traffic`** — Traefik requests per second, the three busiest services on the ring, the error share in the pill | **`restarts`** — container restarts in 24 h, one segment per hour coloured by count, the worst pod in the pill |
 | <img src=".github/media/screens/uptime.gif" alt="UPTIME role" width="200"> | <img src=".github/media/screens/fans.gif" alt="FANS role" width="200"> |
-| **`uptime`** — the longest node uptime, a segment per node, amber for a reboot in the last day | **`fans`** — the loudest fan in rpm, a bar per node with a fan |
+| **`uptime`** — the longest node uptime, a segment per node, amber for a reboot in the last day | **`fans`** — fan power in % (pwm duty) of the busiest fan, a bar per node with a fan |
 | <img src=".github/media/screens/mains.gif" alt="MAINS role" width="200"> | <img src=".github/media/screens/load.gif" alt="LOAD role" width="200"> |
 | **`mains`** — UPS input voltage on six bands over 200–260 V, the last 24 h as a sparkline | **`load`** — the highest 1-minute load, a segment per node by load per core, cluster means in the card |
 | <img src=".github/media/screens/ci.gif" alt="CI role" width="200"> | <img src=".github/media/screens/jellyfin.gif" alt="NOW PLAYING role" width="200"> |
@@ -133,7 +133,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-eight r
 | `traffic` | Prometheus (Traefik) | req/s, ring the three busiest services, pill the busiest and the 5xx share, card the last 90 s |
 | `restarts` | Prometheus (kube-state-metrics) | restarts in 24 h, a segment per hour (green 1, amber 2–5, red 6+), pill the worst pod, card restarts per hour |
 | `uptime` | Prometheus (node-exporter) | longest uptime in days, a segment per node, pill the latest reboot, card days per node |
-| `fans` | Prometheus (node-exporter hwmon) | loudest fan in rpm, ring over 8000, pill the node, card a bar per node |
+| `fans` | Prometheus (node-exporter hwmon pwm) | busiest fan power in %, ring full at 100 %, amber over 85 %, pill the node or "All at 49 %", card a bar per node |
 | `mains` | Prometheus (nut-exporter) | input voltage on six bands, pill stable or low/high voltage with the UPS load, card the last 24 h |
 | `load` | Prometheus (node-exporter) | highest 1-minute load, a segment per node by load per core, card the cluster means |
 | `ci` | GitHub Actions | passes over the last twelve runs, a segment per run, pill the newest run, card average run time and failures |

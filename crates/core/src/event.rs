@@ -412,7 +412,8 @@ pub enum Event {
     },
     /// Seconds since boot per node.
     Uptime(Vec<(String, f64)>),
-    /// Fan speed per node in rpm; nodes without a fan are absent.
+    /// Fan power per node in percent (pwm duty, 0–100); nodes without a fan
+    /// are absent.
     Fans(Vec<(String, f32)>),
     /// UPS input voltage and load.
     Mains {

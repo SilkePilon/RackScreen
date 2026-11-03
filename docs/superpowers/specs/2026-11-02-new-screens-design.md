@@ -43,7 +43,7 @@ Columns as in spec A: curved title · hero · ring · pill · card.
 | traffic | WEB TRAFFIC | req/s (one decimal), unit `req/s` below | Parts: share of the top 3 services (indigo shades), rest `TRACK` | "<busiest service> · 0 % errors" (`WARN` when 5xx share ≥ 1 %, `CRIT` ≥ 5 %) | Spark, last 90 s |
 | restarts | RESTARTS · 24H | container restarts in 24 h | Discrete, 24 segments = hours (oldest first): 0 `TRACK`, 1 `OK` 80 %, 2–5 `WARN`, ≥ 6 `CRIT` | "<worst pod> ×41" (crit when ≥ 6, else `TEXT2`); "No restarts" (ok) at 0 | Bars per hour, coloured as the ring, "per hour" |
 | uptime | UPTIME | longest node uptime in days (`82` + superscript `d`) | Discrete, one per node: `OK`, `WARN` when that node is up < 1 day | "<node> rebooted 9 h ago" (warn) for the most recent reboot < 24 h, else "All up 3 d+" | NodeBars of days per node (0–max), recent reboots in `WARN` |
-| fans | FANS | highest fan speed (`6.1k`), unit `rpm` below | Fill cyan, max ÷ 8000; `WARN` over 7000 | "<node> loudest" | NodeBars per node with a fan, loudest highlighted |
+| fans | FANS | highest fan power (`49`), superscript `%` | Fill cyan, max ÷ 100; `WARN` over 85 % | "<node> busiest", or "All at 49 %" when every node rounds the same | NodeBars 0–100 per node with a fan, busiest highlighted |
 | mains | MAINS | input voltage (`234` + superscript `V`) | Bands over 200–260 V: crit, warn, ok, ok, warn, crit (10 V each); ends labelled 200 / 260 | "Stable · UPS load 7 %" (ok), "Low voltage"/"High voltage" (warn) outside 220–240 | Spark 24 h (hourly), `now_idx` |
 | load | LOAD | highest 1-min load (two decimals) | Discrete, one per node, by load ÷ cores: `OK`, `WARN` ≥ 0.7, `CRIT` ≥ 0.9 | "<node> busiest" | Stats cluster mean load 1 min · 5 min · 15 min |
 | ci | CI | passed / total of the last 12 runs (`11/12`, hero_scale 0.82) | Discrete, 12 segments, oldest first: success `OK`, failure `CRIT`, in progress blue, cancelled/skipped `TRACK` | "<repo> · building" (blue) / "· passed" (ok) / "· failed" (crit) for the newest run | Stats average run time · failed count |
@@ -75,7 +75,7 @@ New instant queries each poll (existing poll interval):
 | traffic | `sum(rate(traefik_entrypoint_requests_total[1m]))`; `topk(3, sum by (service)(rate(traefik_service_requests_total[5m])))`; 5xx share `sum(rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum(rate(traefik_service_requests_total[5m]))` |
 | restarts | `sum(increase(kube_pod_container_status_restarts_total[24h]))`; `topk(1, sum by (namespace, pod)(increase(kube_pod_container_status_restarts_total[24h])))` |
 | uptime | `time() - node_boot_time_seconds` |
-| fans | `node_hwmon_fan_rpm` |
+| fans | `node_hwmon_pwm / 255 * 100` |
 | mains | `nut_input_voltage_volts`, `nut_load` |
 | load | `node_load1`, `node_load5`, `node_load15`, `count by (instance)(node_cpu_seconds_total{mode="idle"})` |
 

@@ -441,7 +441,8 @@ const Q_RESTARTS_TOP: &str =
     "topk(1, sum by (namespace, pod)(increase(kube_pod_container_status_restarts_total[24h])))";
 const Q_RESTARTS_HOURLY: &str = "sum(increase(kube_pod_container_status_restarts_total[1h]))";
 const Q_UPTIME: &str = "time() - node_boot_time_seconds";
-const Q_FANS: &str = "node_hwmon_fan_rpm";
+/// Fan power in percent: pwm duty 0–255 scaled to 0–100.
+const Q_FANS: &str = "node_hwmon_pwm / 255 * 100";
 const Q_MAINS_V: &str = "nut_input_voltage_volts";
 const Q_MAINS_HOURLY: &str = "avg(nut_input_voltage_volts)";
 const Q_LOAD1: &str = "node_load1";
@@ -1312,15 +1313,28 @@ mod tests {
         let hp = nodes.iter().find(|n| n.node == "hp-1").unwrap();
         assert_eq!((hp.load15, hp.cores), (0.0, 12), "a missing series reads 0");
         assert!(load_from(&[], &l5, &l15, &cores).is_empty());
+        // `node_hwmon_pwm / 255 * 100`: 125 → 49 %, 255 → 100 %.
+        assert!(Q_FANS.contains("node_hwmon_pwm") && Q_FANS.contains("/ 255 * 100"));
+        assert!(!Q_FANS.contains("rpm"));
         let fans = labelled(&[
-            (&[("node", "pi-1"), ("sensor", "fan1")], 4838.0),
-            (&[("node", "pi-1"), ("sensor", "fan2")], 5000.0),
-            (&[("node", "pi-2"), ("sensor", "fan1")], 4516.0),
+            (
+                &[("node", "pi-1"), ("sensor", "pwm1")],
+                125.0 / 255.0 * 100.0,
+            ),
+            (&[("node", "pi-1"), ("sensor", "pwm2")], 100.0),
+            (
+                &[("node", "pi-2"), ("sensor", "pwm1")],
+                125.0 / 255.0 * 100.0,
+            ),
         ]);
+        let got = per_node(&fans);
+        assert_eq!(got.len(), 2);
         assert_eq!(
-            per_node(&fans),
-            vec![("pi-1".to_string(), 5000.0), ("pi-2".to_string(), 4516.0)],
-            "max per node, sorted"
+            (got[0].0.as_str(), got[0].1),
+            ("pi-1", 100.0),
+            "max per node"
         );
+        assert_eq!(got[1].0, "pi-2", "sorted");
+        assert!((got[1].1 - 49.02).abs() < 0.01);
     }
 }

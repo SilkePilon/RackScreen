@@ -446,7 +446,8 @@ fn full_model() -> Model {
     );
     m.apply(
         Event::Fans(
-            [4885.0, 4538.0, 6059.0, 5104.0]
+            // Every Pi 5 cooler at pwm 125 of 255, as the cluster exports.
+            [49.0, 49.0, 49.0, 49.0]
                 .iter()
                 .zip(&nodes[3..])
                 .map(|(r, n)| (n.to_string(), *r))
@@ -867,8 +868,8 @@ fn rack_roles_warning_states() {
     );
     m.apply(
         Event::Fans(vec![
-            ("raspberrypi-5-8gb-3".into(), 7420.0),
-            ("raspberrypi-5-8gb-1".into(), 5100.0),
+            ("raspberrypi-5-8gb-3".into(), 92.0),
+            ("raspberrypi-5-8gb-1".into(), 49.0),
         ]),
         0.0,
     );

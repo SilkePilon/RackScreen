@@ -13,9 +13,8 @@ use crate::theme::Color;
 
 /// The three busiest services on the traffic ring, busiest first.
 pub const INDIGO_SHADES: [Color; 3] = [INDIGO, Color::hex(0x6E7BD0), Color::hex(0x525C9E)];
-/// The fan ring is full at this speed, and amber above `FAN_WARN_RPM`.
-pub const FAN_MAX_RPM: f32 = 8000.0;
-pub const FAN_WARN_RPM: f32 = 7000.0;
+/// Fan power (pwm duty) is amber above this percent.
+pub const FAN_WARN_PCT: f32 = 85.0;
 /// Mains is "stable" inside this window.
 pub const MAINS_OK_V: (f32, f32) = (220.0, 240.0);
 
@@ -140,32 +139,34 @@ pub fn uptime(model: &Model, _now: Secs) -> P2Screen {
 
 pub fn fans(model: &Model, _now: Secs) -> P2Screen {
     let f = model.fans();
-    let loudest = f
+    let busiest = f
         .fans
         .iter()
         .enumerate()
         .max_by(|a, b| a.1 .1.total_cmp(&b.1 .1));
-    let (idx, name, max) = match loudest {
-        Some((i, (n, rpm))) => (Some(i), n.as_str(), *rpm),
+    let (idx, name, max) = match busiest {
+        Some((i, (n, pct))) => (Some(i), n.as_str(), *pct),
         None => (None, "", 0.0),
     };
-    let hero = if max >= 1000.0 {
-        format!("{:.1}k", max / 1000.0)
+    let rounded = |pct: f32| pct.round() as i32;
+    let hero = rounded(max);
+    let mut s = P2Screen::new("FANS", hero.to_string());
+    s.unit = Some("%".into());
+    let color = |pct: f32| if pct > FAN_WARN_PCT { WARN } else { CYAN };
+    s.ring = RingSpec::fill((max / 100.0).clamp(0.0, 1.0), color(max));
+    let all_same = f.fans.iter().all(|(_, p)| rounded(*p) == hero);
+    let pill = if all_same && !f.fans.is_empty() {
+        format!("All at {hero} %")
     } else {
-        format!("{max:.0}")
+        format!("{name} busiest")
     };
-    let mut s = P2Screen::new("FANS", hero);
-    s.unit = Some("rpm".into());
-    s.unit_below = true;
-    let color = |rpm: f32| if rpm > FAN_WARN_RPM { WARN } else { CYAN };
-    s.ring = RingSpec::fill((max / FAN_MAX_RPM).clamp(0.0, 1.0), color(max));
-    s.pill = Some((format!("{name} loudest"), TEXT2));
+    s.pill = Some((pill, TEXT2));
     s.card = Some(Card::NodeBars {
-        values: f.fans.iter().map(|(_, rpm)| *rpm).collect(),
+        values: f.fans.iter().map(|(_, pct)| *pct).collect(),
         min: 0.0,
-        max: FAN_MAX_RPM,
+        max: 100.0,
         labels: f.fans.iter().map(|(n, _)| short_node(n)).collect(),
-        colors: f.fans.iter().map(|(_, rpm)| color(*rpm)).collect(),
+        colors: f.fans.iter().map(|(_, pct)| color(*pct)).collect(),
         highlight: idx,
     });
     s
@@ -456,13 +457,13 @@ mod tests {
     }
 
     #[test]
-    fn fans_show_the_loudest_in_kilo_rpm() {
+    fn fans_show_the_busiest_fan_power_in_percent() {
         let mut m = Model::new(Thresholds::default());
         m.apply(
             Event::Fans(vec![
-                ("raspberrypi-5-16gb-1".into(), 4885.0),
-                ("raspberrypi-5-8gb-1".into(), 4538.0),
-                ("raspberrypi-5-8gb-3".into(), 6059.0),
+                ("raspberrypi-5-16gb-1".into(), 45.1),
+                ("raspberrypi-5-8gb-1".into(), 40.0),
+                ("raspberrypi-5-8gb-3".into(), 58.6),
             ]),
             0.0,
         );
@@ -474,12 +475,12 @@ mod tests {
                 s.unit.as_deref(),
                 s.unit_below
             ),
-            ("FANS", "6.1k", Some("rpm"), true)
+            ("FANS", "59", Some("%"), false)
         );
         assert!(
-            matches!(s.ring.kind, RingKind::Fill { frac, color } if (frac - 6059.0 / 8000.0).abs() < 1e-5 && color == CYAN)
+            matches!(s.ring.kind, RingKind::Fill { frac, color } if (frac - 0.586).abs() < 1e-5 && color == CYAN)
         );
-        assert_eq!(pill(&s), ("raspberrypi-5-8gb-3 loudest".into(), TEXT2));
+        assert_eq!(pill(&s), ("raspberrypi-5-8gb-3 busiest".into(), TEXT2));
         match &s.card {
             Some(Card::NodeBars {
                 values,
@@ -489,19 +490,48 @@ mod tests {
                 colors,
                 highlight,
             }) => {
-                assert_eq!(values, &vec![4885.0, 4538.0, 6059.0]);
-                assert_eq!((*min, *max, *highlight), (0.0, FAN_MAX_RPM, Some(2)));
+                assert_eq!(values, &vec![45.1, 40.0, 58.6]);
+                assert_eq!((*min, *max, *highlight), (0.0, 100.0, Some(2)));
                 assert_eq!(labels, &vec!["r1".to_string(), "r1".into(), "r3".into()]);
                 assert_eq!(colors, &vec![CYAN; 3]);
             }
             _ => panic!("node bars"),
         }
-        m.apply(Event::Fans(vec![("pi".into(), 7400.0)]), 1.0);
-        let loud = fans(&m, 1.0);
-        assert_eq!(loud.hero, "7.4k");
-        assert!(matches!(loud.ring.kind, RingKind::Fill { color, .. } if color == WARN));
-        m.apply(Event::Fans(vec![("pi".into(), 850.0)]), 2.0);
-        assert_eq!(fans(&m, 2.0).hero, "850");
+    }
+
+    #[test]
+    fn fans_warn_above_85_percent() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Fans(vec![("a".into(), 92.0), ("b".into(), 49.0)]),
+            0.0,
+        );
+        let s = fans(&m, 0.0);
+        assert_eq!(s.hero, "92");
+        assert!(matches!(s.ring.kind, RingKind::Fill { color, .. } if color == WARN));
+        match &s.card {
+            Some(Card::NodeBars { colors, .. }) => assert_eq!(colors, &vec![WARN, CYAN]),
+            _ => panic!("node bars"),
+        }
+        m.apply(Event::Fans(vec![("a".into(), FAN_WARN_PCT)]), 1.0);
+        let at = fans(&m, 1.0);
+        assert!(matches!(at.ring.kind, RingKind::Fill { color, .. } if color == CYAN));
+    }
+
+    #[test]
+    fn fans_pill_says_all_at_when_every_node_rounds_the_same() {
+        let mut m = Model::new(Thresholds::default());
+        m.apply(
+            Event::Fans(vec![
+                ("a".into(), 49.02),
+                ("b".into(), 49.02),
+                ("c".into(), 48.8),
+            ]),
+            0.0,
+        );
+        let s = fans(&m, 0.0);
+        assert_eq!(s.hero, "49");
+        assert_eq!(pill(&s), ("All at 49 %".into(), TEXT2));
     }
 
     #[test]

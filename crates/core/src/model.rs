@@ -211,7 +211,7 @@ pub struct UptimeState {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FansState {
-    /// `(node, rpm)`, sorted by node name.
+    /// `(node, fan power %)`, sorted by node name.
     pub fans: Vec<(String, f32)>,
     pub have: bool,
 }
@@ -1508,7 +1508,7 @@ mod tests {
             2.0,
         );
         assert_eq!(m.uptime().nodes[0].0, "pi-1", "sorted by name");
-        m.apply(Event::Fans(vec![("pi-1".into(), 4838.0)]), 2.0);
+        m.apply(Event::Fans(vec![("pi-1".into(), 49.0)]), 2.0);
         assert!(m.fans().have && m.fans().fans.len() == 1);
         m.apply(
             Event::MainsHistory {
