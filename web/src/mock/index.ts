@@ -97,7 +97,7 @@ function status(): Status {
   const wob = (k: number) => (Math.sin(now / 4000 + k) + 1) / 2
   return {
     monitor: {
-      state: restarting ? "restarting" : "running",
+      state: restarting ? "starting" : "running",
       error: null,
       since_unix: state.monitorSince,
     },
