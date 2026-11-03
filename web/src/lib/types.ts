@@ -222,8 +222,10 @@ export interface Tile {
   unit: string
   tone: Tone
 }
+export type MonitorState = "starting" | "running" | "stopped" | "error"
+
 export interface Status {
-  monitor: { state: string; error: string | null; since_unix: number }
+  monitor: { state: MonitorState; error: string | null; since_unix: number }
   night: { mode: NightMode; active: boolean }
   screens: ScreenStatus[]
   links: LinkStatus[]

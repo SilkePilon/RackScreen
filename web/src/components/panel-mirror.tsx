@@ -15,6 +15,7 @@ export function PanelMirror({
   cycleSecs,
   label,
   dim,
+  thumb,
 }: {
   screen: number
   className?: string
@@ -22,6 +23,8 @@ export function PanelMirror({
   cycleSecs?: number
   label?: string
   dim?: boolean
+  /** A small thumbnail: the live view may send it fewer frames. */
+  thumb?: boolean
 }) {
   const canvas = React.useRef<HTMLCanvasElement>(null)
   const [hasFrame, setHasFrame] = React.useState(false)
@@ -29,11 +32,15 @@ export function PanelMirror({
   React.useEffect(() => {
     const ctx = canvas.current?.getContext("2d")
     if (!ctx) return
-    return subscribeFrames(screen, (bmp) => {
-      ctx.drawImage(bmp, 0, 0, 240, 240)
-      setHasFrame(true)
-    })
-  }, [screen])
+    return subscribeFrames(
+      screen,
+      (bmp) => {
+        ctx.drawImage(bmp, 0, 0, 240, 240)
+        setHasFrame(true)
+      },
+      { thumb },
+    )
+  }, [screen, thumb])
 
   return (
     <div
@@ -71,14 +78,18 @@ function CycleRing({ progress, cycleSecs }: { progress: number; cycleSecs?: numb
   const arc = React.useRef<SVGCircleElement>(null)
   const C = 2 * Math.PI * 48.5
   React.useEffect(() => {
-    const start = performance.now()
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    if (reduce || !cycleSecs) {
+      // No animation loop: show the polled progress as is.
+      arc.current?.setAttribute("stroke-dashoffset", String(C * (1 - progress)))
+      return
+    }
+    const start = performance.now()
     let raf = 0
     const tick = (now: number) => {
-      const p =
-        cycleSecs && !reduce ? Math.min(1, progress + (now - start) / 1000 / cycleSecs) : progress
+      const p = Math.min(1, progress + (now - start) / 1000 / cycleSecs)
       arc.current?.setAttribute("stroke-dashoffset", String(C * (1 - p)))
-      raf = requestAnimationFrame(tick)
+      if (p < 1) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)

@@ -247,11 +247,15 @@ export function NumberInput({
   integer?: boolean
   placeholder?: string
 }) {
+  const d = useDraft()
   const [text, setText] = React.useState(value === null || value === undefined ? "" : String(value))
   const [prev, setPrev] = React.useState(value)
-  if (prev !== value) {
+  const [prevEpoch, setPrevEpoch] = React.useState(d.epoch)
+  if (prev !== value || prevEpoch !== d.epoch) {
+    const replaced = prevEpoch !== d.epoch
     setPrev(value)
-    if (Number(text) !== value || (value === null && text !== "")) {
+    setPrevEpoch(d.epoch)
+    if (replaced || Number(text) !== value || (value === null && text !== "")) {
       setText(value === null || value === undefined ? "" : String(value))
     }
   }
@@ -263,6 +267,13 @@ export function NumberInput({
         (integer && !Number.isInteger(n)) ||
         (min !== undefined && n < min) ||
         (max !== undefined && n > max)
+  // Report invalid text to the draft so Save waits until it is fixed.
+  const key = React.useId()
+  const { setInvalid } = d
+  React.useEffect(() => {
+    setInvalid(key, invalid)
+    return () => setInvalid(key, false)
+  }, [key, invalid, setInvalid])
   const hint =
     min !== undefined && max !== undefined
       ? `${min} to ${max}`

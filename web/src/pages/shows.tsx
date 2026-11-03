@@ -161,7 +161,7 @@ function OrderChip({ screen, position }: { screen: number; position: number }) {
           isDragging && "bg-accent shadow-xl",
         )}
       >
-        <PanelMirror screen={screen} className="w-12 p-[3px]" />
+        <PanelMirror thumb screen={screen} className="w-12 p-[3px]" />
         <span className="text-xs font-medium tabular">Screen {screen + 1}</span>
       </button>
     </li>

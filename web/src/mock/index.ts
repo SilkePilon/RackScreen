@@ -97,7 +97,7 @@ function status(): Status {
   const wob = (k: number) => (Math.sin(now / 4000 + k) + 1) / 2
   return {
     monitor: {
-      state: restarting ? "restarting" : "running",
+      state: restarting ? "starting" : "running",
       error: null,
       since_unix: state.monitorSince,
     },
@@ -202,6 +202,7 @@ function save(incoming: Config, fromYaml: boolean) {
   state.config = c
   const restart = webChanged ? "process" : "monitor"
   if (webChanged) {
+    state.started = Math.floor(Date.now() / 1000) + 4
     state.offline = true
     setTimeout(() => (state.offline = false), 4000)
   } else {
@@ -315,9 +316,10 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       return json(200, { ok: true })
     case "GET /logs": {
       const after = Number(url.searchParams.get("after") ?? 0)
-      const limit = Number(url.searchParams.get("limit") ?? 500)
-      const lines = state.logs.filter((l) => l.seq > after).slice(-limit)
-      return json(200, { lines, next: (state.logs.at(-1)?.seq ?? 0) + 1 })
+      const limit = Math.min(2000, Math.max(1, Number(url.searchParams.get("limit") ?? 500)))
+      // Like the service: the OLDEST `limit` lines after `after`; next = last seq sent.
+      const lines = state.logs.filter((l) => l.seq > after).slice(0, limit)
+      return json(200, { lines, next: lines.at(-1)?.seq ?? after })
     }
     case "GET /spotify":
       return json(200, {
