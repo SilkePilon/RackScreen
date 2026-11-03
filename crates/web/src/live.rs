@@ -61,26 +61,47 @@ fn parse_fps(text: &str) -> Option<u32> {
     Some((fps as u32).clamp(1, MAX_LIVE_FPS))
 }
 
+/// How often the server pings a live client.
+pub const PING_EVERY: Duration = Duration::from_secs(15);
+/// A client that sent nothing (not even a pong) for this long is gone.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+/// A send that does not finish in this long means the peer stopped reading.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn ticker_for(fps: u32) -> tokio::time::Interval {
+    let mut t = tokio::time::interval(Duration::from_millis(1000 / fps as u64));
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    t
+}
+
+async fn send_timed(socket: &mut WebSocket, msg: Message) -> bool {
+    matches!(
+        tokio::time::timeout(SEND_TIMEOUT, socket.send(msg)).await,
+        Ok(Ok(()))
+    )
+}
+
 async fn session(mut socket: WebSocket, state: Arc<AppState>) {
     let tap = state.hub.frames.clone();
-    let _guard = tap.watch();
+    // dropped on every return: the tap stops copying once nobody watches
+    let guard = tap.watch();
     let mut fps = DEFAULT_LIVE_FPS;
-    tap.set_fps(fps);
-    let n = tap.screens();
-    let mut sent = vec![0u64; n];
-    let mut ticker = tokio::time::interval(Duration::from_millis(1000 / fps as u64));
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut sent = vec![0u64; tap.screens()];
+    let mut ticker = ticker_for(fps);
+    let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_seen = tokio::time::Instant::now();
     loop {
         tokio::select! {
             msg = socket.recv() => {
+                last_seen = tokio::time::Instant::now();
                 match msg {
                     Some(Ok(Message::Text(t))) => {
                         if let Some(f) = parse_fps(&t) {
                             if f != fps {
                                 fps = f;
-                                tap.set_fps(fps);
-                                ticker = tokio::time::interval(Duration::from_millis(1000 / fps as u64));
-                                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                                guard.set_fps(fps);
+                                ticker = ticker_for(fps);
                             }
                         }
                     }
@@ -88,8 +109,19 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>) {
                     Some(Ok(_)) => {}
                 }
             }
+            _ = ping.tick() => {
+                if last_seen.elapsed() >= IDLE_TIMEOUT {
+                    tracing::debug!("live: client silent for {IDLE_TIMEOUT:?}, closing");
+                    break;
+                }
+                if !send_timed(&mut socket, Message::Ping(Vec::new().into())).await {
+                    break;
+                }
+            }
             _ = ticker.tick() => {
-                for (i, last) in sent.iter_mut().enumerate() {
+                let active = tap.active();
+                state.trim_png_cache(active);
+                for (i, last) in sent.iter_mut().enumerate().take(active) {
                     let seq = tap.seq(i);
                     if seq == 0 || seq == *last {
                         continue;
@@ -100,7 +132,7 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>) {
                     let mut msg = Vec::with_capacity(png.len() + 1);
                     msg.push(i as u8);
                     msg.extend_from_slice(&png);
-                    if socket.send(Message::Binary(msg.into())).await.is_err() {
+                    if !send_timed(&mut socket, Message::Binary(msg.into())).await {
                         return;
                     }
                     *last = seq;
@@ -108,6 +140,7 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>) {
             }
         }
     }
+    let _ = tokio::time::timeout(SEND_TIMEOUT, socket.send(Message::Close(None))).await;
 }
 
 #[cfg(test)]

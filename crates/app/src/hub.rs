@@ -2,6 +2,7 @@
 //! log sink, a tap on the rendered frames, a once-a-second status snapshot, a
 //! control channel into the current render loop and the supervisor's mailbox.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -36,7 +37,20 @@ pub struct FrameTap {
     watchers: AtomicUsize,
     /// Minimum milliseconds between two copies of one screen.
     interval_ms: AtomicU64,
+    /// The fps each live connection asked for, by watch id; the fastest wins.
+    fps: Mutex<FpsRequests>,
+    /// Sequence numbers are unique across screens and monitor restarts, so
+    /// a slot cleared and filled again never repeats a number a client saw.
+    next_seq: AtomicU64,
+    /// Screens the current monitor drives (`<= slots.len()`).
+    active: AtomicUsize,
     slots: Vec<Mutex<TapSlot>>,
+}
+
+#[derive(Default)]
+struct FpsRequests {
+    next_id: u64,
+    by_id: HashMap<u64, u32>,
 }
 
 pub const DEFAULT_LIVE_FPS: u32 = 10;
@@ -50,6 +64,9 @@ impl FrameTap {
         FrameTap {
             watchers: AtomicUsize::new(0),
             interval_ms: AtomicU64::new(1000 / DEFAULT_LIVE_FPS as u64),
+            fps: Mutex::new(FpsRequests::default()),
+            next_seq: AtomicU64::new(1),
+            active: AtomicUsize::new(screens),
             slots: (0..screens)
                 .map(|_| {
                     Mutex::new(TapSlot {
@@ -61,24 +78,60 @@ impl FrameTap {
         }
     }
 
+    /// Tap slots (the most screens there can be).
     pub fn screens(&self) -> usize {
         self.slots.len()
     }
 
-    /// Register a live client; drop the guard to unregister.
+    /// Screens the current monitor drives.
+    pub fn active(&self) -> usize {
+        self.active.load(Ordering::SeqCst).min(self.slots.len())
+    }
+
+    /// A (re)started monitor drives `n` screens: forget the frames of the
+    /// screens past that, so no client keeps being sent a stale one.
+    pub fn set_active(&self, n: usize) {
+        let n = n.min(self.slots.len());
+        self.active.store(n, Ordering::SeqCst);
+        for slot in &self.slots[n..] {
+            let mut slot = slot.lock().unwrap();
+            slot.frame = None;
+            slot.last_copy = None;
+        }
+    }
+
+    /// Register a live client (asking for `DEFAULT_LIVE_FPS` until it says
+    /// otherwise); drop the guard to unregister.
     pub fn watch(self: &Arc<Self>) -> WatchGuard {
+        let id = {
+            let mut f = self.fps.lock().unwrap();
+            let id = f.next_id;
+            f.next_id += 1;
+            f.by_id.insert(id, DEFAULT_LIVE_FPS);
+            id
+        };
         self.watchers.fetch_add(1, Ordering::SeqCst);
-        WatchGuard(self.clone())
+        self.recompute_fps();
+        WatchGuard {
+            tap: self.clone(),
+            id,
+        }
     }
 
     pub fn watchers(&self) -> usize {
         self.watchers.load(Ordering::SeqCst)
     }
 
-    /// Ask for at most `fps` copies a second (1..=`MAX_LIVE_FPS`). The
-    /// fastest request wins while several clients watch.
-    pub fn set_fps(&self, fps: u32) {
-        let fps = fps.clamp(1, MAX_LIVE_FPS);
+    /// The interval for the fastest live connection (the default when none).
+    fn recompute_fps(&self) {
+        let f = self.fps.lock().unwrap();
+        let fps = f
+            .by_id
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(DEFAULT_LIVE_FPS)
+            .clamp(1, MAX_LIVE_FPS);
         self.interval_ms.store(1000 / fps as u64, Ordering::Relaxed);
     }
 
@@ -107,7 +160,7 @@ impl FrameTap {
             return;
         };
         let mut slot = slot.lock().unwrap();
-        let seq = slot.frame.as_ref().map_or(1, |f| f.seq + 1);
+        let seq = self.next_seq.fetch_add(1, Ordering::SeqCst);
         slot.frame = Some(TappedFrame {
             seq,
             rgba: Arc::from(rgba),
@@ -129,11 +182,31 @@ impl FrameTap {
     }
 }
 
-pub struct WatchGuard(Arc<FrameTap>);
+/// One live connection's registration with the tap.
+pub struct WatchGuard {
+    tap: Arc<FrameTap>,
+    id: u64,
+}
+
+impl WatchGuard {
+    /// This connection wants at most `fps` frames a second
+    /// (1..=`MAX_LIVE_FPS`). The fastest live connection sets the pace.
+    pub fn set_fps(&self, fps: u32) {
+        self.tap
+            .fps
+            .lock()
+            .unwrap()
+            .by_id
+            .insert(self.id, fps.clamp(1, MAX_LIVE_FPS));
+        self.tap.recompute_fps();
+    }
+}
 
 impl Drop for WatchGuard {
     fn drop(&mut self) {
-        self.0.watchers.fetch_sub(1, Ordering::SeqCst);
+        self.tap.fps.lock().unwrap().by_id.remove(&self.id);
+        self.tap.watchers.fetch_sub(1, Ordering::SeqCst);
+        self.tap.recompute_fps();
     }
 }
 
@@ -388,9 +461,9 @@ mod tests {
         );
         assert!(tap.wants(0, t0 + Duration::from_millis(100)));
         assert!(tap.wants(1, t0), "the other screen is free");
-        tap.set_fps(20);
+        guard.set_fps(20);
         assert_eq!(tap.interval_ms(), 1000 / 15, "capped at 15 fps");
-        tap.set_fps(0);
+        guard.set_fps(0);
         assert_eq!(tap.interval_ms(), 1000);
         tap.publish(0, &frame, t0 + Duration::from_secs(1));
         let f = tap.latest(0).unwrap();
@@ -399,6 +472,49 @@ mod tests {
         drop(guard);
         assert_eq!(tap.watchers(), 0);
         assert!(!tap.wants(1, t0 + Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn fps_is_the_fastest_live_connection() {
+        let tap = Arc::new(FrameTap::new(1));
+        assert_eq!(tap.interval_ms(), 100);
+        let a = tap.watch();
+        let b = tap.watch();
+        a.set_fps(2);
+        assert_eq!(tap.interval_ms(), 100, "b still wants the default 10");
+        b.set_fps(5);
+        assert_eq!(tap.interval_ms(), 200);
+        b.set_fps(15);
+        a.set_fps(1);
+        assert_eq!(tap.interval_ms(), 1000 / 15, "a slower a does not win");
+        drop(b);
+        assert_eq!(tap.interval_ms(), 1000, "only a is left");
+        drop(a);
+        assert_eq!(tap.interval_ms(), 100, "back to the default");
+        assert_eq!(tap.watchers(), 0);
+    }
+
+    #[test]
+    fn fewer_screens_clear_the_rest_and_seqs_never_repeat() {
+        let tap = Arc::new(FrameTap::new(4));
+        let _g = tap.watch();
+        let t0 = Instant::now();
+        let frame = vec![1u8; 240 * 240 * 4];
+        for i in 0..4 {
+            tap.publish(i, &frame, t0);
+        }
+        let old = tap.seq(3);
+        assert_eq!(tap.active(), 4);
+        tap.set_active(2);
+        assert_eq!(tap.active(), 2);
+        assert_eq!(tap.seq(2), 0);
+        assert!(tap.latest(3).is_none());
+        assert!(tap.seq(1) > 0, "kept");
+        tap.set_active(4);
+        tap.publish(3, &frame, t0);
+        assert!(tap.seq(3) > old, "a refilled slot gets a new number");
+        tap.set_active(99);
+        assert_eq!(tap.active(), 4, "capped at the slots");
     }
 
     #[test]

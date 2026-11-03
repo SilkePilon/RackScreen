@@ -55,6 +55,14 @@ impl AppState {
         }
     }
 
+    /// Forget the encoded PNGs of screens at or past `active`.
+    pub fn trim_png_cache(&self, active: usize) {
+        let mut cache = self.png_cache.lock().unwrap();
+        for slot in cache.iter_mut().skip(active) {
+            *slot = None;
+        }
+    }
+
     pub fn password(&self) -> String {
         self.password.read().unwrap().clone()
     }

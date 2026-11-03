@@ -201,6 +201,8 @@ impl Monitor {
             cycle_secs_cfg: cfg.screens.iter().map(|s| s.cycle_secs).collect(),
         };
         if let Some(h) = &hub {
+            // a restart with fewer screens drops the frames of the rest
+            h.frames.set_active(cfg.screens.len());
             h.set_control(Some(ControlHandle {
                 events: tx.clone(),
                 control: control_tx,
