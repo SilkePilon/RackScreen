@@ -1144,3 +1144,20 @@ fn show_freight() {
     let def = rackscreen_core::shows::by_id("freight").unwrap();
     check("show_freight", &show_strip(def, 4.5));
 }
+
+#[test]
+fn show_round_one() {
+    for (id, t, name) in [
+        ("deep-sea", 5.0, "show_deep_sea"),
+        ("deep-sea", 6.0, "show_deep_sea_school"),
+        ("paper-plane", 5.2, "show_paper_plane"),
+        ("storm", 3.95, "show_storm"),
+        ("day", 3.0, "show_day"),
+        ("day", 11.0, "show_day_night"),
+        ("space", 4.0, "show_space"),
+        ("space", 1.0, "show_space_ship"),
+    ] {
+        let def = rackscreen_core::shows::by_id(id).unwrap();
+        check(name, &show_strip(def, t));
+    }
+}

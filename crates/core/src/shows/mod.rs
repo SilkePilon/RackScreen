@@ -2,8 +2,13 @@
 //! panels as one wide world. Each show is a pure function of the 12 fps
 //! frame index `f` and the quantised local time `t`.
 
+mod day;
+mod deep_sea;
 mod freight;
+mod paper_plane;
 pub mod schedule;
+mod space;
+mod storm;
 pub mod world;
 
 use world::{Layout, World, WorldFrame};
@@ -21,12 +26,44 @@ pub struct ShowDef {
 }
 
 /// Every show, in spec order.
-pub const SHOWS: &[ShowDef] = &[ShowDef {
-    id: "freight",
-    name: "Dusk freight",
-    secs: freight::SECS,
-    draw: freight::draw,
-}];
+pub const SHOWS: &[ShowDef] = &[
+    ShowDef {
+        id: "freight",
+        name: "Dusk freight",
+        secs: freight::SECS,
+        draw: freight::draw,
+    },
+    ShowDef {
+        id: "deep-sea",
+        name: "Deep sea",
+        secs: deep_sea::SECS,
+        draw: deep_sea::draw,
+    },
+    ShowDef {
+        id: "paper-plane",
+        name: "Paper plane",
+        secs: paper_plane::SECS,
+        draw: paper_plane::draw,
+    },
+    ShowDef {
+        id: "storm",
+        name: "Thunderstorm",
+        secs: storm::SECS,
+        draw: storm::draw,
+    },
+    ShowDef {
+        id: "day",
+        name: "Day in a minute",
+        secs: day::SECS,
+        draw: day::draw,
+    },
+    ShowDef {
+        id: "space",
+        name: "Space cruise",
+        secs: space::SECS,
+        draw: space::draw,
+    },
+];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
     SHOWS.iter().find(|s| s.id == id)
@@ -62,6 +99,21 @@ mod tests {
         let d = by_id("freight").expect("freight");
         assert_eq!((d.name, d.secs), ("Dusk freight", 9.0));
         assert!(by_id("nope").is_none());
+    }
+
+    #[test]
+    fn round_one_shows_are_registered() {
+        let got: Vec<_> = SHOWS[1..].iter().map(|d| (d.id, d.name, d.secs)).collect();
+        assert_eq!(
+            got,
+            [
+                ("deep-sea", "Deep sea", 10.0),
+                ("paper-plane", "Paper plane", 8.0),
+                ("storm", "Thunderstorm", 8.0),
+                ("day", "Day in a minute", 12.0),
+                ("space", "Space cruise", 8.0),
+            ]
+        );
     }
 
     #[test]

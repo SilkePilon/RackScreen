@@ -8,6 +8,8 @@
 pub const WORLD_H: u32 = 60;
 pub const PANEL_W: u32 = 60;
 pub const SCALE: u32 = 4;
+/// Width of the mockups' world: four panels with 8 px gaps.
+pub const MOCKUP_W: f64 = 264.0;
 
 /// Bezel gap in world px: one world px is about 0.54 mm on a GC9A01.
 pub fn gap_px(gap_mm: f32) -> u32 {
@@ -83,6 +85,16 @@ impl World<'_> {
     }
     pub fn px0(&self, i: u32) -> i32 {
         self.layout.x0(i) as i32
+    }
+    /// Left edge of panel `i`, clamped to the last panel, for mockup
+    /// elements pinned to a screen that a narrower layout lacks.
+    pub fn panel(&self, i: u32) -> i32 {
+        self.px0(i.min(self.layout.panels.saturating_sub(1)))
+    }
+    /// A mockup count of things spread over its 264 px world, scaled to this
+    /// world's width so every screen keeps the mockup's density.
+    pub fn spread(&self, n: u32) -> u32 {
+        js_round(n as f64 * self.w() as f64 / MOCKUP_W).max(0) as u32
     }
 
     /// Canvas `fillRect` at integer coordinates, clipped to the raster.
@@ -211,6 +223,23 @@ mod tests {
         assert_eq!(Layout { panels: 3, gap: 46 }.width(), 272);
         assert_eq!(Layout { panels: 2, gap: 46 }.width(), 166);
         assert_eq!(Layout { panels: 2, gap: 46 }.x0(1), 106);
+    }
+
+    #[test]
+    fn spread_keeps_the_mockup_count_at_its_width() {
+        let mut f = WorldFrame::new(264);
+        let w = World {
+            frame: &mut f,
+            layout: L,
+        };
+        assert_eq!(w.spread(11), 11);
+        let mut f = WorldFrame::new(378);
+        let w = World {
+            frame: &mut f,
+            layout: Layout { panels: 4, gap: 46 },
+        };
+        assert_eq!((w.spread(11), w.spread(90)), (16, 129));
+        assert_eq!((w.panel(2), w.panel(9)), (212, 318));
     }
 
     #[test]

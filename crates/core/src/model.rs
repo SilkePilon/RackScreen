@@ -1807,6 +1807,7 @@ mod tests {
     fn a_scheduled_show_pauses_role_cycling_and_extends_every_dwell() {
         let mut m = cycling_show_model();
         let mut run = None;
+        let mut total = 0.0;
         let mut last_role_change = 0.0;
         let mut changes_after = Vec::new();
         for i in 0..(200 * 30) {
@@ -1823,9 +1824,9 @@ mod tests {
                     assert!(now - last_role_change > 0.0, "not mid-transition");
                 }
                 run = Some(r.started);
+                total = r.total();
                 assert!(!transitioning, "no role change during a show at {now}");
             } else if let Some(start) = run {
-                let total = crate::shows::by_id("freight").unwrap().secs + 0.6;
                 if transitioning && changes_after.is_empty() {
                     changes_after.push(now - (start + total));
                 }
