@@ -21,8 +21,18 @@ pub const MAX_DOWNLOAD_BYTES: usize = 20 * 1024 * 1024;
 const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 /// GIFs with a larger canvas are refused: the canvas alone would be 16 MB.
 pub const MAX_CANVAS_PX: u64 = 4_000_000;
-/// A failed GIF is tried again after this long.
-pub const RETRY: Duration = Duration::from_secs(3600);
+/// The wait before trying a GIF again after its `failures`-th failed
+/// download in a row: 1 min, 5 min, 15 min, then hourly. A Pi that boots
+/// before its network is up gets its GIFs within a minute or so.
+pub fn retry_delay(failures: u32) -> Duration {
+    let mins = match failures {
+        0 | 1 => 1,
+        2 => 5,
+        3 => 15,
+        _ => 60,
+    };
+    Duration::from_secs(mins * 60)
+}
 /// One download may take this long (the shared client's 10 s is for APIs).
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 /// A GIF download follows at most this many redirects.
@@ -326,13 +336,21 @@ async fn fetch_capped(url: &str, accept: &str, max: usize) -> Result<Vec<u8>> {
     Ok(body)
 }
 
+/// Run blocking file or parse work off the async threads.
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .context("blocking task")
+}
+
 /// The `.gif` URL behind a pasted link; a Tenor page is fetched for it.
 async fn resolve(link: GifLink) -> Result<String> {
     match link {
         GifLink::Direct(u) => Ok(u),
         GifLink::TenorPage(page) => {
             let html = fetch_capped(&page, "text/html", MAX_PAGE_BYTES).await?;
-            tenor_gif_url(&String::from_utf8_lossy(&html))
+            blocking(move || tenor_gif_url(&String::from_utf8_lossy(&html)))
+                .await?
                 .ok_or_else(|| anyhow!("no .gif in the Tenor page {page}"))
         }
     }
@@ -342,16 +360,25 @@ async fn resolve(link: GifLink) -> Result<String> {
 /// resolve, download, check it is a GIF and cache it.
 pub async fn load(url: &str, cache_dir: &Path) -> Result<Vec<u8>> {
     let path = cache_path(cache_dir, url);
-    if let Ok(bytes) = std::fs::read(&path) {
+    let cached = path.clone();
+    if let Ok(bytes) = blocking(move || std::fs::read(&cached)).await? {
         return Ok(bytes);
     }
     let link = classify_link(url).map_err(|e| anyhow!(e))?;
     let gif_url = resolve(link).await?;
-    let bytes = fetch_capped(&gif_url, "image/gif", MAX_DOWNLOAD_BYTES).await?;
+    let mut bytes = fetch_capped(&gif_url, "image/gif", MAX_DOWNLOAD_BYTES).await?;
+    // the buffer grew by doubling: give back the slack before decoding
+    bytes.shrink_to_fit();
     if !bytes.starts_with(b"GIF8") {
         bail!("{gif_url} is not a GIF");
     }
-    if let Err(e) = write_cache(&path, &bytes) {
+    let at = path.clone();
+    let (bytes, written) = blocking(move || {
+        let written = write_cache(&at, &bytes);
+        (bytes, written)
+    })
+    .await?;
+    if let Err(e) = written {
         tracing::warn!("gif cache {}: {e:#}", path.display());
     }
     Ok(bytes)
@@ -366,9 +393,20 @@ fn write_cache(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::rename(&tmp, path).with_context(|| format!("rename {}", tmp.display()))
 }
 
+/// Why a try failed. `Fetch` (the network, a server) is tried again after
+/// `retry_delay`; `Final` (a bad link, or a GIF that downloaded but does
+/// not decode) stays failed until a restart.
+#[derive(Debug)]
+enum Failure {
+    Fetch(anyhow::Error),
+    Final(anyhow::Error),
+}
+
 /// Fetch and decode every GIF the screens use, one task each. A GIF that
-/// fails is reported (`Event::GifFailed`) and tried again every `RETRY`.
-/// Decoding runs one GIF at a time, so the memory peak stays one GIF's.
+/// fails to download is reported (`Event::GifFailed`) and tried again after
+/// `retry_delay`; one that does not decode is reported once and left.
+/// One GIF at a time is loaded and decoded, so the memory peak is one
+/// GIF's raw bytes and decode buffers.
 pub async fn run_gifs(gifs: Vec<GifSpec>, cache_dir: PathBuf, ctx: SourceCtx) {
     let decode_lock = Arc::new(tokio::sync::Semaphore::new(1));
     let tasks: Vec<_> = gifs
@@ -391,8 +429,9 @@ async fn run_one(
     lock: Arc<tokio::sync::Semaphore>,
     ctx: SourceCtx,
 ) {
+    let mut failures = 0u32;
     loop {
-        match load_and_decode(&spec, &cache_dir, &lock).await {
+        let e = match load_and_decode(&spec, &cache_dir, &lock).await {
             Ok(frames) => {
                 tracing::info!(
                     "gif:{}: {} frames, {:.1} s loop",
@@ -406,17 +445,30 @@ async fn run_one(
                 });
                 return;
             }
-            Err(e) => {
-                tracing::warn!("gif:{}: {e:#}; retrying in an hour", spec.name);
+            Err(Failure::Final(e)) => {
+                tracing::warn!("gif:{}: {e:#}; not retried until a restart", spec.name);
                 ctx.emit(Event::GifFailed {
                     index: spec.index,
                     reason: format!("{e:#}"),
                 });
+                return;
             }
-        }
+            Err(Failure::Fetch(e)) => e,
+        };
+        failures = failures.saturating_add(1);
+        let wait = retry_delay(failures);
+        tracing::warn!(
+            "gif:{}: {e:#}; retrying in {} min",
+            spec.name,
+            wait.as_secs() / 60
+        );
+        ctx.emit(Event::GifFailed {
+            index: spec.index,
+            reason: format!("{e:#}"),
+        });
         tokio::select! {
             _ = ctx.shutdown.cancelled() => return,
-            _ = tokio::time::sleep(RETRY) => {}
+            _ = tokio::time::sleep(wait) => {}
         }
     }
 }
@@ -425,17 +477,29 @@ async fn load_and_decode(
     spec: &GifSpec,
     cache_dir: &Path,
     lock: &tokio::sync::Semaphore,
-) -> Result<GifFrames> {
-    let bytes = load(&spec.url, cache_dir).await?;
-    let _permit = lock.acquire().await.context("decode lock")?;
-    let result = tokio::task::spawn_blocking(move || decode(&bytes))
+) -> std::result::Result<GifFrames, Failure> {
+    classify_link(&spec.url).map_err(|e| Failure::Final(anyhow!(e)))?;
+    // Held from before the download to the end of the decode: one GIF's
+    // bytes and buffers at a time.
+    let _permit = lock
+        .acquire()
         .await
-        .context("decode task")?;
-    if result.is_err() {
-        // A broken cached file is fetched again on the next try.
-        let _ = std::fs::remove_file(cache_path(cache_dir, &spec.url));
+        .map_err(|e| Failure::Final(anyhow!("decode lock: {e}")))?;
+    let bytes = load(&spec.url, cache_dir).await.map_err(Failure::Fetch)?;
+    let cached = cache_path(cache_dir, &spec.url);
+    let decoded = blocking(move || {
+        let result = decode(&bytes);
+        if result.is_err() {
+            // a restart fetches a broken file afresh
+            let _ = std::fs::remove_file(&cached);
+        }
+        result
+    })
+    .await;
+    match decoded {
+        Ok(Ok(frames)) => Ok(frames),
+        Ok(Err(e)) | Err(e) => Err(Failure::Final(e)),
     }
-    result
 }
 
 #[cfg(test)]
@@ -676,6 +740,73 @@ mod tests {
     async fn an_uncached_bad_link_fails_without_fetching() {
         let dir = tempfile_dir();
         assert!(load("https://example.com/x.png", &dir).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn retries_back_off_to_hourly() {
+        let mins = |n: u32| retry_delay(n).as_secs() / 60;
+        assert_eq!(
+            (1..=7).map(mins).collect::<Vec<_>>(),
+            vec![1, 5, 15, 60, 60, 60, 60]
+        );
+        assert_eq!(mins(0), 1, "defensive: as the first");
+        assert_eq!(mins(u32::MAX), 60);
+    }
+
+    fn ctx() -> (SourceCtx, std::sync::mpsc::Receiver<Event>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = SourceCtx {
+            tx,
+            shutdown: tokio_util::sync::CancellationToken::new(),
+        };
+        (ctx, rx)
+    }
+
+    #[tokio::test]
+    async fn a_gif_that_fails_to_decode_is_not_retried_this_session() {
+        let dir = tempfile_dir();
+        let url = "https://unreachable.invalid/broken.gif";
+        // a GIF header with nothing decodable behind it
+        std::fs::write(cache_path(&dir, url), b"GIF89a\x01").unwrap();
+        let spec = GifSpec {
+            index: 3,
+            name: "broken".into(),
+            url: url.into(),
+        };
+        let (ctx, rx) = ctx();
+        let lock = Arc::new(tokio::sync::Semaphore::new(1));
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            run_one(spec, dir.clone(), lock, ctx),
+        )
+        .await
+        .expect("gives up instead of waiting to retry");
+        let evs: Vec<Event> = rx.try_iter().collect();
+        assert_eq!(evs.len(), 1, "reported once: {evs:?}");
+        assert!(matches!(&evs[0], Event::GifFailed { index: 3, .. }));
+        assert!(
+            !cache_path(&dir, url).exists(),
+            "the broken file is fetched afresh after a restart"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_gif_waits_for_the_permit_before_loading() {
+        let dir = tempfile_dir();
+        let spec = GifSpec {
+            index: 0,
+            name: "later".into(),
+            url: "https://unreachable.invalid/later.gif".into(),
+        };
+        let lock = tokio::sync::Semaphore::new(1);
+        let held = lock.acquire().await.unwrap();
+        // were it loaded first, the download would fail at once
+        let r =
+            tokio::time::timeout(Duration::from_secs(2), load_and_decode(&spec, &dir, &lock)).await;
+        assert!(r.is_err(), "still waiting for the permit: {r:?}");
+        drop(held);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
