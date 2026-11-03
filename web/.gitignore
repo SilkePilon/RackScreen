@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-mock
+dist-ssr
+*.local
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+screenshots-tmp
