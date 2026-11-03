@@ -177,19 +177,22 @@ impl Painter {
 fn blit_world(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
     let (w, h) = (px.width(), px.height());
     let data = px.data_mut();
-    for py in 0..h {
-        let wy = py / SCALE;
-        if wy >= WORLD_H {
-            break;
+    let stride = w as usize * 4;
+    // The panel pixels the world covers; a slice past the world's right
+    // edge is cut off there.
+    let cols = (world.width.saturating_sub(x0) * SCALE).min(w) as usize;
+    let mut row = vec![0u8; cols * 4];
+    for wy in 0..h.div_ceil(SCALE).min(WORLD_H) {
+        // Scale one world row once...
+        let src = &world.rgba[(wy * world.width) as usize * 4..];
+        for (pxx, out) in row.chunks_exact_mut(4).enumerate() {
+            let s = (x0 as usize + pxx / SCALE as usize) * 4;
+            out.copy_from_slice(&src[s..s + 4]);
         }
-        for pxx in 0..w {
-            let wx = x0 + pxx / SCALE;
-            if wx >= world.width {
-                break;
-            }
-            let src = ((wy * world.width + wx) * 4) as usize;
-            let dst = ((py * w + pxx) * 4) as usize;
-            data[dst..dst + 4].copy_from_slice(&world.rgba[src..src + 4]);
+        // ...then copy it into its SCALE scanlines.
+        for py in wy * SCALE..((wy + 1) * SCALE).min(h) {
+            let dst = py as usize * stride;
+            data[dst..dst + row.len()].copy_from_slice(&row);
         }
     }
 }
@@ -332,6 +335,50 @@ mod tests {
         }
         assert!(red.data().chunks(4).all(|p| p == [255, 0, 0, 255]));
         assert!(blue.data().chunks(4).all(|p| p == [0, 0, 255, 255]));
+    }
+
+    /// The per-pixel loop `blit_world` replaced, kept as the reference.
+    fn blit_world_by_pixel(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
+        let (w, h) = (px.width(), px.height());
+        let data = px.data_mut();
+        for py in 0..h {
+            let wy = py / SCALE;
+            if wy >= WORLD_H {
+                break;
+            }
+            for pxx in 0..w {
+                let wx = x0 + pxx / SCALE;
+                if wx >= world.width {
+                    break;
+                }
+                let src = ((wy * world.width + wx) * 4) as usize;
+                let dst = ((py * w + pxx) * 4) as usize;
+                data[dst..dst + 4].copy_from_slice(&world.rgba[src..src + 4]);
+            }
+        }
+    }
+
+    #[test]
+    fn world_blit_by_rows_matches_the_per_pixel_loop() {
+        let width = 150;
+        let mut world = WorldFrame::new(width);
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        for b in world.rgba.iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *b = x as u8;
+        }
+        // whole slices, one ending at the world's right edge, one cut off by it
+        for x0 in [0, 1, 45, 90, 120, 149, 150] {
+            let mut a = crate::frame::new_pixmap();
+            let mut b = crate::frame::new_pixmap();
+            a.fill(tiny_skia::Color::from_rgba8(7, 8, 9, 255));
+            b.fill(tiny_skia::Color::from_rgba8(7, 8, 9, 255));
+            blit_world(&mut a, &world, x0);
+            blit_world_by_pixel(&mut b, &world, x0);
+            assert!(a.data() == b.data(), "x0 {x0}");
+        }
     }
 
     #[test]
