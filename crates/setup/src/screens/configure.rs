@@ -15,6 +15,7 @@ use crate::ops::config_file::save_config;
 use crate::ops::paths::service_user;
 use crate::ops::shell::RealShell;
 use crate::ops::systemd::Systemd;
+use crate::screens::spotify_login::{real_exchange, Exchange, LoginFlow, Target};
 use crate::widgets::{confirm_dialog, help_line, SidebarView, StatusTone};
 use crate::{Action, Screen, Shared};
 
@@ -24,6 +25,8 @@ pub enum FieldKind {
     Secret,
     Number,
     Bool,
+    /// Not a config value: Enter runs something (the Spotify login).
+    Command,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +86,9 @@ pub enum Field {
     JellyfinUrl,
     JellyfinKey,
     JellyfinPoll,
+    SpotifyEnabled,
+    SpotifyClientId,
+    SpotifyLogin,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,10 +100,11 @@ pub enum Group {
     Media,
     Display,
     Thresholds,
+    Spotify,
 }
 
 impl Group {
-    pub const ALL: [Group; 7] = [
+    pub const ALL: [Group; 8] = [
         Group::Cluster,
         Group::Services,
         Group::Energy,
@@ -105,6 +112,7 @@ impl Group {
         Group::Media,
         Group::Display,
         Group::Thresholds,
+        Group::Spotify,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -115,6 +123,7 @@ impl Group {
             Group::Media => "Media & Jellyfin",
             Group::Display => "Display",
             Group::Thresholds => "Thresholds",
+            Group::Spotify => "Spotify",
         }
     }
     pub fn index(self) -> usize {
@@ -155,10 +164,10 @@ const fn spec(
     }
 }
 
-use FieldKind::{Bool, Number, Secret, Text};
-use Group::{Cluster, Display, Energy, Media, Services, Sky, Thresholds};
+use FieldKind::{Bool, Command, Number, Secret, Text};
+use Group::{Cluster, Display, Energy, Media, Services, Sky, Spotify, Thresholds};
 
-pub const FIELDS: [FieldSpec; 55] = [
+pub const FIELDS: [FieldSpec; 58] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -599,6 +608,30 @@ pub const FIELDS: [FieldSpec; 55] = [
         Number,
         "Temperature that marks a node hot.",
     ),
+    spec(
+        Field::SpotifyEnabled,
+        Spotify,
+        "Spotify",
+        "enabled",
+        Bool,
+        "Now playing from Spotify on the music screen.",
+    ),
+    spec(
+        Field::SpotifyClientId,
+        Spotify,
+        "Spotify",
+        "client id",
+        Text,
+        "Your app at developer.spotify.com.",
+    ),
+    spec(
+        Field::SpotifyLogin,
+        Spotify,
+        "Spotify",
+        "log in",
+        Command,
+        "⏎ log in; redirect URI http://127.0.0.1:8888/callback",
+    ),
 ];
 
 /// Indices into `FIELDS` for one group, in display order.
@@ -685,6 +718,9 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::JellyfinUrl => cfg.jellyfin.url.clone(),
         Field::JellyfinKey => cfg.jellyfin.api_key.clone(),
         Field::JellyfinPoll => cfg.jellyfin.poll_secs.to_string(),
+        Field::SpotifyEnabled => cfg.spotify.enabled.to_string(),
+        Field::SpotifyClientId => cfg.spotify.client_id.clone(),
+        Field::SpotifyLogin => String::new(),
     }
 }
 
@@ -794,6 +830,14 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         }
         Field::JellyfinKey => cfg.jellyfin.api_key = text.into(),
         Field::JellyfinPoll => cfg.jellyfin.poll_secs = num::<u64>(t, "poll secs")?.max(2),
+        Field::SpotifyEnabled => cfg.spotify.enabled = t == "true",
+        Field::SpotifyClientId => {
+            if !t.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err("client id is letters and digits only".into());
+            }
+            cfg.spotify.client_id = t.into();
+        }
+        Field::SpotifyLogin => {}
     }
     Ok(())
 }
@@ -806,6 +850,8 @@ enum Mode {
     AskDiscard,
     /// `systemctl restart` is running on a worker thread; keys wait for its result.
     Restarting,
+    /// The Spotify login dialog.
+    Login(LoginFlow),
 }
 
 pub struct Configure {
@@ -820,9 +866,37 @@ pub struct Configure {
     /// `s` must never overwrite the user's file with them.
     unreadable: bool,
     restart_rx: Option<Receiver<String>>,
+    /// Where a Spotify login is written (the service user's state dir).
+    spotify_target: Option<Target>,
+    exchange: Exchange,
+    /// "logged in as …", "not logged in", "token expired, log in again".
+    login_status: String,
 }
 
 impl Configure {
+    fn refresh_login_status(&mut self) {
+        let tok = self
+            .spotify_target
+            .as_ref()
+            .and_then(|(p, _)| rackscreen_sources::spotify::read_token(p));
+        self.login_status = rackscreen_sources::spotify::login_status(tok.as_ref());
+    }
+
+    fn start_login(&mut self) {
+        let id = self.cfg.spotify.client_id.trim().to_string();
+        if id.is_empty() {
+            self.error = Some("set the client id first".into());
+            return;
+        }
+        match LoginFlow::start(&id) {
+            Ok(flow) => {
+                self.error = None;
+                self.mode = Mode::Login(flow);
+            }
+            Err(e) => self.error = Some(format!("{e:#}")),
+        }
+    }
+
     pub fn new(shared: &Shared) -> Configure {
         Configure::from_load(Config::load_or_default(&shared.ctx.config_path))
     }
@@ -837,7 +911,7 @@ impl Configure {
                 true,
             ),
         };
-        Configure {
+        let mut c = Configure {
             cfg,
             row: 0,
             mode: Mode::Browse,
@@ -846,7 +920,12 @@ impl Configure {
             dirty: false,
             unreadable,
             restart_rx: None,
-        }
+            spotify_target: rackscreen_app::spotify::token_path_for_service_user().ok(),
+            exchange: real_exchange(),
+            login_status: String::new(),
+        };
+        c.refresh_login_status();
+        c
     }
 
     pub fn group(&self) -> Group {
@@ -937,11 +1016,13 @@ impl Screen for Configure {
                 KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.move_group(-1),
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.move_group(1),
-                KeyCode::Char(c @ '1'..='7') => {
+                KeyCode::Char(c @ '1'..='8') => {
                     self.jump_to(Group::ALL[(c as u8 - b'1') as usize]);
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    if kind == FieldKind::Bool {
+                    if kind == FieldKind::Command {
+                        self.start_login();
+                    } else if kind == FieldKind::Bool {
                         let cur = get(&self.cfg, field) == "true";
                         let _ = set(&mut self.cfg, field, if cur { "false" } else { "true" });
                         self.dirty = true;
@@ -1001,11 +1082,35 @@ impl Screen for Configure {
                 }
                 self.mode = Mode::Restarting;
             }
+            Mode::Login(mut flow) => {
+                match key.code {
+                    KeyCode::Esc if !flow.busy() => return Action::None,
+                    KeyCode::Enter if !flow.busy() => match &self.spotify_target {
+                        Some(t) => flow.submit(self.exchange.clone(), t.clone()),
+                        None => flow.error = Some("no home directory for the token file".into()),
+                    },
+                    KeyCode::Backspace if !flow.busy() => {
+                        flow.buf.pop();
+                    }
+                    KeyCode::Char(c) if !flow.busy() => flow.buf.push(c),
+                    _ => {}
+                }
+                self.mode = Mode::Login(flow);
+            }
         }
         Action::None
     }
 
     fn tick(&mut self, shared: &mut Shared, _now: Secs) {
+        if let Mode::Login(flow) = &mut self.mode {
+            if let Some(Ok(_)) = flow.poll() {
+                self.mode = Mode::Browse;
+                self.refresh_login_status();
+                let msg = format!("Spotify: {}", self.login_status);
+                shared.banner = Some(msg.clone());
+                self.note = Some(msg);
+            }
+        }
         let Some(rx) = &self.restart_rx else { return };
         let msg = match rx.try_recv() {
             Ok(m) => m,
@@ -1107,6 +1212,7 @@ impl Screen for Configure {
                                 format!("{} off", g.pending)
                             }
                         }
+                        (_, _, FieldKind::Command) => self.login_status.clone(),
                         (_, _, FieldKind::Number) if s.label == "poll" => {
                             raw.parse::<u64>().map(humanise_poll).unwrap_or(raw)
                         }
@@ -1183,6 +1289,9 @@ impl Screen for Configure {
                 false,
             );
         }
+        if let Mode::Login(flow) = &self.mode {
+            flow.draw(f, area, th);
+        }
         if matches!(self.mode, Mode::AskDiscard) {
             confirm_dialog(
                 f,
@@ -1198,11 +1307,12 @@ impl Screen for Configure {
 
     fn keys(&self) -> String {
         match self.mode {
-            Mode::Browse => "↑↓ field  Tab/←→ group  1-7 jump  ⏎ edit  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  Tab/←→ group  1-8 jump  ⏎ edit  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
             Mode::AskDiscard => "y discard  Esc keep".into(),
             Mode::Restarting => "restarting...  Esc back".into(),
+            Mode::Login(_) => "paste the address  ⏎ log in  Esc cancel".into(),
         }
     }
     fn subtitle(&self) -> String {
@@ -1239,6 +1349,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::path::Path;
+    use std::sync::Arc;
 
     fn shared_at(path: &Path) -> Shared {
         Shared {
@@ -1381,7 +1492,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 55);
+        assert_eq!(FIELDS.len(), 58);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1389,7 +1500,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 55);
+        assert_eq!(FIELDS.len(), 58);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);
@@ -1441,10 +1552,10 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
         assert_eq!(
             screen.group(),
-            Group::Thresholds,
+            Group::Spotify,
             "up from the first field wraps to the end"
         );
-        assert_eq!(FIELDS[screen.row].field, Field::HotTemp);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyLogin);
         screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Cluster);
         for _ in 0..5 {
@@ -1467,13 +1578,10 @@ mod tests {
         );
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
-        assert_eq!(screen.group(), Group::Thresholds, "groups wrap");
+        assert_eq!(screen.group(), Group::Spotify, "groups wrap");
         assert!(screen.consumes_left());
-        assert_eq!(
-            screen.sidebar().unwrap().selected,
-            Group::Thresholds.index()
-        );
-        assert_eq!(screen.sidebar().unwrap().items.len(), 7);
+        assert_eq!(screen.sidebar().unwrap().selected, Group::Spotify.index());
+        assert_eq!(screen.sidebar().unwrap().items.len(), 8);
     }
 
     #[test]
@@ -1497,8 +1605,10 @@ mod tests {
         assert_eq!(screen.group(), Group::Cluster);
         screen.handle(KeyEvent::from(KeyCode::Char('7')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Thresholds);
+        screen.handle(KeyEvent::from(KeyCode::Char('8')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Spotify);
         assert!(!screen.dirty, "navigation never dirties the form");
-        assert!(screen.keys().contains("1-7 jump"));
+        assert!(screen.keys().contains("1-8 jump"));
     }
 
     #[test]
@@ -1600,5 +1710,104 @@ mod tests {
         assert_eq!(Group::ALL[4], Group::Media);
         assert_eq!(group_indices(Group::Media).len(), 15);
         assert!(c.validate().is_ok());
+    }
+
+    fn login_screen(dir: &Path) -> Configure {
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        screen.spotify_target = Some((dir.join("state/rackscreen/spotify.json"), None));
+        screen.exchange = Arc::new(|_: &str, code: &str, _: &str| {
+            anyhow::ensure!(code == "c0de", "bad code");
+            Ok(rackscreen_sources::spotify::TokenFile {
+                access_token: "a".into(),
+                refresh_token: "r".into(),
+                expires_at: 1,
+                display_name: Some("Silke".into()),
+                error: None,
+            })
+        });
+        screen.refresh_login_status();
+        screen
+    }
+
+    #[test]
+    fn spotify_fields_round_trip() {
+        let mut c = Config::default();
+        assert_eq!(Group::ALL[7], Group::Spotify);
+        assert_eq!(Group::Spotify.name(), "Spotify");
+        assert_eq!(group_indices(Group::Spotify).len(), 3);
+        assert_eq!(get(&c, Field::SpotifyEnabled), "false");
+        set(&mut c, Field::SpotifyEnabled, "true").unwrap();
+        set(&mut c, Field::SpotifyClientId, " abc123 ").unwrap();
+        assert!(c.spotify.enabled && c.spotify.client_id == "abc123");
+        assert!(set(&mut c, Field::SpotifyClientId, "no way")
+            .unwrap_err()
+            .contains("letters and digits"));
+        assert_eq!(get(&c, Field::SpotifyLogin), "");
+        assert_eq!(section_enabled(&c, "Spotify"), Some(true));
+    }
+
+    #[test]
+    fn spotify_login_needs_a_client_id_then_logs_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = login_screen(dir.path());
+        assert_eq!(screen.login_status, "not logged in");
+        screen.handle(KeyEvent::from(KeyCode::Char('8')), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyClientId);
+        screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
+        assert_eq!(FIELDS[screen.row].field, Field::SpotifyLogin);
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Browse));
+        assert!(screen.error.as_deref().unwrap().contains("client id"));
+        screen.cfg.spotify.client_id = "cid".into();
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        let state = match &screen.mode {
+            Mode::Login(f) => url::Url::parse(f.url())
+                .unwrap()
+                .query_pairs()
+                .find(|(k, _)| k == "state")
+                .unwrap()
+                .1
+                .into_owned(),
+            _ => panic!("login dialog"),
+        };
+        let mut term = Terminal::new(TestBackend::new(100, 60)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let text = term.backend().to_string();
+        assert!(
+            text.contains("Spotify login") && text.contains("▀"),
+            "{text}"
+        );
+        for c in format!("code=c0de&state={state}").chars() {
+            screen.handle(KeyEvent::from(KeyCode::Char(c)), &mut sh, 0.0);
+        }
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        for _ in 0..200 {
+            screen.tick(&mut sh, 0.0);
+            if matches!(screen.mode, Mode::Browse) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(screen.mode, Mode::Browse), "dialog closed");
+        assert_eq!(screen.login_status, "logged in as Silke");
+        assert_eq!(sh.banner.as_deref(), Some("Spotify: logged in as Silke"));
+        assert!(dir.path().join("state/rackscreen/spotify.json").exists());
+    }
+
+    #[test]
+    fn esc_closes_the_login_dialog() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = login_screen(dir.path());
+        screen.cfg.spotify.client_id = "cid".into();
+        screen.row = group_indices(Group::Spotify)[2];
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Login(_)));
+        screen.handle(KeyEvent::from(KeyCode::Char('x')), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Esc), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Browse));
+        assert!(!screen.dirty, "logging in does not touch the form");
     }
 }

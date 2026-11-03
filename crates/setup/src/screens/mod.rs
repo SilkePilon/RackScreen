@@ -6,6 +6,7 @@ pub mod run;
 // `screens::screens` is the Screens editor; the repeated name is the screen's own name.
 #[allow(clippy::module_inception)]
 pub mod screens;
+pub mod spotify_login;
 pub mod status;
 pub mod uninstall;
 pub mod update;
