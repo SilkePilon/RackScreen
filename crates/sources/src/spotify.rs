@@ -222,37 +222,22 @@ pub fn read_token(path: &Path) -> Option<TokenFile> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-/// Write via a temp file and rename, mode 0600; with `owner`, the created
-/// directories and the file are chowned to it (setup runs under sudo).
+/// Write via a fresh temp file and rename, mode 0600, in directories made
+/// 0700. With `owner` (setup runs under sudo) the created directories and
+/// the file are owned by the service user, chowned through the file handle;
+/// a link at the final or the temp path is refused, never followed.
 pub fn write_token(path: &Path, tok: &TokenFile, owner: Option<(u32, u32)>) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use crate::owned_fs::{create_dir_all_owned_mode, write_new_owned};
     let dir = path.parent().context("token path has no parent")?;
-    let mut missing = Vec::new();
-    let mut d = Some(dir);
-    while let Some(p) = d.filter(|p| !p.exists()) {
-        missing.push(p.to_path_buf());
-        d = p.parent();
-    }
-    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    let tmp = path.with_extension("json.tmp");
-    let _ = std::fs::remove_file(&tmp);
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)
-        .with_context(|| format!("write {}", tmp.display()))?;
-    f.write_all(serde_json::to_string_pretty(tok)?.as_bytes())?;
-    f.sync_all()?;
-    drop(f);
-    if let Some((uid, gid)) = owner {
-        for p in missing.iter().chain([&tmp]) {
-            std::os::unix::fs::chown(p, Some(uid), Some(gid))
-                .with_context(|| format!("chown {}", p.display()))?;
-        }
-    }
-    std::fs::rename(&tmp, path).with_context(|| format!("rename to {}", path.display()))
+    create_dir_all_owned_mode(dir, 0o700, owner)?;
+    let body = serde_json::to_string_pretty(tok)?;
+    write_new_owned(
+        path,
+        &path.with_extension("json.tmp"),
+        body.as_bytes(),
+        0o600,
+        owner,
+    )
 }
 
 /// The setup screen's status line for the login.
@@ -725,6 +710,77 @@ mod tests {
             ..tok
         };
         assert_eq!(login_status(Some(&bad)), "token expired, log in again");
+    }
+
+    fn token() -> TokenFile {
+        TokenFile {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_at: 99,
+            display_name: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn token_write_never_follows_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = token_path_in(dir.path());
+        write_token(&path, &token(), None).unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "keep me").unwrap();
+        // a link at the final path
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+        assert!(write_token(&path, &token(), None).is_err());
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+        assert!(std::fs::symlink_metadata(&path).unwrap().is_symlink());
+        // a link at the temp path
+        std::fs::remove_file(&path).unwrap();
+        let tmp = path.with_extension("json.tmp");
+        std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+        assert!(write_token(&path, &token(), None).is_err());
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn token_dirs_are_0700_and_owned_like_the_file() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let me = {
+            let m = std::fs::metadata(dir.path()).unwrap();
+            (m.uid(), m.gid())
+        };
+        let state = dir.path().join(".local/state");
+        let path = token_path_in(&state);
+        write_token(&path, &token(), Some(me)).unwrap();
+        for d in [
+            dir.path().join(".local"),
+            state.clone(),
+            state.join("rackscreen"),
+        ] {
+            let m = std::fs::metadata(&d).unwrap();
+            assert_eq!(m.permissions().mode() & 0o777, 0o700, "{}", d.display());
+            assert_eq!((m.uid(), m.gid()), me);
+        }
+        let m = std::fs::metadata(&path).unwrap();
+        assert_eq!(m.permissions().mode() & 0o777, 0o600);
+        assert_eq!((m.uid(), m.gid()), me);
+        // a directory that already existed keeps its mode
+        let other = dir.path().join("shared");
+        std::fs::create_dir_all(other.join("rackscreen")).unwrap();
+        std::fs::set_permissions(
+            other.join("rackscreen"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        write_token(&token_path_in(&other), &token(), None).unwrap();
+        let mode = std::fs::metadata(other.join("rackscreen"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
     }
 
     #[test]

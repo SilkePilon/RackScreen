@@ -1,6 +1,6 @@
 //! Files written as root into a user's directory (under `sudo`): the play
-//! request and the GIF cache. Created fresh, never through a link, and
-//! owned by that user.
+//! request, the GIF cache and the Spotify login. Created fresh, never
+//! through a link, and owned by that user.
 
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -14,13 +14,24 @@ pub type Owner = (u32, u32);
 /// Create `dir` and its missing parents; with `owner`, each directory
 /// created here is chowned to it (ones that existed are left alone).
 pub fn create_dir_all_owned(dir: &Path, owner: Option<Owner>) -> Result<()> {
+    create_dir_all_owned_mode(dir, 0o777, owner)
+}
+
+/// `create_dir_all_owned`, with the directories it creates made with `mode`
+/// (less the umask); ones that existed keep theirs.
+pub fn create_dir_all_owned_mode(dir: &Path, mode: u32, owner: Option<Owner>) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
     let mut missing = Vec::new();
     let mut d = Some(dir);
     while let Some(p) = d.filter(|p| !p.exists()) {
         missing.push(p.to_path_buf());
         d = p.parent();
     }
-    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(mode)
+        .create(dir)
+        .with_context(|| format!("create {}", dir.display()))?;
     if let Some((uid, gid)) = owner {
         for p in missing.iter().rev() {
             std::os::unix::fs::chown(p, Some(uid), Some(gid))
@@ -65,6 +76,10 @@ pub fn write_new_owned(
         std::os::unix::fs::fchown(&file, Some(uid), Some(gid))
             .with_context(|| format!("chown {}", tmp.display()))?;
     }
+    // on disk before the rename: a power cut never leaves an empty file
+    // (a rotated Spotify refresh token cannot be fetched again)
+    file.sync_all()
+        .with_context(|| format!("sync {}", tmp.display()))?;
     drop(file);
     std::fs::rename(tmp, path).with_context(|| format!("rename to {}", path.display()))
 }
@@ -110,6 +125,21 @@ mod tests {
         std::fs::write(&tmp, "stale").unwrap();
         write_new_owned(&path, &tmp, b"two", 0o644, None).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"two");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn created_dirs_get_the_mode_asked_for() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tmpdir();
+        let dir = root.join("a").join("b");
+        create_dir_all_owned_mode(&dir, 0o700, None).unwrap();
+        for d in [root.join("a"), dir.clone()] {
+            let mode = std::fs::metadata(&d).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700, "{}", d.display());
+        }
+        let root_mode = std::fs::metadata(&root).unwrap().permissions().mode();
+        assert_ne!(root_mode & 0o777, 0o700, "an existing parent is left alone");
         let _ = std::fs::remove_dir_all(&root);
     }
 
