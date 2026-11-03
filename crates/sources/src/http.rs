@@ -1,4 +1,4 @@
-//! Shared HTTP client for the public APIs (Electricity Maps, price sources).
+//! Shared HTTP client for the public APIs (Electricity Maps, Open-Meteo, ...).
 
 use std::sync::OnceLock;
 use std::time::Duration;

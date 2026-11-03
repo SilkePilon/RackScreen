@@ -46,17 +46,18 @@ pub enum Preset {
 }
 
 impl Preset {
-    /// Roles for the first four screens, in order.
+    /// Roles for the first screens, in order: four rows, or two for
+    /// electricity, which has only the two grid roles.
     pub fn rows(self) -> Vec<Vec<Role>> {
         use Role::*;
         match self {
             Preset::Cluster => vec![vec![Cpu], vec![Mem], vec![Pods], vec![Health]],
-            Preset::Electricity => vec![vec![PowerMix], vec![Price], vec![Carbon], vec![Renewable]],
+            Preset::Electricity => vec![vec![PowerMix], vec![Renewable]],
             Preset::Mixed => vec![
                 vec![Cpu, PowerMix],
-                vec![Mem, Price],
-                vec![Pods, Carbon],
-                vec![Health, Renewable],
+                vec![Mem, Renewable],
+                vec![Pods],
+                vec![Health],
             ],
             Preset::Sky => vec![
                 vec![Weather, Aqi],
@@ -75,7 +76,7 @@ pub fn set_screen_roles(cfg: &mut Config, index: usize, roles: &[Role], cycle_se
     }
 }
 
-/// Apply a preset to the first four screens; extra screens keep their roles.
+/// Apply a preset to the first screens; the screens past its rows keep their roles.
 pub fn apply_preset(cfg: &mut Config, preset: Preset) {
     for (i, roles) in preset.rows().into_iter().enumerate() {
         set_screen_roles(cfg, i, &roles, 15);
@@ -102,18 +103,27 @@ mod tests {
     }
 
     #[test]
-    fn preset_rewrites_the_first_four_screens_only() {
+    fn preset_rewrites_only_its_own_screens() {
         let mut c = Config::default();
         let fifth = c.screens[0].clone();
         c.screens.push(ScreenCfg {
             roles: vec!["thermal".into()],
             ..fifth
         });
+        let before = c.clone();
         apply_preset(&mut c, Preset::Electricity);
         assert_eq!(c.screens[0].roles, vec!["power-mix".to_string()]);
         assert_eq!(c.screens[0].cycle_secs, 15);
-        assert_eq!(c.screens[3].roles, vec!["renewable".to_string()]);
+        assert_eq!(c.screens[1].roles, vec!["renewable".to_string()]);
+        assert_eq!(c.screens[2], before.screens[2], "past the grid roles");
+        assert_eq!(c.screens[3], before.screens[3]);
         assert_eq!(c.screens[4].roles, vec!["thermal".to_string()]);
+        apply_preset(&mut c, Preset::Mixed);
+        assert_eq!(
+            c.screens[1].roles,
+            vec!["mem".to_string(), "renewable".into()]
+        );
+        assert_eq!(c.screens[3].roles, vec!["health".to_string()]);
         set_screen_roles(&mut c, 0, &[Role::Cpu, Role::Mem], 1000);
         assert_eq!(c.screens[0].roles, vec!["cpu".to_string(), "mem".into()]);
         assert_eq!(c.screens[0].cycle_secs, 300);

@@ -35,14 +35,12 @@ const MASK_R: f32 = 120.0;
 /// Seed for the fake source, picked so the drifting values stay in a good band.
 const SEED: u64 = 7;
 /// Simulated seconds the model runs before the first kept frame: rings have
-/// eased in, prices are loaded and the solar curve is halfway down its arc.
+/// eased in and the solar curve is halfway down its arc.
 /// The half second is what the badges that alternate every five seconds need to
 /// have faded in, so the first frame of a GIF is never a half-drawn one.
 const WARMUP: Secs = 100.5;
 /// The shortest dwell the model accepts; anything less is clamped to it.
 const CYCLE: Secs = 3.0;
-/// Local quarter-hour the price gauge reads as "now": 14:00.
-const SLOT: u32 = 56;
 /// Every role, each dwelling `CYCLE` and then crossfading for `TRANSITION_SECS`
 /// (0.4 s): roughly one whole round of the cycling screen. Only a guide: at 20 fps
 /// a dwell or a fade can take one frame more than its nominal length, so the clip
@@ -198,7 +196,6 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     model.set_one_at_a_time(false);
     // An Electricity Maps token is configured, so the grid roles show data.
     model.set_token_present(true);
-    model.set_local_slot(SLOT);
     model.set_location_present(true);
     model.set_github_token_present(true);
     model.set_jellyfin_configured(true);

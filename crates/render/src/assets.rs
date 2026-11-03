@@ -35,8 +35,6 @@ icons!(
     "ms-thermostat",
     "ms-hard_drive",
     "ms-bolt",
-    "ms-euro",
-    "ms-co2",
     "ms-eco",
     "ms-commit",
     "ms-partly_cloudy_day",

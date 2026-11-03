@@ -53,10 +53,6 @@ pub enum Field {
     ElecZone,
     ElecToken,
     ElecPoll,
-    PriceEnabled,
-    PriceZone,
-    PriceVat,
-    PricePoll,
     HotTemp,
     LocLat,
     LocLon,
@@ -162,7 +158,7 @@ const fn spec(
 use FieldKind::{Bool, Number, Secret, Text};
 use Group::{Cluster, Display, Energy, Media, Services, Sky, Thresholds};
 
-pub const FIELDS: [FieldSpec; 59] = [
+pub const FIELDS: [FieldSpec; 55] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -313,7 +309,7 @@ pub const FIELDS: [FieldSpec; 59] = [
         "Electricity Maps",
         "enabled",
         Bool,
-        "Power mix, carbon and renewable roles.",
+        "Power mix and renewable roles.",
     ),
     spec(
         Field::ElecZone,
@@ -338,38 +334,6 @@ pub const FIELDS: [FieldSpec; 59] = [
         "poll",
         Number,
         "Seconds between polls, at least 60.",
-    ),
-    spec(
-        Field::PriceEnabled,
-        Energy,
-        "Prices",
-        "enabled",
-        Bool,
-        "Day-ahead prices from Energy-Charts, no key.",
-    ),
-    spec(
-        Field::PriceZone,
-        Energy,
-        "Prices",
-        "zone",
-        Text,
-        "Energy-Charts zone (NL, DE-LU, DK1); empty: from elec. zone.",
-    ),
-    spec(
-        Field::PriceVat,
-        Energy,
-        "Prices",
-        "vat %",
-        Number,
-        "VAT added to the exchange price, 0 to 100.",
-    ),
-    spec(
-        Field::PricePoll,
-        Energy,
-        "Prices",
-        "poll",
-        Number,
-        "Seconds between price polls, at least 900.",
     ),
     spec(
         Field::LocLat,
@@ -691,10 +655,6 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::ElecZone => cfg.electricity.zone.clone(),
         Field::ElecToken => cfg.electricity.token.clone(),
         Field::ElecPoll => cfg.electricity.poll_secs.to_string(),
-        Field::PriceEnabled => cfg.price.enabled.to_string(),
-        Field::PriceZone => cfg.price.zone.clone(),
-        Field::PriceVat => format!("{}", cfg.price.vat_pct),
-        Field::PricePoll => cfg.price.poll_secs.to_string(),
         Field::HotTemp => format!("{}", cfg.thresholds.hot_temp),
         Field::LocLat => cfg.location.lat.map(|v| v.to_string()).unwrap_or_default(),
         Field::LocLon => cfg.location.lon.map(|v| v.to_string()).unwrap_or_default(),
@@ -786,16 +746,6 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         Field::ElecZone => cfg.electricity.zone = t.into(),
         Field::ElecToken => cfg.electricity.token = text.into(),
         Field::ElecPoll => cfg.electricity.poll_secs = num::<u64>(t, "poll secs")?.max(60),
-        Field::PriceEnabled => cfg.price.enabled = t == "true",
-        Field::PriceZone => cfg.price.zone = t.to_string(),
-        Field::PriceVat => {
-            let v: f32 = num(t, "vat %")?;
-            if !(0.0..=100.0).contains(&v) {
-                return Err("vat % must be between 0 and 100".into());
-            }
-            cfg.price.vat_pct = v;
-        }
-        Field::PricePoll => cfg.price.poll_secs = num::<u64>(t, "poll secs")?.max(900),
         Field::HotTemp => cfg.thresholds.hot_temp = num(t, "temp °C")?,
         Field::LocLat => cfg.location.lat = coord(t, "lat", 90.0)?,
         Field::LocLon => cfg.location.lon = coord(t, "lon", 180.0)?,
@@ -1391,12 +1341,9 @@ mod tests {
     }
 
     #[test]
-    fn electricity_price_and_temp_fields() {
+    fn electricity_and_temp_fields() {
         let mut c = Config::default();
         assert_eq!(get(&c, Field::ElecZone), "NL");
-        assert_eq!(get(&c, Field::PriceEnabled), "true");
-        assert_eq!(get(&c, Field::PriceZone), "");
-        assert_eq!(get(&c, Field::PriceVat), "21");
         assert_eq!(get(&c, Field::HotTemp), "70");
         set(&mut c, Field::ElecEnabled, "true").unwrap();
         assert!(c.electricity.enabled);
@@ -1406,23 +1353,6 @@ mod tests {
         assert_eq!(c.electricity.token, "tok");
         set(&mut c, Field::ElecPoll, "10").unwrap();
         assert_eq!(c.electricity.poll_secs, 60, "poll secs are floored at 60");
-        set(&mut c, Field::PriceEnabled, "false").unwrap();
-        assert!(!c.price.enabled);
-        set(&mut c, Field::PriceZone, " IT-North ").unwrap();
-        assert_eq!(
-            c.price.zone, "IT-North",
-            "trimmed, case kept: Energy-Charts zones are case-sensitive"
-        );
-        set(&mut c, Field::PriceVat, "0").unwrap();
-        assert_eq!(c.price.vat_pct, 0.0);
-        assert!(set(&mut c, Field::PriceVat, "150")
-            .unwrap_err()
-            .contains("0 and 100"));
-        assert!(set(&mut c, Field::PriceVat, "lots").is_err());
-        set(&mut c, Field::PricePoll, "60").unwrap();
-        assert_eq!(c.price.poll_secs, 900, "floored at 900 for Energy-Charts");
-        set(&mut c, Field::PricePoll, "1800").unwrap();
-        assert_eq!(c.price.poll_secs, 1800);
         set(&mut c, Field::HotTemp, "82.5").unwrap();
         assert_eq!(c.thresholds.hot_temp, 82.5);
         assert!(set(&mut c, Field::HotTemp, "warm").is_err());
@@ -1451,7 +1381,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 59);
+        assert_eq!(FIELDS.len(), 55);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1459,7 +1389,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 59);
+        assert_eq!(FIELDS.len(), 55);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);

@@ -1,4 +1,4 @@
-//! Electricity Maps API poller: production mix, renewable / fossil-free share, carbon intensity.
+//! Electricity Maps API poller: production mix and renewable / fossil-free share.
 
 use std::time::Duration;
 
@@ -56,14 +56,6 @@ pub fn parse_power_breakdown(json: &str) -> Result<PowerBreakdown> {
     })
 }
 
-pub fn parse_carbon(json: &str) -> Result<f32> {
-    let v: Value = serde_json::from_str(json).context("carbon-intensity json")?;
-    v.get("carbonIntensity")
-        .and_then(|c| c.as_f64())
-        .map(|c| c as f32)
-        .context("carbonIntensity missing")
-}
-
 /// A non-2xx answer from Electricity Maps, kept typed so the poller can tell a
 /// rejected token from a network hiccup.
 #[derive(Debug, thiserror::Error)]
@@ -115,13 +107,11 @@ async fn fetch(path: &str, zone: &str, token: &str) -> Result<String> {
 
 pub async fn poll_once(cfg: &ElectricityConfig) -> Result<Event> {
     let pb = parse_power_breakdown(&fetch("power-breakdown", &cfg.zone, &cfg.token).await?)?;
-    let carbon = parse_carbon(&fetch("carbon-intensity", &cfg.zone, &cfg.token).await?)?;
     Ok(Event::Electricity {
         zone: cfg.zone.clone(),
         mix_mw: pb.mix_mw,
         renewable_pct: pb.renewable_pct,
         fossil_free_pct: pb.fossil_free_pct,
-        carbon_gco2: carbon,
         updated_at: pb.datetime,
     })
 }
@@ -183,7 +173,6 @@ mod tests {
     use super::*;
 
     const PB: &str = include_str!("../tests/fixtures/em-power-breakdown.json");
-    const CI: &str = include_str!("../tests/fixtures/em-carbon.json");
 
     #[test]
     fn parses_breakdown_with_storage_and_nulls() {
@@ -223,11 +212,5 @@ mod tests {
         assert_eq!(backoff_secs(300, 9, false), 300);
         // a rejected token never gets the quick retry
         assert_eq!(backoff_secs(300, 1, true), 300);
-    }
-
-    #[test]
-    fn parses_carbon() {
-        assert_eq!(parse_carbon(CI).unwrap(), 214.0);
-        assert!(parse_carbon("{}").is_err());
     }
 }

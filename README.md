@@ -24,7 +24,7 @@
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, four from [Electricity Maps](https://app.electricitymaps.com) and the day-ahead price feeds, seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and today's electricity price on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, two from [Electricity Maps](https://app.electricitymaps.com), seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and the grid's power mix on the next.
 
 ## Screens
 
@@ -38,10 +38,8 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`pods`** — running pods; the ring split into running, pending and failed | **`health`** — one segment per node, alerts and not-ready counts; a live dot while the link is up |
 | <img src=".github/media/screens/thermal.gif" alt="THERMAL role" width="200"> | <img src=".github/media/screens/storage.gif" alt="STORAGE role" width="200"> |
 | **`thermal`** — the hottest node, amber and red near the threshold; a bar per node | **`storage`** — used capacity split per Longhorn volume; a degraded volume turns red |
-| <img src=".github/media/screens/power-mix.gif" alt="POWER MIX role" width="200"> | <img src=".github/media/screens/price.gif" alt="PRICE role" width="200"> |
-| **`power-mix`** — twenty 5 % segments by source, the leader first from the top right, a capsule with icon and share for every source worth two segments | **`price`** — today's price on its five bands, the marker where it sits between today's low and high, the hours as bars |
-| <img src=".github/media/screens/carbon.gif" alt="CARBON role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
-| **`carbon`** — grid carbon intensity on five bands, compared with the last 24 h | **`renewable`** — the renewable share, the fossil-free share in the pill, today as a sparkline |
+| <img src=".github/media/screens/power-mix.gif" alt="POWER MIX role" width="200"> | <img src=".github/media/screens/renewable.gif" alt="RENEWABLE role" width="200"> |
+| **`power-mix`** — twenty 5 % segments by source, the leader first from the top right, a capsule with icon and share for every source worth two segments | **`renewable`** — the renewable share, the fossil-free share in the pill, today as a sparkline |
 | <img src=".github/media/screens/gh-activity.gif" alt="GH ACTIVITY role" width="200"> | <img src=".github/media/screens/weather.gif" alt="WEATHER role" width="200"> |
 | **`gh-activity`** — today's contributions against your best day, this week as seven bars | **`weather`** — the temperature on the day's low to high, the condition and rain ahead in the pill, the next 12 h as a curve |
 | <img src=".github/media/screens/wind.gif" alt="WIND role" width="200"> | <img src=".github/media/screens/aqi.gif" alt="AQI role" width="200"> |
@@ -96,7 +94,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 
 `rackscreen setup` (what the installer opens) is a ratatui shell: a sidebar on the left with the eight actions, a pane on the right, and a help row at the bottom. `↑↓` move the sidebar bar, `⏎` opens, `Esc` returns to Home (`←` does the same on screens that do not use it themselves; Configure and Calibrate do). Below 72 columns the sidebar folds away and Home shows the menu itself.
 
-- **Home** — a live overview: service state and uptime, boot enablement, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `argocd`, `weather`, `rain`, `github`, `electricity`, `prices`), what each screen cycles through (long lists end in `+N`), and the last three log lines.
+- **Home** — a live overview: service state and uptime, boot enablement, a dot per link (`k8s`, `prometheus`, `qbittorrent`, `argocd`, `weather`, `rain`, `github`, `electricity`), what each screen cycles through (long lists end in `+N`), and the last three log lines.
 - **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
 - **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels in a true-colour terminal, assumed unless `TERM` is a plain `xterm`/`screen`/`linux`; set `RACKSCREEN_TRUECOLOR=0` or `1` to force it; otherwise a drawn circle), the other panels are a strip in the info column to the right. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
@@ -108,7 +106,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Thirty roles exist:
+Every screen shows one or more **roles** and cycles through them. Twenty-eight roles exist:
 
 | Role | Data source | Tile |
 |---|---|---|
@@ -119,8 +117,6 @@ Every screen shows one or more **roles** and cycles through them. Thirty roles e
 | `thermal` | Prometheus | ring the hottest node (amber from `hot node temp °C` − 5, red from + 5), card a bar per node |
 | `storage` | Prometheus (Longhorn) | ring the used share per volume, pill used of total or the degraded volume, card a stacked bar and free space |
 | `power-mix` | Electricity Maps | twenty 5 % segments by source, the leader first from the top right, a capsule per source worth two segments |
-| `price` | Energy-Charts | five bands with a marker, pill the band, card today's hours as bars |
-| `carbon` | Electricity Maps | five bands over 0 to 500 gCO2/kWh, pill against the last 24 h, card a 24 h sparkline |
 | `renewable` | Electricity Maps | ring the renewable share, pill the fossil-free share, card today |
 | `gh-activity` | GitHub | ring today against the month's best, pill best day and streak, card this week |
 | `weather` | Open-Meteo | ring the day's low to high, pill the condition and the rain hint, card the next 12 h |
@@ -143,7 +139,7 @@ Every screen shows one or more **roles** and cycles through them. Thirty roles e
 | `ci` | GitHub Actions | passes over the last twelve runs, a segment per run, pill the newest run, card average run time and failures |
 | `jellyfin` | Jellyfin | time left, ring the position (amber movie, cyan episode, dim when paused), pill direct play / transcoding / paused, card title, episode or year and viewer |
 
-**Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill all four screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix`, `price`, `carbon`, `renewable`), `m` mixed (each screen alternates a cluster role with an electricity one) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
+**Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill the screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), `m` mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
 Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; `o` in **Screens** (or `display.one_at_a_time` in the config) turns that off.
 
@@ -151,14 +147,15 @@ In the config each screen has a `roles` list and a `cycle_secs`; the old single 
 
 ## Electricity mode
 
-The grid roles (`power-mix`, `carbon`, `renewable`) use [Electricity Maps](https://app.electricitymaps.com). Sign in there for a free personal API token, which is tied to one zone. In **Configure** set `electricity enabled` to on, `electricity zone` to your zone code (`NL`, `DE`, `FR`, ...) and paste the token into `electricity api token`. Polling is every `electricity poll secs` (300 by default, never faster than a minute) so the free quota lasts.
+The grid roles (`power-mix`, `renewable`) use [Electricity Maps](https://app.electricitymaps.com). Sign in there for a free personal API token, which is tied to one zone. In **Configure** set `electricity enabled` to on, `electricity zone` to your zone code (`NL`, `DE`, `FR`, ...) and paste the token into `electricity api token`. Polling is every `electricity poll secs` (300 by default, never faster than a minute) so the free quota lasts.
 
 > [!NOTE]
 > Without a token the grid roles say "Token needed" instead of a value: they are configured but have nothing to poll with.
 
-The `price` role is separate and needs no token: day-ahead prices come from [Energy-Charts](https://www.energy-charts.info) by Fraunhofer ISE, at quarter-hour resolution for 40-odd European bidding zones. It is on by default; a config that still says `source: none` from an older version has to set `enabled: false` once; `price zone` is the Energy-Charts bidding zone (`NL`, `BE`, `DE-LU`, `DK1`, `NO1`, `SE3`, `IT-North`, ...) and may stay empty when the electricity zone maps to one, which it does for the countries and zones Electricity Maps and Energy-Charts share. With neither, prices stay off and the log says so. `price vat %` (21 by default) is added to the raw exchange price; energy tax and supplier markup are not included by any feed.
+**Status** shows a dot per link, including `electricity`: green after a successful poll, red after failures, grey while nothing has been logged yet.
 
-The tile shows the current quarter-hour's price in €/kWh and its band against the mean of today and the two days before: below 60 % of it is `Very cheap`, below 90 % `Cheap`, up to 115 % `Normal`, up to 140 % `Pricey`, above that `Very pricey`. The marker on the ring shows where the price sits between today's low and high, and the card has today's hours as bars. The current hour follows the Pi's clock, so set its time zone once: `sudo timedatectl set-timezone Europe/Amsterdam`. Energy-Charts rate-limits bursts, so `price poll secs` is never below 900. **Status** shows a dot per link, including `electricity` and `prices`: green after a successful poll, red after failures, grey while nothing has been logged yet.
+> [!NOTE]
+> The `price` and `carbon` roles were removed in 0.10.1. An older config still loads: those entries are dropped from each `roles` list with a warning (a screen left with no roles is an error naming them), and a `price:` block is ignored.
 
 The mix colours and the source icons are the ones from the Electricity Maps web app, under their own licence; see [Licence](#licence).
 
@@ -171,7 +168,7 @@ The mix colours and the source icons are the ones from the Electricity Maps web 
 - **Sun and moon** are computed on the Pi from the location and the clock, nothing to configure. The moon card counts the days to the next full and new moon.
 - **ISS** fetches the station's orbital elements from [Celestrak](https://celestrak.org) once a day and predicts the next pass above `iss min elevation °` (10 by default); turn on `iss enabled`. A pass is marked visible when the sky is dark and the station is still sunlit; during a pass the tile shows its height overhead.
 
-The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienradar covers NL and BE and stamps its slots in `Europe/Amsterdam`, so the bars line up with "now" on a Pi left on UTC as well. The sun and price tiles do use the Pi's own zone, so still set it once with `sudo timedatectl set-timezone Europe/Amsterdam`.
+The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienradar covers NL and BE and stamps its slots in `Europe/Amsterdam`, so the bars line up with "now" on a Pi left on UTC as well. The sun tile does use the Pi's own zone, so still set it once with `sudo timedatectl set-timezone Europe/Amsterdam`.
 
 ## GitHub role
 
@@ -234,12 +231,6 @@ electricity:
   token: ""
   poll_secs: 300
 
-price:
-  enabled: true            # Energy-Charts day-ahead prices, no key
-  zone: ""                 # Energy-Charts bidding zone, e.g. NL, DE-LU, DK1; derived from electricity.zone when empty
-  vat_pct: 21              # added to the raw exchange price
-  poll_secs: 900           # minimum 900; Energy-Charts rate-limits bursts
-
 location:
   lat: null                # decimal degrees; needed by weather, wind, aqi, rain, sun, moon and iss
   lon: null
@@ -286,9 +277,9 @@ display:
   one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
-# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
-#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys,
-#        media, traffic, restarts, uptime, fans, mains, load, ci, jellyfin
+# Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
+#        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
+#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:
@@ -305,7 +296,7 @@ screens:
 - **`qbittorrent`** — the client behind the download monitor; turn it off and HEALTH stays a health ring.
 - **`night`** — the window in which the panels dim, on the Pi's local clock.
 - **`thresholds`** — when a node counts as hot: the CPU and memory percentages at which `cpu` and `mem` turn amber, and the temperature around which `thermal` turns amber (5 °C below) and red (5 °C above).
-- **`electricity`** and **`price`** — see [Electricity mode](#electricity-mode).
+- **`electricity`** — see [Electricity mode](#electricity-mode).
 - **`location`**, **`weather`**, **`rain`**, **`iss`** — see [Sky roles](#sky-roles).
 - **`github`** — see [GitHub role](#github-role) and [CI role](#ci-role).
 - **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
@@ -338,7 +329,7 @@ The simulator draws the same scenes in a window, so none of this needs a Pi:
     cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
     cargo run -- calibrate --sim --config /tmp/rs.yaml
 
-Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `p` price outage, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `m` the download finishes, `k` a restart burst, `b` a mains brownout and back, `j` Jellyfin playing → paused → idle, `c` a passing CI run, `Esc` quit. `--sim-grid` shows all four panels at once.
+Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `m` the download finishes, `k` a restart burst, `b` a mains brownout and back, `j` Jellyfin playing → paused → idle, `c` a passing CI run, `Esc` quit. `--sim-grid` shows all four panels at once.
 
 Tests: `cargo test --workspace --features sim,pi`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
 
@@ -360,7 +351,7 @@ The design notes are in [`docs/superpowers/specs/2026-09-05-rackscreen-design.md
 
 Code MIT, see [`LICENSE`](LICENSE). Icons: [Lucide](https://lucide.dev) (ISC), `assets/icons/LICENSE`; the role icons at the top of each screen are [Material Symbols](https://fonts.google.com/icons) Rounded (Apache 2.0), `assets/icons/ms-*.svg`, see `assets/icons/MATERIAL-LICENSE.txt`. Font: [Outfit](https://github.com/Outfitio/Outfit-Fonts) (OFL), `assets/fonts/Outfit-LICENSE.txt`.
 
-The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps belongs to that service and is subject to its terms. Day-ahead prices come from [Energy-Charts](https://www.energy-charts.info) by Fraunhofer ISE under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+The electricity source icons (`assets/icons/em-*.svg`) come from the Electricity Maps web app and stay under the GNU Affero General Public License v3.0; see [`assets/icons/EM-LICENSE.md`](assets/icons/EM-LICENSE.md). Grid data from Electricity Maps belongs to that service and is subject to its terms.
 
 <p align="center">
   <a href="https://github.com/silkepilon/RackScreen">GitHub</a> &nbsp;·&nbsp;

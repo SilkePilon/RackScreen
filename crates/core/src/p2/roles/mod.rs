@@ -1,7 +1,6 @@
 //! Role builders: `Model` → `P2Screen`, plain data the composer draws.
 
 pub mod cluster;
-pub mod energy;
 pub mod github;
 pub mod media;
 pub mod power_mix;
@@ -26,8 +25,6 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Deploys => cluster::deploys(model, now),
         Role::Weather => sky::weather(model, now),
         Role::Iss => sky::iss(model, now),
-        Role::Price => energy::price(model, now),
-        Role::Carbon => energy::carbon(model, now),
         Role::GhActivity => github::github(model, now),
         Role::Thermal => system::thermal(model, now),
         Role::Net => system::net(model, now),
@@ -77,11 +74,10 @@ mod tests {
         // (hero, superscript unit, the role's hero_scale, unit below?)
         for (text, unit, scale, below) in [
             ("100", Some("%"), 1.0, false), // cpu, mem, storage, ups, renewable, moon
-            ("999", None, 1.0, false),      // pods, deploys, contributions, carbon
+            ("999", None, 1.0, false),      // pods, deploys, contributions
             ("16/16", None, 0.82, false),   // cluster
             ("-12", Some("°"), 1.0, false), // weather below zero
             ("59:59", None, 0.82, false),   // iss
-            ("-0.123", None, 0.78, true),   // price
             ("1000", None, 1.0, true),      // net Mb/s
             ("120", None, 1.0, true),       // wind, aqi, rain minutes
             ("23:59", None, 0.82, false),   // sun

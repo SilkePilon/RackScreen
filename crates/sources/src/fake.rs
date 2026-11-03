@@ -50,12 +50,8 @@ const SOLAR_PEAK: f32 = 9200.0;
 /// Ticks in the compressed demo "day" the solar curve runs through.
 const SOLAR_CYCLE: u64 = 240;
 
-/// Day-ahead price curve in €/kWh per hour; `prices()` interpolates it to quarter-hours.
-const PRICE_CURVE: [f32; 24] = [
-    0.22, 0.19, 0.17, 0.16, 0.15, 0.15, 0.17, 0.21, 0.24, 0.22, 0.18, 0.13, 0.09, 0.07, 0.06, 0.08,
-    0.12, 0.19, 0.26, 0.29, 0.27, 0.24, 0.22, 0.21,
-];
-const PRICE_DATE: &str = "2026-09-06";
+/// The demo day the Electricity Maps timestamps fall on.
+const DEMO_DATE: &str = "2026-09-06";
 
 /// Simulated observer: Amsterdam.
 const FAKE_LAT: f64 = 52.37;
@@ -150,7 +146,6 @@ pub enum FakeCmd {
     DegradeVolume,
     HealVolume,
     HotTemp,
-    PriceOutage,
     UpsToggle,
     AppToggle,
     GithubPush,
@@ -182,7 +177,6 @@ impl FakeCmd {
             '9' => FakeCmd::DegradeVolume,
             '0' => FakeCmd::HealVolume,
             'h' => FakeCmd::HotTemp,
-            'p' => FakeCmd::PriceOutage,
             'u' => FakeCmd::UpsToggle,
             'd' => FakeCmd::AppToggle,
             'g' => FakeCmd::GithubPush,
@@ -221,10 +215,6 @@ pub struct FakeState {
     storage_used: u64,
     storage_cap: u64,
     mix: Vec<(Source, f32)>,
-    carbon: f32,
-    prices_ok: bool,
-    /// Hours the price curve is rotated by, so the current-hour marker moves.
-    price_rot: usize,
     /// Wall clock the sky, rain and ISS events are built against; advances with ticks.
     unix_start: i64,
     utc_offset: i32,
@@ -284,9 +274,6 @@ impl FakeState {
             storage_used: STORAGE_USED,
             storage_cap: STORAGE_CAP,
             mix: MIX_SEED.to_vec(),
-            carbon: 214.0,
-            prices_ok: true,
-            price_rot: 0,
             unix_start: now.timestamp(),
             utc_offset: now.offset().local_minus_utc(),
             weather_idx: 1,
@@ -402,7 +389,7 @@ impl FakeState {
     fn updated_at(&self) -> String {
         let h = self.ticks / 3600 % 24;
         let m = self.ticks / 60 % 60;
-        format!("{PRICE_DATE}T{h:02}:{m:02}:00Z")
+        format!("{DEMO_DATE}T{h:02}:{m:02}:00Z")
     }
 
     fn electricity(&self) -> Event {
@@ -421,27 +408,7 @@ impl FakeState {
             mix_mw: self.mix.clone(),
             renewable_pct: share(is_renewable),
             fossil_free_pct: share(|s| is_renewable(s) || s == Source::Nuclear),
-            carbon_gco2: self.carbon,
             updated_at: self.updated_at(),
-        }
-    }
-
-    fn prices(&self) -> Event {
-        let mut hourly = PRICE_CURVE.to_vec();
-        hourly.rotate_left(self.price_rot % PRICE_CURVE.len());
-        let eur = (0..96)
-            .map(|i| {
-                let h = i / 4;
-                let a = hourly[h];
-                let b = hourly[(h + 1) % 24];
-                a + (b - a) * (i % 4) as f32 / 4.0
-            })
-            .collect();
-        Event::Prices {
-            date: PRICE_DATE.into(),
-            eur_per_kwh: eur,
-            avg_eur_per_kwh: PRICE_CURVE.iter().sum::<f32>() / PRICE_CURVE.len() as f32,
-            currency: "EUR".into(),
         }
     }
 
@@ -790,10 +757,6 @@ impl FakeState {
                 up: true,
             },
             Event::Link {
-                target: LinkTarget::Prices,
-                up: true,
-            },
-            Event::Link {
                 target: LinkTarget::Weather,
                 up: true,
             },
@@ -821,7 +784,6 @@ impl FakeState {
             self.storage(),
             self.volume_sizes(),
             self.electricity(),
-            self.prices(),
             self.weather(),
             self.forecast(),
             self.air(),
@@ -869,7 +831,9 @@ impl FakeState {
                 *mw = solar;
             }
         }
-        self.carbon = (self.carbon + self.rng.f32() * 6.0 - 3.0).clamp(20.0, 600.0);
+        // the draw that drifted the removed carbon intensity; kept so the
+        // seeded demo stream, and the gifs built from it, stay as they were
+        self.rng.f32();
         self.net_rx = (self.net_rx * (1.0 + self.rng.f64() * 0.4 - 0.2)).clamp(2e6, 400e6);
         self.net_tx = (self.net_tx * (1.0 + self.rng.f64() * 0.4 - 0.2)).clamp(2e5, 40e6);
         self.temp = (self.temp + self.rng.f32() * 0.4 - 0.2).clamp(-5.0, 35.0);
@@ -955,10 +919,6 @@ impl FakeState {
             out.push(self.sky());
             out.push(self.iss());
             out.push(self.github());
-        }
-        if self.ticks.is_multiple_of(60) && self.prices_ok {
-            self.price_rot += 1;
-            out.push(self.prices());
         }
         out
     }
@@ -1134,13 +1094,6 @@ impl FakeState {
                 self.hot_temp_on = !self.hot_temp_on;
                 vec![self.node_temps()]
             }
-            FakeCmd::PriceOutage => {
-                self.prices_ok = !self.prices_ok;
-                vec![Event::Link {
-                    target: LinkTarget::Prices,
-                    up: self.prices_ok,
-                }]
-            }
             FakeCmd::UpsToggle => {
                 self.ups_on_battery = !self.ups_on_battery;
                 vec![
@@ -1258,7 +1211,7 @@ mod tests {
         assert_eq!(FakeCmd::from_key('9'), Some(FakeCmd::DegradeVolume));
         assert_eq!(FakeCmd::from_key('0'), Some(FakeCmd::HealVolume));
         assert_eq!(FakeCmd::from_key('h'), Some(FakeCmd::HotTemp));
-        assert_eq!(FakeCmd::from_key('p'), Some(FakeCmd::PriceOutage));
+        assert_eq!(FakeCmd::from_key('p'), None, "the price outage key is gone");
         assert_eq!(FakeCmd::from_key('u'), Some(FakeCmd::UpsToggle));
         assert_eq!(FakeCmd::from_key('d'), Some(FakeCmd::AppToggle));
         assert_eq!(FakeCmd::from_key('g'), Some(FakeCmd::GithubPush));
@@ -1439,13 +1392,16 @@ mod tests {
     fn initial_has_temps_storage_and_electricity() {
         let s = FakeState::new(1);
         let evs = s.initial();
-        for target in [LinkTarget::Electricity, LinkTarget::Prices] {
-            assert!(
-                evs.iter()
-                    .any(|e| matches!(e, Event::Link { target: t, up: true } if *t == target)),
-                "{target:?} link up missing"
-            );
-        }
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                Event::Link {
+                    target: LinkTarget::Electricity,
+                    up: true
+                }
+            )),
+            "electricity link up missing"
+        );
         assert!(
             evs.iter()
                 .any(|e| matches!(e, Event::NodeTemps(t) if t.len() == 7)),
@@ -1469,34 +1425,15 @@ mod tests {
             Event::Electricity { zone, mix_mw, renewable_pct, .. }
                 if zone == "NL" && mix_mw.len() == 9 && *renewable_pct > 50.0
         )));
-        assert!(evs.iter().any(|e| matches!(
-            e,
-            Event::Prices { eur_per_kwh, avg_eur_per_kwh, currency, .. }
-                if eur_per_kwh.len() == 96 && eur_per_kwh[0] == 0.22 && *avg_eur_per_kwh > 0.17 && *avg_eur_per_kwh < 0.19 && currency == "EUR"
-        )));
     }
 
     #[test]
-    fn tick_emits_temps_storage_electricity_and_prices() {
+    fn tick_emits_temps_storage_and_electricity() {
         let mut s = FakeState::new(3);
         let ten: Vec<Event> = (0..10).flat_map(|_| s.tick()).collect();
         assert!(ten.iter().any(|e| matches!(e, Event::NodeTemps(_))));
         assert!(ten.iter().any(|e| matches!(e, Event::Storage { .. })));
         assert!(ten.iter().any(|e| matches!(e, Event::Electricity { .. })));
-        assert!(!ten.iter().any(|e| matches!(e, Event::Prices { .. })));
-        let rest: Vec<Event> = (10..60).flat_map(|_| s.tick()).collect();
-        let rotated = rest
-            .iter()
-            .find_map(|e| match e {
-                Event::Prices { eur_per_kwh, .. } => Some(eur_per_kwh.clone()),
-                _ => None,
-            })
-            .expect("prices at tick 60");
-        assert_eq!(rotated[0], 0.19, "curve rotated by one hour");
-        assert!(
-            (rotated[2] - 0.18).abs() < 1e-6,
-            "quarter-hours interpolate toward the next hour"
-        );
     }
 
     #[test]
@@ -1554,29 +1491,6 @@ mod tests {
         );
         let evs = s.command(FakeCmd::HotTemp);
         assert!(hottest(&evs) < 70.0, "back to normal");
-    }
-
-    #[test]
-    fn price_outage_toggles_link_and_silences_prices() {
-        let mut s = FakeState::new(1);
-        assert_eq!(
-            s.command(FakeCmd::PriceOutage),
-            vec![Event::Link {
-                target: LinkTarget::Prices,
-                up: false
-            }]
-        );
-        let out: Vec<Event> = (0..120).flat_map(|_| s.tick()).collect();
-        assert!(!out.iter().any(|e| matches!(e, Event::Prices { .. })));
-        assert_eq!(
-            s.command(FakeCmd::PriceOutage),
-            vec![Event::Link {
-                target: LinkTarget::Prices,
-                up: true
-            }]
-        );
-        let out: Vec<Event> = (0..60).flat_map(|_| s.tick()).collect();
-        assert!(out.iter().any(|e| matches!(e, Event::Prices { .. })));
     }
 
     #[test]

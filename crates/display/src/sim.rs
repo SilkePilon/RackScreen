@@ -153,7 +153,7 @@ impl SimHub {
             }
             frames += 1;
             if last.elapsed() >= Duration::from_secs(1) {
-                self.window.set_title(&format!("RackScreen sim  {frames} fps  [1-8 events, 9/0 volume, h hot, p price outage, t torrent, n night, b boot, u ups, d app, g push, r star, f ci, l thunder, w rain, i iss, Esc quit]"));
+                self.window.set_title(&format!("RackScreen sim  {frames} fps  [1-8 events, 9/0 volume, h hot, t torrent, n night, b boot, u ups, d app, g push, r star, f ci, l thunder, w rain, i iss, Esc quit]"));
                 frames = 0;
                 last = Instant::now();
             }

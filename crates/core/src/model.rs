@@ -42,7 +42,6 @@ pub struct LinkState {
     pub prom: bool,
     pub qbit: bool,
     pub electricity: bool,
-    pub prices: bool,
     pub weather: bool,
     pub rain: bool,
     pub github: bool,
@@ -57,19 +56,7 @@ pub struct ElectricityState {
     pub mix: Vec<(Source, f32)>,
     pub renewable_pct: f32,
     pub fossil_free_pct: f32,
-    pub carbon_gco2: f32,
     pub updated_at: String,
-    pub have: bool,
-}
-
-/// Day-ahead prices, one entry per local quarter-hour starting at 00:00.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct PriceState {
-    pub date: String,
-    pub eur: Vec<f32>,
-    /// Mean €/kWh over today and the two days before; the level's reference.
-    pub avg: f32,
-    pub currency: String,
     pub have: bool,
 }
 
@@ -315,7 +302,6 @@ pub struct Model {
     link: LinkState,
     thresholds: Thresholds,
     electricity: ElectricityState,
-    prices: PriceState,
     ups: UpsState,
     net: NetState,
     apps: AppsState,
@@ -343,15 +329,12 @@ pub struct Model {
     cpu_hist: History,
     mem_hist: History,
     net_hist: History,
-    /// Carbon intensity and renewable share per unix hour, 24 h.
-    carbon_hist: Hourly,
+    /// Renewable share per unix hour, 24 h.
     renewable_hist: Hourly,
     deploys: DeployLog,
     /// An Electricity Maps token is configured; without one the electricity
     /// roles show a key instead of the offline cloud.
     token_present: bool,
-    /// The local quarter-hour (0..=95) the price gauge reads as "now".
-    local_slot: u32,
     /// Unix seconds, set by the render loop every frame; the sun dial, rain
     /// ring and ISS countdown are clock-based.
     unix_now: i64,
@@ -390,7 +373,6 @@ impl Model {
                 prom: false,
                 qbit: false,
                 electricity: false,
-                prices: false,
                 weather: false,
                 rain: false,
                 github: false,
@@ -398,7 +380,6 @@ impl Model {
             },
             thresholds,
             electricity: ElectricityState::default(),
-            prices: PriceState::default(),
             ups: UpsState::default(),
             net: NetState::default(),
             apps: AppsState::default(),
@@ -423,11 +404,9 @@ impl Model {
             cpu_hist: History::new(31, 2.0),
             mem_hist: History::new(31, 3.0),
             net_hist: History::new(31, 2.0),
-            carbon_hist: Hourly::new(),
             renewable_hist: Hourly::new(),
             deploys: DeployLog::default(),
             token_present: false,
-            local_slot: 48,
             unix_now: 0,
             utc_offset_secs: 0,
             location_present: false,
@@ -467,9 +446,6 @@ impl Model {
     pub fn net_history(&self) -> &History {
         &self.net_hist
     }
-    pub fn carbon_hourly(&self) -> &Hourly {
-        &self.carbon_hist
-    }
     pub fn renewable_hourly(&self) -> &Hourly {
         &self.renewable_hist
     }
@@ -503,9 +479,6 @@ impl Model {
     }
     pub fn electricity(&self) -> &ElectricityState {
         &self.electricity
-    }
-    pub fn prices(&self) -> &PriceState {
-        &self.prices
     }
     pub fn ups(&self) -> &UpsState {
         &self.ups
@@ -575,24 +548,6 @@ impl Model {
     }
     pub fn token_present(&self) -> bool {
         self.token_present
-    }
-    /// The local quarter-hour (0..=95) the price gauge reads as "now".
-    pub fn set_local_slot(&mut self, s: u32) {
-        self.local_slot = s.min(95);
-    }
-    pub fn local_slot(&self) -> u32 {
-        self.local_slot
-    }
-    /// The price of the current quarter-hour, when it is known.
-    pub fn current_price(&self) -> Option<f32> {
-        if !self.prices.have {
-            return None;
-        }
-        self.prices
-            .eur
-            .get(self.local_slot as usize)
-            .copied()
-            .filter(|v| v.is_finite())
     }
     pub fn set_unix_now(&mut self, secs: i64) {
         self.unix_now = secs;
@@ -818,33 +773,16 @@ impl Model {
                 mix_mw,
                 renewable_pct,
                 fossil_free_pct,
-                carbon_gco2,
                 updated_at,
             } => {
                 let hour = self.unix_hour();
-                self.carbon_hist.push(hour, carbon_gco2);
                 self.renewable_hist.push(hour, renewable_pct);
                 self.electricity = ElectricityState {
                     zone,
                     mix: mix_mw,
                     renewable_pct,
                     fossil_free_pct,
-                    carbon_gco2,
                     updated_at,
-                    have: true,
-                };
-            }
-            Event::Prices {
-                date,
-                eur_per_kwh,
-                avg_eur_per_kwh,
-                currency,
-            } => {
-                self.prices = PriceState {
-                    date,
-                    eur: eur_per_kwh,
-                    avg: avg_eur_per_kwh,
-                    currency,
                     have: true,
                 };
             }
@@ -891,7 +829,6 @@ impl Model {
                 LinkTarget::Prometheus => self.link.prom = up,
                 LinkTarget::QBittorrent => self.link.qbit = up,
                 LinkTarget::Electricity => self.link.electricity = up,
-                LinkTarget::Prices => self.link.prices = up,
                 LinkTarget::Weather => self.link.weather = up,
                 LinkTarget::Rain => self.link.rain = up,
                 LinkTarget::Github => self.link.github = up,
@@ -1263,7 +1200,10 @@ mod tests {
     #[test]
     fn set_screens_replaces_layout_and_never_leaves_it_empty() {
         let mut m = Model::new(Thresholds::default());
-        m.set_screens(vec![vec![Role::Thermal, Role::Price], vec![]], vec![5.0]);
+        m.set_screens(
+            vec![vec![Role::Thermal, Role::Renewable], vec![]],
+            vec![5.0],
+        );
         assert_eq!(m.screen_count(), 2);
         assert_eq!(m.current_role(0), Role::Thermal);
         assert_eq!(m.current_role(1), Role::Cpu, "empty list falls back to cpu");
@@ -1372,28 +1312,26 @@ mod tests {
     fn electricity_samples_land_in_hourly_slots_by_unix_hour() {
         let mut m = Model::new(Thresholds::default());
         m.set_unix_now(3600 * 1000 + 100);
-        m.apply(electricity_sample(214.0, 61.0), 0.0);
+        m.apply(electricity_sample(61.0), 0.0);
         m.set_unix_now(3600 * 1000 + 1800);
-        m.apply(electricity_sample(220.0, 62.0), 1.0);
+        m.apply(electricity_sample(62.0), 1.0);
         assert_eq!(
-            m.carbon_hourly().values(),
-            vec![220.0],
+            m.renewable_hourly().values(),
+            vec![62.0],
             "same hour replaces"
         );
         m.set_unix_now(3600 * 1001);
-        m.apply(electricity_sample(180.0, 70.0), 2.0);
-        assert_eq!(m.carbon_hourly().values(), vec![220.0, 180.0]);
+        m.apply(electricity_sample(70.0), 2.0);
         assert_eq!(m.renewable_hourly().values(), vec![62.0, 70.0]);
         assert_eq!(m.unix_hour(), 1001);
     }
 
-    fn electricity_sample(carbon: f32, renewable: f32) -> Event {
+    fn electricity_sample(renewable: f32) -> Event {
         Event::Electricity {
             zone: "NL".into(),
             mix_mw: vec![(Source::Wind, 50.0), (Source::Gas, 50.0)],
             renewable_pct: renewable,
             fossil_free_pct: renewable + 5.0,
-            carbon_gco2: carbon,
             updated_at: String::new(),
         }
     }

@@ -23,8 +23,6 @@ pub struct Config {
     #[serde(default)]
     pub electricity: ElectricityCfg,
     #[serde(default)]
-    pub price: PriceCfg,
-    #[serde(default)]
     pub location: LocationCfg,
     #[serde(default)]
     pub weather: WeatherCfg,
@@ -98,26 +96,13 @@ pub struct DisplayCfg {
     pub one_at_a_time: bool,
 }
 
-/// Electricity Maps: grid mix, carbon intensity and renewable share.
+/// Electricity Maps: grid mix and renewable share.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct ElectricityCfg {
     pub enabled: bool,
     pub zone: String,
     pub token: String,
-    pub poll_secs: u64,
-}
-
-/// Day-ahead electricity price from Energy-Charts.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(default)]
-pub struct PriceCfg {
-    pub enabled: bool,
-    /// Energy-Charts bidding zone (`NL`, `DE-LU`, `DK1`, ...); empty derives
-    /// it from `electricity.zone`.
-    pub zone: String,
-    /// VAT added to the raw exchange price, percent.
-    pub vat_pct: f32,
     pub poll_secs: u64,
 }
 
@@ -320,16 +305,6 @@ impl Default for ElectricityCfg {
         }
     }
 }
-impl Default for PriceCfg {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            zone: String::new(),
-            vat_pct: 21.0,
-            poll_secs: 900,
-        }
-    }
-}
 impl Default for WeatherCfg {
     fn default() -> Self {
         Self {
@@ -459,6 +434,12 @@ pub fn expand_home(p: &str) -> PathBuf {
 
 pub const DEFAULT_PATH: &str = "/etc/rackscreen/config.yaml";
 
+/// Roles that no longer exist; an old config's roles lists drop them at load.
+const REMOVED_ROLES: [&str; 3] = ["face", "price", "carbon"];
+
+/// Top-level blocks of removed features; an old config's copy is ignored.
+const REMOVED_BLOCKS: [&str; 2] = ["face", "price"];
+
 impl Config {
     pub fn default_path() -> PathBuf {
         PathBuf::from(DEFAULT_PATH)
@@ -466,17 +447,20 @@ impl Config {
 
     pub fn from_yaml(text: &str) -> Result<Config> {
         let raw: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).context("parse yaml")?;
-        if raw.get("face").is_some() {
-            tracing::warn!("config: the `face:` block is no longer used and is ignored");
+        for block in REMOVED_BLOCKS {
+            if raw.get(block).is_some() {
+                tracing::warn!("config: the `{block}:` block is no longer used and is ignored");
+            }
         }
         let mut cfg: Config = serde_yaml_ng::from_str(text).context("parse yaml")?;
         cfg.normalize()?;
         Ok(cfg)
     }
 
-    /// Upgrade legacy fields in place and fill the per-app arr ports. The
-    /// removed `face` role is dropped from old configs, with one warning per
-    /// screen; a screen left with no roles is an error.
+    /// Upgrade legacy fields in place and fill the per-app arr ports. Removed
+    /// roles (`REMOVED_ROLES`) are dropped from old configs, with one warning
+    /// per screen and role; a screen left with no roles is an error naming
+    /// what was dropped.
     pub fn normalize(&mut self) -> Result<()> {
         for (i, s) in self.screens.iter_mut().enumerate() {
             if let Some(r) = s.role.take() {
@@ -484,16 +468,23 @@ impl Config {
                     s.roles = vec![r];
                 }
             }
-            let n = s.roles.len();
-            s.roles.retain(|r| !r.eq_ignore_ascii_case("face"));
-            if s.roles.len() < n {
-                tracing::warn!("screen {}: the face role was removed; ignoring", i + 1);
-                anyhow::ensure!(
-                    !s.roles.is_empty(),
-                    "screen {} has no roles left after dropping the removed face role",
-                    i + 1
-                );
-            }
+            let mut dropped: Vec<&str> = Vec::new();
+            s.roles.retain(|r| {
+                let Some(gone) = REMOVED_ROLES.iter().find(|g| r.eq_ignore_ascii_case(g)) else {
+                    return true;
+                };
+                if !dropped.contains(gone) {
+                    tracing::warn!("screen {}: the {gone} role was removed; ignoring", i + 1);
+                    dropped.push(gone);
+                }
+                false
+            });
+            anyhow::ensure!(
+                dropped.is_empty() || !s.roles.is_empty(),
+                "screen {} has no roles left after dropping removed roles ({})",
+                i + 1,
+                dropped.join(", ")
+            );
         }
         let defaults = MediaCfg::default();
         for (app, d) in [
@@ -596,16 +587,6 @@ impl Config {
                 s.cycle_secs
             );
         }
-        anyhow::ensure!(
-            (0.0..=100.0).contains(&self.price.vat_pct),
-            "price.vat_pct must be between 0 and 100 (got {})",
-            self.price.vat_pct
-        );
-        anyhow::ensure!(
-            self.price.poll_secs >= 900,
-            "price.poll_secs must be at least 900; Energy-Charts rate-limits (got {})",
-            self.price.poll_secs
-        );
         anyhow::ensure!(
             !self.electricity.enabled || !self.electricity.zone.trim().is_empty(),
             "electricity.zone must be set when electricity is enabled"
@@ -848,7 +829,53 @@ mod tests {
         .to_string();
         assert_eq!(
             e,
-            "screen 2 has no roles left after dropping the removed face role"
+            "screen 2 has no roles left after dropping removed roles (face)"
+        );
+    }
+
+    #[test]
+    fn price_and_carbon_roles_are_dropped_from_a_roles_list() {
+        let c = Config::from_yaml(
+            "screens:\n  - { roles: [power-mix, price, renewable, Carbon], spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            c.screens[0].roles,
+            vec!["power-mix".to_string(), "renewable".into()]
+        );
+        assert_eq!(
+            c.screens[0].roles().unwrap(),
+            vec![Role::PowerMix, Role::Renewable]
+        );
+        // a legacy single `role: price` too
+        let e = Config::from_yaml("screens:\n  - { role: price, spi: 0, cs: 0, dc: 6, rst: 5 }\n")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            e,
+            "screen 1 has no roles left after dropping removed roles (price)"
+        );
+    }
+
+    #[test]
+    fn an_only_removed_roles_screen_names_each_dropped_role_once() {
+        let e = Config::from_yaml(
+            "screens:\n  - { roles: [cpu], spi: 0, cs: 0, dc: 6, rst: 5 }\n  - { roles: [mem], spi: 0, cs: 1, dc: 6, rst: 5 }\n  - { roles: [price, carbon, PRICE], spi: 1, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            e,
+            "screen 3 has no roles left after dropping removed roles (price, carbon)"
+        );
+        let e = Config::from_yaml(
+            "screens:\n  - { roles: [carbon, face], spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            e,
+            "screen 1 has no roles left after dropping removed roles (carbon, face)"
         );
     }
 
@@ -870,34 +897,15 @@ mod tests {
     }
 
     #[test]
-    fn price_bounds_and_old_keys() {
-        let mut c = Config::default();
-        c.price.vat_pct = 120.0;
-        assert!(c
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("price.vat_pct"));
-        c.price.vat_pct = 0.0;
-        c.price.poll_secs = 600;
-        assert!(c
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("price.poll_secs"));
-        c.price.poll_secs = 900;
-        c.validate().unwrap();
-        // a file from before Energy-Charts still loads; its old keys are ignored
-        let old = Config::from_yaml(
-            "price:\n  source: entsoe\n  entsoe_token: t\n  entsoe_zone: 10YNL----------L\n  include_vat: false\n  poll_secs: 1800\n",
+    fn a_legacy_price_block_is_ignored() {
+        let c = Config::from_yaml(
+            "price:\n  enabled: true\n  zone: NL\n  vat_pct: 21\n  poll_secs: 1800\nnight:\n  enabled: false\n",
         )
         .unwrap();
-        assert_eq!(old.price.poll_secs, 1800);
-        assert!(old.price.enabled);
-        assert_eq!(old.price.vat_pct, 21.0);
+        assert!(!c.night.enabled);
         assert!(
-            !old.to_yaml().unwrap().contains("entsoe"),
-            "dropped on save"
+            !c.to_yaml().unwrap().contains("price:"),
+            "never written back"
         );
     }
 
@@ -913,15 +921,11 @@ mod tests {
     }
 
     #[test]
-    fn electricity_price_and_threshold_defaults() {
+    fn electricity_and_threshold_defaults() {
         let c = Config::default();
         assert!(!c.electricity.enabled);
         assert_eq!(c.electricity.zone, "NL");
         assert_eq!(c.electricity.poll_secs, 300);
-        assert!(c.price.enabled);
-        assert_eq!(c.price.zone, "");
-        assert_eq!(c.price.vat_pct, 21.0);
-        assert_eq!(c.price.poll_secs, 900);
         assert_eq!(c.thresholds.hot_temp, 70.0);
     }
 

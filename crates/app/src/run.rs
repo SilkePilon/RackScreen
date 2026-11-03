@@ -97,7 +97,7 @@ impl Monitor {
             }
         };
 
-        // The fake source produces its own electricity and price events; every other
+        // The fake source produces its own electricity events; every other
         // source mode polls the real APIs.
         if !matches!(source, SourceKind::Fake) {
             spawn_energy_sources(&runtime, cfg, &ctx);
@@ -213,8 +213,8 @@ impl Drop for Monitor {
     }
 }
 
-/// Electricity Maps and day-ahead prices. Both are independent of the cluster,
-/// so they run whenever the source is not the fake one.
+/// Electricity Maps. It is independent of the cluster, so it runs whenever
+/// the source is not the fake one.
 fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
     if cfg.electricity.enabled && !cfg.electricity.token.is_empty() {
         let ecfg = rackscreen_sources::electricity::ElectricityConfig {
@@ -228,16 +228,6 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
         ));
     } else if cfg.electricity.enabled {
         tracing::warn!("electricity enabled but no token set; electricity screens stay on no-data");
-    }
-    if let Some(zone) = price_zone(cfg) {
-        let pcfg = rackscreen_sources::prices::PriceConfig {
-            zone,
-            vat_pct: cfg.price.vat_pct,
-            poll_secs: cfg.price.poll_secs,
-            // the system local zone, the same clock the current slot uses
-            tz: chrono::Local,
-        };
-        runtime.spawn(rackscreen_sources::prices::run_prices(pcfg, ctx.clone()));
     }
 }
 
@@ -316,29 +306,6 @@ fn spawn_github(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx
         },
         ctx.clone(),
     ));
-}
-
-/// The Energy-Charts bidding zone to poll: `price.zone` when set, else the one
-/// `electricity.zone` maps to. `None` when prices are off, or (with a warning)
-/// when neither gives a zone.
-fn price_zone(cfg: &Config) -> Option<String> {
-    if !cfg.price.enabled {
-        return None;
-    }
-    let zone = cfg.price.zone.trim();
-    if !zone.is_empty() {
-        return Some(zone.to_string());
-    }
-    match rackscreen_core::electricity::energy_charts_zone_for(&cfg.electricity.zone) {
-        Some(z) => Some(z.to_string()),
-        None => {
-            tracing::warn!(
-                "price zone unknown for electricity zone {}; set price.zone",
-                cfg.electricity.zone
-            );
-            None
-        }
-    }
 }
 
 fn spawn_k8s_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: SourceCtx) {
@@ -454,36 +421,4 @@ async fn sigterm() {
         }
     }
     std::future::pending::<()>().await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn price_zone_prefers_the_explicit_zone_and_keeps_its_case() {
-        let mut cfg = Config::default();
-        cfg.electricity.zone = "NL".into();
-        assert_eq!(
-            price_zone(&cfg).as_deref(),
-            Some("NL"),
-            "derived from the electricity zone"
-        );
-        cfg.price.zone = " IT-North ".into();
-        assert_eq!(
-            price_zone(&cfg).as_deref(),
-            Some("IT-North"),
-            "explicit zone, trimmed, case kept"
-        );
-        cfg.price.zone.clear();
-        cfg.electricity.zone = "XX".into();
-        assert_eq!(
-            price_zone(&cfg),
-            None,
-            "unknown electricity zone and no price zone"
-        );
-        cfg.price.enabled = false;
-        cfg.price.zone = "NL".into();
-        assert_eq!(price_zone(&cfg), None, "off is off");
-    }
 }

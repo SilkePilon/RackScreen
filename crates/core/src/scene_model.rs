@@ -19,10 +19,7 @@ impl crate::model::Model {
             Role::Health => !st.have_nodes,
             Role::Thermal => !(link.prom && st.have_temps),
             Role::Storage => !(link.prom && st.have_storage),
-            Role::PowerMix | Role::Carbon | Role::Renewable => {
-                !(link.electricity && self.electricity().have)
-            }
-            Role::Price => !(link.prices && self.prices().have),
+            Role::PowerMix | Role::Renewable => !(link.electricity && self.electricity().have),
             Role::Ups => !(link.prom && self.ups().have),
             Role::Net => !(link.prom && self.net().have),
             Role::Deploys => !(link.argocd && self.apps().have),
@@ -88,10 +85,7 @@ impl crate::model::Model {
         if !self.needs_data(role) {
             return role_scene(self, role, now, ui);
         }
-        let electricity = matches!(
-            role,
-            Role::PowerMix | Role::Price | Role::Carbon | Role::Renewable
-        );
+        let electricity = matches!(role, Role::PowerMix | Role::Renewable);
         let why = if role.is_sky() && !self.location_present() {
             NoData::Location
         } else if (matches!(role, Role::GhActivity | Role::Ci) && !self.github_token_present())
@@ -205,7 +199,6 @@ mod tests {
             ],
             renewable_pct: 61.0,
             fossil_free_pct: 73.0,
-            carbon_gco2: 214.0,
             updated_at: "2026-09-07T12:00:00Z".into(),
         }
     }
@@ -294,7 +287,7 @@ mod tests {
         let s = for_role(&m, Role::PowerMix, 5.0);
         assert!(arcs(&s) >= 20, "power mix ring lit with the link up");
         m.apply(link(LinkTarget::Electricity, false), 6.0);
-        for role in [Role::PowerMix, Role::Carbon, Role::Renewable] {
+        for role in [Role::PowerMix, Role::Renewable] {
             assert_eq!(
                 pill_of(&for_role(&m, role, 6.0)).as_deref(),
                 Some("Waiting for data"),
@@ -305,33 +298,6 @@ mod tests {
         assert_eq!(
             pill_of(&for_role(&m, Role::PowerMix, 6.0)).as_deref(),
             Some("Token needed")
-        );
-    }
-
-    #[test]
-    fn price_role_gates_on_the_prices_link() {
-        let mut m = ready_model();
-        m.set_token_present(true);
-        m.apply(
-            Event::Prices {
-                date: "2026-09-07".into(),
-                eur_per_kwh: vec![0.10; 96],
-                avg_eur_per_kwh: 0.10,
-                currency: "EUR".into(),
-            },
-            0.0,
-        );
-        m.apply(link(LinkTarget::Prices, true), 0.0);
-        let live = for_role(&m, Role::Price, 1.0);
-        assert_eq!(icon_of(&live), Some("ms-euro"));
-        assert!(live
-            .items
-            .iter()
-            .any(|d| matches!(d, Drawable::Run { text, .. } if text == "€/kWh")));
-        m.apply(link(LinkTarget::Prices, false), 2.0);
-        assert_eq!(
-            pill_of(&for_role(&m, Role::Price, 2.0)).as_deref(),
-            Some("Waiting for data")
         );
     }
 

@@ -132,7 +132,6 @@ fn full_model() -> Model {
     let mut m = Model::new(Thresholds::default());
     m.set_unix_now(UNIX);
     m.set_utc_offset_secs(OFFSET);
-    m.set_local_slot(56);
     m.set_token_present(true);
     m.set_location_present(true);
     m.set_github_token_present(true);
@@ -141,7 +140,6 @@ fn full_model() -> Model {
         LinkTarget::K8sApi,
         LinkTarget::Prometheus,
         LinkTarget::Electricity,
-        LinkTarget::Prices,
         LinkTarget::Weather,
         LinkTarget::Rain,
         LinkTarget::Github,
@@ -245,31 +243,12 @@ fn full_model() -> Model {
                 renewable_pct: 55.0
                     + 20.0 * (((h as f32) - 6.0) / 24.0 * std::f32::consts::TAU).sin(),
                 fossil_free_pct: 82.0,
-                carbon_gco2: 230.0 + 80.0 * (-((h as f32 - 19.0).powi(2)) / 8.0).exp()
-                    - 90.0 * (-((h as f32 - 13.0).powi(2)) / 10.0).exp(),
                 updated_at: String::new(),
             },
             0.0,
         );
     }
     m.set_unix_now(UNIX);
-    let eur: Vec<f32> = (0..96)
-        .map(|i| {
-            let h = (i / 4) as f32;
-            0.11 + 0.06 * (-((h - 19.0).powi(2)) / 5.0).exp()
-                + 0.035 * (-((h - 8.0).powi(2)) / 3.0).exp()
-                - 0.05 * (-((h - 13.0).powi(2)) / 7.0).exp()
-        })
-        .collect();
-    m.apply(
-        Event::Prices {
-            date: "2026-09-07".into(),
-            avg_eur_per_kwh: eur.iter().sum::<f32>() / 96.0,
-            eur_per_kwh: eur,
-            currency: "EUR".into(),
-        },
-        0.0,
-    );
     m.apply(
         Event::Weather {
             temp_c: 17.0,

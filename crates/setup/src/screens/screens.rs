@@ -260,25 +260,12 @@ impl Screens {
         self.mode = Mode::Restarting(rx);
     }
 
-    /// The `!` hint for one role: the grid roles need an Electricity Maps token,
-    /// and `price` needs to be on with a bidding zone it can resolve.
+    /// The `!` hint for one role: the grid roles need an Electricity Maps token.
     fn role_hint(&self, r: Role) -> Option<&'static str> {
         let c = self.cfg.as_ref().ok()?;
         match r {
-            Role::PowerMix | Role::Carbon | Role::Renewable => {
+            Role::PowerMix | Role::Renewable => {
                 c.electricity.token.is_empty().then_some("no token")
-            }
-            Role::Price => {
-                if !c.price.enabled {
-                    Some("prices off")
-                } else if c.price.zone.trim().is_empty()
-                    && rackscreen_core::electricity::energy_charts_zone_for(&c.electricity.zone)
-                        .is_none()
-                {
-                    Some("no price zone")
-                } else {
-                    None
-                }
             }
             r if r.is_sky() => c.location().is_none().then_some("no location"),
             Role::GhActivity => c.github.token.is_empty().then_some("no token"),
@@ -697,42 +684,25 @@ mod tests {
     }
 
     #[test]
-    fn hints_flag_a_missing_token_and_a_dead_price_zone() {
+    fn hints_flag_a_missing_electricity_token() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         let dir = tempfile::tempdir().unwrap();
         let sh = test_shared(dir.path());
         let mut s = Screens::new(&sh);
-        // defaults: no Electricity Maps token, prices derived from zone NL
+        // defaults: no Electricity Maps token
         assert_eq!(s.role_hint(Role::PowerMix), Some("no token"));
-        assert_eq!(s.role_hint(Role::Carbon), Some("no token"));
-        assert_eq!(
-            s.role_hint(Role::Price),
-            None,
-            "NL maps to an Energy-Charts zone"
-        );
+        assert_eq!(s.role_hint(Role::Renewable), Some("no token"));
         assert_eq!(s.role_hint(Role::Cpu), None);
-        {
-            let cfg = s.cfg.as_mut().unwrap();
-            cfg.electricity.token = "tok".into();
-            cfg.electricity.zone = "XX".into();
-        }
-        assert_eq!(s.role_hint(Role::PowerMix), None);
-        assert_eq!(
-            s.role_hint(Role::Price),
-            Some("no price zone"),
-            "an unmapped electricity zone and no price zone cannot fetch"
-        );
-        s.cfg.as_mut().unwrap().price.zone = "DE-LU".into();
-        assert_eq!(s.role_hint(Role::Price), None);
-        s.cfg.as_mut().unwrap().price.enabled = false;
-        assert_eq!(s.role_hint(Role::Price), Some("prices off"));
         // and the row says so
         s.editor.apply_preset(Preset::Electricity);
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
         term.draw(|f| s.draw(f, f.area(), &sh, 0.0)).unwrap();
         let text = term.backend().to_string();
-        assert!(text.contains("! prices off"), "{text}");
+        assert!(text.contains("! no token"), "{text}");
+        s.cfg.as_mut().unwrap().electricity.token = "tok".into();
+        assert_eq!(s.role_hint(Role::PowerMix), None);
+        assert_eq!(s.role_hint(Role::Renewable), None);
     }
 
     #[test]

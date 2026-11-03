@@ -109,7 +109,7 @@ mod tests {
         assert_eq!(s.pill, Some(("Waiting for data".into(), TEXT2)));
         assert!(s.card.is_none() && s.unit.is_none());
         assert_eq!(
-            no_data_screen(Role::Price, NoData::Token).pill,
+            no_data_screen(Role::PowerMix, NoData::Token).pill,
             Some(("Token needed".into(), WARN))
         );
         assert_eq!(

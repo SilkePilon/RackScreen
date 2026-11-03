@@ -234,7 +234,6 @@ impl Screen for Home {
                     (s.links.rain, "rain"),
                     (s.links.github, "github"),
                     (s.links.electricity, "electricity"),
-                    (s.links.prices, "prices"),
                 ];
                 let links_w = (area.width as usize).saturating_sub(2 + LABEL_W);
                 let mut row: Vec<Span> = Vec::new();
@@ -386,7 +385,6 @@ mod tests {
                 qbittorrent: Dot::Down,
                 argocd: Dot::Unknown,
                 electricity: Dot::Unknown,
-                prices: Dot::Unknown,
                 weather: Dot::Up,
                 rain: Dot::Up,
                 github: Dot::Unknown,
@@ -497,16 +495,23 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(63, 20)).unwrap();
         term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
         let t = term.backend().to_string();
-        assert!(t.contains("● prices"), "last link complete: {t}");
+        assert!(t.contains("● electricity"), "last link complete: {t}");
         assert!(t.contains("● k8s"));
         let link_rows = t.lines().filter(|l| l.contains("● ")).count();
-        // Service, Boot, and the links in three rows
+        // Service, Boot, and the links in two rows
+        assert!(link_rows >= 4, "links wrap onto a second row: {t}");
+        // narrower still: a third row
+        let mut term = Terminal::new(TestBackend::new(48, 20)).unwrap();
+        term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("● electricity"), "last link complete: {t}");
+        let link_rows = t.lines().filter(|l| l.contains("● ")).count();
         assert!(link_rows >= 5, "links wrap onto extra rows: {t}");
-        // wide pane: the same nine links fit in two rows
+        // wide pane: the same eight links fit in two rows
         let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
         term.draw(|f| home.draw(f, f.area(), &sh, 0.0)).unwrap();
         let t = term.backend().to_string();
-        assert!(t.contains("● prices"), "{t}");
+        assert!(t.contains("● electricity"), "{t}");
         assert!(
             t.contains("● k8s  ● prometheus  ● qbittorrent  ● argocd"),
             "{t}"

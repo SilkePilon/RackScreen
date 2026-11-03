@@ -61,8 +61,6 @@ pub enum Role {
     Thermal,
     Storage,
     PowerMix,
-    Price,
-    Carbon,
     Renewable,
     GhActivity,
     Weather,
@@ -87,7 +85,7 @@ pub enum Role {
 }
 
 impl Role {
-    pub const ALL: [Role; 30] = [
+    pub const ALL: [Role; 28] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -95,8 +93,6 @@ impl Role {
         Role::Thermal,
         Role::Storage,
         Role::PowerMix,
-        Role::Price,
-        Role::Carbon,
         Role::Renewable,
         Role::GhActivity,
         Role::Weather,
@@ -139,8 +135,6 @@ impl Role {
             Role::Thermal => "THERMAL",
             Role::Storage => "STORAGE",
             Role::PowerMix => "POWER MIX",
-            Role::Price => "ELECTRICITY",
-            Role::Carbon => "CARBON",
             Role::Renewable => "RENEWABLE",
             Role::GhActivity => "CONTRIBUTIONS",
             Role::Weather => "WEATHER",
@@ -176,8 +170,6 @@ impl Role {
             Role::Thermal => "ms-thermostat",
             Role::Storage => "ms-hard_drive",
             Role::PowerMix => "ms-bolt",
-            Role::Price => "ms-euro",
-            Role::Carbon => "ms-co2",
             Role::Renewable => "ms-eco",
             Role::GhActivity => "ms-commit",
             Role::Weather => "ms-partly_cloudy_day",
@@ -211,8 +203,6 @@ impl Role {
             Role::Thermal => "thermal",
             Role::Storage => "storage",
             Role::PowerMix => "power-mix",
-            Role::Price => "price",
-            Role::Carbon => "carbon",
             Role::Renewable => "renewable",
             Role::GhActivity => "gh-activity",
             Role::Weather => "weather",
@@ -374,19 +364,21 @@ mod tests {
                 Role::Load,
             ]
         );
-        assert!(!Role::PowerMix.is_cluster() && !Role::Price.is_cluster());
+        assert!(!Role::PowerMix.is_cluster() && !Role::Renewable.is_cluster());
         assert!(!Role::Weather.is_cluster() && !Role::GhActivity.is_cluster());
     }
 
     #[test]
-    fn thirty_roles_with_unique_names() {
-        assert_eq!(Role::ALL.len(), 30);
+    fn twenty_eight_roles_with_unique_names() {
+        assert_eq!(Role::ALL.len(), 28);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 30);
-        assert_eq!(Role::parse("face"), None);
-        assert_eq!(Role::ALL[20], Role::Deploys);
+        assert_eq!(names.len(), 28);
+        for gone in ["face", "price", "carbon"] {
+            assert_eq!(Role::parse(gone), None);
+        }
+        assert_eq!(Role::ALL[18], Role::Deploys);
         assert_eq!(
-            &Role::ALL[21..],
+            &Role::ALL[19..],
             &[
                 Role::Media,
                 Role::Traffic,

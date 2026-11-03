@@ -190,7 +190,6 @@ pub enum LinkTarget {
     Prometheus,
     QBittorrent,
     Electricity,
-    Prices,
     Weather,
     Rain,
     Github,
@@ -293,17 +292,7 @@ pub enum Event {
         mix_mw: Vec<(Source, f32)>,
         renewable_pct: f32,
         fossil_free_pct: f32,
-        carbon_gco2: f32,
         updated_at: String,
-    },
-    /// Day-ahead prices, one entry per local quarter-hour of `date` starting
-    /// at 00:00 (NaN where unknown), plus the mean over that day and the two
-    /// before it.
-    Prices {
-        date: String,
-        eur_per_kwh: Vec<f32>,
-        avg_eur_per_kwh: f32,
-        currency: String,
     },
     /// Current conditions from Open-Meteo.
     Weather {

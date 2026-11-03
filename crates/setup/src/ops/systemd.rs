@@ -134,7 +134,6 @@ pub struct LinkDots {
     pub prometheus: Dot,
     pub qbittorrent: Dot,
     pub electricity: Dot,
-    pub prices: Dot,
     pub weather: Dot,
     pub rain: Dot,
     pub github: Dot,
@@ -148,7 +147,6 @@ pub fn links_from_logs(lines: &[String]) -> LinkDots {
         prometheus: Dot::Unknown,
         qbittorrent: Dot::Unknown,
         electricity: Dot::Unknown,
-        prices: Dot::Unknown,
         weather: Dot::Unknown,
         rain: Dot::Unknown,
         github: Dot::Unknown,
@@ -169,9 +167,6 @@ pub fn links_from_logs(lines: &[String]) -> LinkDots {
         }
         if lower.contains("electricity:") {
             d.electricity = if warn { Dot::Down } else { Dot::Up };
-        }
-        if lower.contains("prices:") {
-            d.prices = if warn { Dot::Down } else { Dot::Up };
         }
         for (needle, dot) in [
             ("weather:", &mut d.weather),
@@ -246,10 +241,10 @@ mod tests {
     #[test]
     fn journal_and_links() {
         let sh = FakeShell::new();
-        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO electricity: poll ok (7 sources)\nWARN prices: energy-charts status: 503\nINFO running (4 screens, 30 fps, source K8s)\n"));
+        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO electricity: poll ok (7 sources)\nINFO running (4 screens, 30 fps, source K8s)\n"));
         let sd = Systemd::new(&sh, "pi");
         let lines = sd.journal_tail(20).unwrap();
-        assert_eq!(lines.len(), 5);
+        assert_eq!(lines.len(), 4);
         assert!(sh.called("journalctl -u rackscreen@pi -n 20"));
         let d = links_from_logs(&lines);
         assert_eq!(
@@ -259,7 +254,6 @@ mod tests {
                 prometheus: Dot::Up,
                 qbittorrent: Dot::Down,
                 electricity: Dot::Up,
-                prices: Dot::Down,
                 weather: Dot::Unknown,
                 rain: Dot::Unknown,
                 github: Dot::Unknown,
@@ -268,11 +262,10 @@ mod tests {
         );
         // the newest line wins for each dot
         let later = links_from_logs(&[
+            "INFO electricity: poll ok (7 sources)".to_string(),
             "WARN electricity: token rejected".to_string(),
-            "INFO prices: 24 hours for 2026-09-07".to_string(),
         ]);
         assert_eq!(later.electricity, Dot::Down);
-        assert_eq!(later.prices, Dot::Up);
         assert_eq!(links_from_logs(&[]).api, Dot::Unknown);
     }
 

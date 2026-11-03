@@ -562,7 +562,6 @@ mod tests {
                     ],
                     renewable_pct: ren,
                     fossil_free_pct: 82.0,
-                    carbon_gco2: 100.0,
                     updated_at: String::new(),
                 },
                 0.0,

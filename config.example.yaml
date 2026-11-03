@@ -35,12 +35,6 @@ electricity:
   token: ""
   poll_secs: 300
 
-price:
-  enabled: true            # Energy-Charts day-ahead prices, no key
-  zone: ""                 # Energy-Charts bidding zone, e.g. NL, DE-LU, DK1; derived from electricity.zone when empty
-  vat_pct: 21              # added to the raw exchange price
-  poll_secs: 900           # minimum 900; Energy-Charts rate-limits bursts
-
 location:
   lat: null                # decimal degrees; needed by weather, wind, aqi, rain, sun, moon and iss
   lon: null
@@ -87,9 +81,9 @@ display:
   one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
-# Roles: cpu, mem, pods, health, thermal, storage, power-mix, price, carbon, renewable,
-#        gh-activity, weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys,
-#        media, traffic, restarts, uptime, fans, mains, load, ci, jellyfin
+# Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
+#        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
+#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:
