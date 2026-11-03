@@ -26,7 +26,7 @@ The SPI clock was tested live with Silke watching the panels: 33, 40 and 50 MHz 
 - `Scene` gains `base: Vec<Drawable>` next to `items`. `base` holds what rarely changes: `Clear`, card, ring track, captions, static labels. `items` holds what moves: hero digits, needles, arcs that glide, marquees, pills that blink.
 - Role builders put their drawables in the right list. Rule: anything whose position, colour, alpha or text depends on `now` or on a glide goes in `items`.
 - The renderer keeps one cached base pixmap per screen with a hash of the `base` list (hash over the drawables' bit patterns). Same hash: copy the cached pixmap into the frame (memcpy). Different: redraw the base, store it, then draw `items`.
-- Correctness guard: a test renders every role in every state both ways (base + items vs everything drawn in one pass) and asserts identical pixels. Since `items` are drawn after `base`, a role may only put a drawable in `base` if nothing in `base` draws over an earlier `items` drawable; the builders keep base drawables first.
+- Correctness guard: a test renders every role in every state both ways (base + items vs everything drawn in one pass) and asserts identical pixels. Since `base` is always drawn before `items`, a drawable may go in `base` only if every drawable before it in the builder's original order is also in `base`; this keeps the paint order unchanged.
 
 ## 4. One render worker per screen
 
