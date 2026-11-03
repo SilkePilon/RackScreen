@@ -74,6 +74,7 @@ fn key_char(key: Key) -> Option<char> {
         Key::L => 'l',
         Key::W => 'w',
         Key::I => 'i',
+        Key::S => 's',
         _ => return None,
     })
 }
