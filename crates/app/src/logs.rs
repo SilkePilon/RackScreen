@@ -1,124 +1,267 @@
-//! An in-memory ring of log lines that tracing can write into (for the TUI's Run screen).
+//! An in-memory ring of structured log lines that tracing writes into, for
+//! the web UI's log page: every line has a sequence number, so a client can
+//! ask for "everything after N", and new lines are broadcast for streaming.
 
 use std::collections::VecDeque;
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-use tracing_subscriber::fmt::MakeWriter;
+use tracing::field::{Field, Visit};
+use tracing::Subscriber;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::Layer;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogLine {
+    pub seq: u64,
+    pub unix_ms: u64,
+    pub level: &'static str,
+    pub target: String,
+    pub msg: String,
+}
+
+struct Inner {
+    lines: VecDeque<LogLine>,
+    next_seq: u64,
+}
 
 #[derive(Clone)]
 pub struct LogSink {
-    inner: Arc<Mutex<VecDeque<String>>>,
+    inner: Arc<Mutex<Inner>>,
     capacity: usize,
-    partial: Arc<Mutex<String>>,
+    live: tokio::sync::broadcast::Sender<LogLine>,
+}
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl LogSink {
     pub fn new(capacity: usize) -> LogSink {
+        let (live, _) = tokio::sync::broadcast::channel(256);
         LogSink {
-            inner: Arc::new(Mutex::new(VecDeque::new())),
-            capacity,
-            partial: Arc::new(Mutex::new(String::new())),
+            inner: Arc::new(Mutex::new(Inner {
+                lines: VecDeque::new(),
+                next_seq: 1,
+            })),
+            capacity: capacity.max(1),
+            live,
         }
     }
 
+    /// Append one line; returns its sequence number.
+    pub fn push(&self, level: &'static str, target: &str, msg: &str) -> u64 {
+        self.push_at(unix_ms(), level, target, msg)
+    }
+
+    pub fn push_at(&self, unix_ms: u64, level: &'static str, target: &str, msg: &str) -> u64 {
+        let line = {
+            let mut inner = self.inner.lock().unwrap();
+            let seq = inner.next_seq;
+            inner.next_seq += 1;
+            let line = LogLine {
+                seq,
+                unix_ms,
+                level,
+                target: target.to_string(),
+                msg: msg.to_string(),
+            };
+            if inner.lines.len() >= self.capacity {
+                inner.lines.pop_front();
+            }
+            inner.lines.push_back(line.clone());
+            line
+        };
+        let seq = line.seq;
+        // no receiver: nobody is streaming, which is fine
+        let _ = self.live.send(line);
+        seq
+    }
+
+    /// Lines with `seq > after`, at most `limit`, oldest first, and the
+    /// sequence number the next request should ask after (the last line
+    /// returned, or `after` when nothing is newer).
+    pub fn after(&self, after: u64, limit: usize) -> (Vec<LogLine>, u64) {
+        let inner = self.inner.lock().unwrap();
+        let lines: Vec<LogLine> = inner
+            .lines
+            .iter()
+            .filter(|l| l.seq > after)
+            .take(limit)
+            .cloned()
+            .collect();
+        let next = lines.last().map_or(after, |l| l.seq);
+        (lines, next)
+    }
+
+    /// The newest `n` lines, oldest first.
+    pub fn tail(&self, n: usize) -> Vec<LogLine> {
+        let inner = self.inner.lock().unwrap();
+        let skip = inner.lines.len().saturating_sub(n);
+        inner.lines.iter().skip(skip).cloned().collect()
+    }
+
+    /// Plain text of every line, oldest first.
     pub fn lines(&self) -> Vec<String> {
-        self.inner.lock().unwrap().iter().cloned().collect()
+        self.inner
+            .lock()
+            .unwrap()
+            .lines
+            .iter()
+            .map(|l| format!("{} {} {}", l.level, l.target, l.msg))
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap().lines.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The sequence number the next pushed line gets.
+    pub fn next_seq(&self) -> u64 {
+        self.inner.lock().unwrap().next_seq
     }
 
     pub fn clear(&self) {
-        self.inner.lock().unwrap().clear();
+        self.inner.lock().unwrap().lines.clear();
     }
 
-    fn push_bytes(&self, buf: &[u8]) {
-        let mut partial = self.partial.lock().unwrap();
-        partial.push_str(&String::from_utf8_lossy(buf));
-        let mut lines = self.inner.lock().unwrap();
-        while let Some(pos) = partial.find('\n') {
-            let line: String = partial.drain(..=pos).collect();
-            let line = strip_ansi(line.trim_end_matches('\n'));
-            if !line.is_empty() {
-                if lines.len() >= self.capacity {
-                    lines.pop_front();
-                }
-                lines.push_back(line);
-            }
-        }
+    /// New lines as they arrive (a receiver that falls 256 lines behind skips).
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<LogLine> {
+        self.live.subscribe()
+    }
+
+    /// A tracing layer that writes every event into this sink.
+    pub fn layer(&self) -> SinkLayer {
+        SinkLayer(self.clone())
     }
 }
 
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' {
-            for n in chars.by_ref() {
-                if n.is_ascii_alphabetic() {
-                    break;
-                }
-            }
+/// `tracing_subscriber::Layer` feeding a `LogSink`; stack it next to the
+/// usual stdout `fmt` layer.
+pub struct SinkLayer(LogSink);
+
+struct MessageVisitor {
+    message: String,
+    rest: Vec<String>,
+}
+
+impl Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{value:?}");
         } else {
-            out.push(c);
+            self.rest.push(format!("{}={value:?}", field.name()));
         }
     }
-    out
-}
-
-pub struct SinkWriter(LogSink);
-
-impl Write for SinkWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.push_bytes(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        } else {
+            self.rest.push(format!("{}={value}", field.name()));
+        }
     }
 }
 
-impl<'a> MakeWriter<'a> for LogSink {
-    type Writer = SinkWriter;
-    fn make_writer(&'a self) -> SinkWriter {
-        SinkWriter(self.clone())
+fn level_name(l: &tracing::Level) -> &'static str {
+    match *l {
+        tracing::Level::ERROR => "ERROR",
+        tracing::Level::WARN => "WARN",
+        tracing::Level::INFO => "INFO",
+        tracing::Level::DEBUG => "DEBUG",
+        tracing::Level::TRACE => "TRACE",
     }
 }
 
-/// Route all tracing output into the sink (no stderr). Safe to call more than once.
-pub fn install_sink_subscriber(sink: &LogSink) {
-    let filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_ansi(false)
-        .with_writer(sink.clone())
-        .try_init();
+impl<S: Subscriber> Layer<S> for SinkLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let mut v = MessageVisitor {
+            message: String::new(),
+            rest: Vec::new(),
+        };
+        event.record(&mut v);
+        let mut msg = v.message;
+        if !v.rest.is_empty() {
+            if !msg.is_empty() {
+                msg.push(' ');
+            }
+            msg.push_str(&v.rest.join(" "));
+        }
+        let meta = event.metadata();
+        self.0.push(level_name(meta.level()), meta.target(), &msg);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tracing_subscriber::layer::SubscriberExt;
 
     #[test]
-    fn captures_lines_and_caps() {
+    fn sequence_numbers_grow_and_the_ring_caps() {
         let sink = LogSink::new(3);
-        let mut w = sink.make_writer();
-        w.write_all(b"one\ntw").unwrap();
-        w.write_all(b"o\n\x1b[32mthree\x1b[0m\nfour\n").unwrap();
-        assert_eq!(sink.lines(), vec!["two", "three", "four"]);
+        assert_eq!(sink.push("INFO", "t", "one"), 1);
+        assert_eq!(sink.push("WARN", "t", "two"), 2);
+        assert_eq!(sink.push("INFO", "t", "three"), 3);
+        assert_eq!(sink.push("INFO", "t", "four"), 4);
+        let msgs: Vec<&str> = sink
+            .lines()
+            .iter()
+            .map(|l| l.as_str())
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|_| "")
+            .collect();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(sink.len(), 3);
+        assert_eq!(sink.next_seq(), 5);
+        let (lines, next) = sink.after(0, 500);
+        assert_eq!(
+            lines.iter().map(|l| l.seq).collect::<Vec<_>>(),
+            vec![2, 3, 4],
+            "the oldest line fell out"
+        );
+        assert_eq!(next, 4);
+        let (lines, next) = sink.after(3, 500);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].msg, "four");
+        assert_eq!(lines[0].level, "INFO");
+        assert_eq!(next, 4);
+        let (lines, next) = sink.after(4, 500);
+        assert!(lines.is_empty());
+        assert_eq!(next, 4, "nothing newer: ask after the same seq again");
+        let (lines, next) = sink.after(0, 2);
+        assert_eq!(lines.len(), 2, "limit honoured");
+        assert_eq!(next, 3);
+        assert_eq!(sink.tail(1)[0].msg, "four");
         sink.clear();
-        assert!(sink.lines().is_empty());
+        assert!(sink.is_empty());
+        assert_eq!(sink.push("INFO", "t", "five"), 5, "seq keeps counting");
     }
 
     #[test]
-    fn tracing_goes_into_sink() {
+    fn tracing_events_land_in_the_sink_with_level_and_target() {
         let sink = LogSink::new(10);
-        let sub = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_writer(sink.clone())
-            .finish();
+        let mut rx = sink.subscribe();
+        let sub = tracing_subscriber::registry().with(sink.layer());
         tracing::subscriber::with_default(sub, || {
-            tracing::info!("hello sink");
+            tracing::info!(target: "rackscreen_sources::k8s", "hello {}", "sink");
+            tracing::warn!(count = 3, "with fields");
         });
-        assert!(sink.lines().iter().any(|l| l.contains("hello sink")));
+        let lines = sink.tail(10);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].level, "INFO");
+        assert_eq!(lines[0].target, "rackscreen_sources::k8s");
+        assert_eq!(lines[0].msg, "hello sink");
+        assert_eq!(lines[1].level, "WARN");
+        assert_eq!(lines[1].msg, "with fields count=3");
+        assert!(lines[0].unix_ms > 1_700_000_000_000);
+        assert_eq!(rx.try_recv().unwrap().msg, "hello sink");
+        assert_eq!(rx.try_recv().unwrap().seq, 2);
     }
 }

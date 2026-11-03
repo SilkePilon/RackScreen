@@ -2,6 +2,7 @@
 //! the night fade, diff, pack and hand the frame to the display thread.
 
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -13,6 +14,8 @@ use rackscreen_render::frame::{
 };
 use rackscreen_render::renderer::Renderer;
 use tiny_skia::Pixmap;
+
+use crate::hub::FrameTap;
 
 pub struct Job {
     pub scene: Scene,
@@ -42,6 +45,10 @@ pub struct ScreenFrames {
     first: bool,
     /// Scene and fade of the last rendered frame.
     last: Option<(Scene, Option<f32>)>,
+    /// The web UI's live view, fed only while someone watches.
+    tap: Option<(usize, Arc<FrameTap>)>,
+    /// A frame was rendered since the tap last got a copy.
+    tap_dirty: bool,
 }
 
 impl ScreenFrames {
@@ -54,6 +61,32 @@ impl ScreenFrames {
             prev: new_pixmap(),
             first: true,
             last: None,
+            tap: None,
+            tap_dirty: false,
+        }
+    }
+
+    /// Feed the live view of screen `index` through `tap`.
+    pub fn with_tap(mut self, index: usize, tap: Arc<FrameTap>) -> Self {
+        self.tap = Some((index, tap));
+        self
+    }
+
+    /// Copy the latest frame (`prev` after a flush) into the tap when it
+    /// wants one: there are watchers and the throttle allows it. Called on
+    /// every job, so a change that fell in a throttled slot still reaches
+    /// the browser once the slot frees up.
+    fn feed_tap(&mut self) {
+        let Some((index, tap)) = &self.tap else {
+            return;
+        };
+        if !self.tap_dirty {
+            return;
+        }
+        let now = Instant::now();
+        if tap.wants(*index, now) {
+            tap.publish(*index, self.prev.data(), now);
+            self.tap_dirty = false;
         }
     }
 
@@ -67,6 +100,7 @@ impl ScreenFrames {
         let unchanged =
             !self.first && matches!(&self.last, Some((s, f)) if *f == job.fade && *s == job.scene);
         if unchanged {
+            self.feed_tap();
             return Done {
                 skipped: true,
                 ..Done::default()
@@ -82,6 +116,8 @@ impl ScreenFrames {
         self.flush();
         let flush_ms = t.elapsed().as_secs_f32() * 1000.0;
         self.last = Some((job.scene, job.fade));
+        self.tap_dirty = true;
+        self.feed_tap();
         Done {
             render_ms,
             flush_ms,
@@ -119,7 +155,13 @@ pub struct ScreenWorker {
 }
 
 impl ScreenWorker {
-    pub fn spawn(index: usize, orient: Orient, mailbox: Mailbox, brightness: f32) -> Result<Self> {
+    pub fn spawn(
+        index: usize,
+        orient: Orient,
+        mailbox: Mailbox,
+        brightness: f32,
+        tap: Option<Arc<FrameTap>>,
+    ) -> Result<Self> {
         let (jobs, job_rx) = sync_channel::<Job>(1);
         let (done_tx, done) = sync_channel::<Done>(1);
         let (ready_tx, ready_rx) = sync_channel::<Result<()>>(1);
@@ -137,6 +179,9 @@ impl ScreenWorker {
                     }
                 };
                 let mut frames = ScreenFrames::new(orient, mailbox, brightness);
+                if let Some(tap) = tap {
+                    frames = frames.with_tap(index, tap);
+                }
                 for job in job_rx {
                     if done_tx.send(frames.run(&mut renderer, job)).is_err() {
                         break;
@@ -269,7 +314,7 @@ mod tests {
     #[test]
     fn worker_thread_renders_and_reports() {
         let mb = Mailbox::new();
-        let w = ScreenWorker::spawn(0, Orient::identity(), mb.clone(), 1.0).unwrap();
+        let w = ScreenWorker::spawn(0, Orient::identity(), mb.clone(), 1.0, None).unwrap();
         w.send(job(scene(50.0))).unwrap();
         let d = w.wait().unwrap();
         assert!(!d.skipped);
@@ -294,5 +339,35 @@ mod tests {
                 h: 1
             }])
         );
+    }
+
+    #[test]
+    fn tap_gets_frames_only_while_watched() {
+        let mb = Mailbox::new();
+        let tap = Arc::new(FrameTap::new(1));
+        let mut f = ScreenFrames::new(Orient::identity(), mb.clone(), 1.0).with_tap(0, tap.clone());
+        let mut r = Renderer::new().unwrap();
+        f.run(&mut r, job(scene(50.0)));
+        assert_eq!(tap.seq(0), 0, "nobody watches: no copy");
+        let guard = tap.watch();
+        // the frame is unchanged, but the browser never saw it: copied now
+        assert!(f.run(&mut r, job(scene(50.0))).skipped);
+        assert_eq!(tap.seq(0), 1);
+        let frame = tap.latest(0).unwrap();
+        assert_eq!(frame.rgba.len(), 240 * 240 * 4);
+        assert!(frame.rgba.iter().any(|b| *b != 0), "has the white rect");
+        // the same frame again: nothing new to copy
+        assert!(f.run(&mut r, job(scene(50.0))).skipped);
+        assert_eq!(tap.seq(0), 1);
+        // a change inside the throttle window waits for the next job
+        assert!(!f.run(&mut r, job(scene(60.0))).skipped);
+        assert_eq!(tap.seq(0), 1, "throttled");
+        std::thread::sleep(std::time::Duration::from_millis(110));
+        assert!(f.run(&mut r, job(scene(60.0))).skipped);
+        assert_eq!(tap.seq(0), 2, "copied once the slot is free");
+        drop(guard);
+        std::thread::sleep(std::time::Duration::from_millis(110));
+        assert!(!f.run(&mut r, job(scene(70.0))).skipped);
+        assert_eq!(tap.seq(0), 2, "no watchers again");
     }
 }

@@ -1,6 +1,7 @@
-//! Application wiring shared by the `rackscreen` binary and the setup TUI.
+//! Application wiring shared by the `rackscreen` binary and the web server.
 pub mod calibrate;
 pub mod config;
+pub mod hub;
 pub mod logs;
 pub mod night;
 pub mod panels;
@@ -9,4 +10,5 @@ pub mod run;
 pub mod runloop;
 pub mod spotify;
 pub mod stats;
+pub mod supervisor;
 pub mod worker;

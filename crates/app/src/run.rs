@@ -15,8 +15,9 @@ use rackscreen_sources::SourceCtx;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{expand_home, Config};
+use crate::hub::{ControlHandle, Hub};
 use crate::panels::{open_panels, Panels};
-use crate::runloop::{NightWindow, RenderLoop, ScreenSlot};
+use crate::runloop::{LinkCfg, NightWindow, RenderLoop, ScreenSlot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind {
@@ -51,10 +52,22 @@ pub struct Monitor {
     runtime: tokio::runtime::Runtime,
     render_thread: Option<JoinHandle<()>>,
     panels: Option<Panels>,
+    /// The hub whose control handle points at this monitor's render loop.
+    hub: Option<Arc<Hub>>,
 }
 
 impl Monitor {
     pub fn start(cfg: &Config, opts: RunOptions) -> Result<Monitor> {
+        Monitor::start_with_hub(cfg, opts, None)
+    }
+
+    /// Start, and when `hub` is given, publish status and frames into it and
+    /// take controls from it.
+    pub fn start_with_hub(
+        cfg: &Config,
+        opts: RunOptions,
+        hub: Option<Arc<Hub>>,
+    ) -> Result<Monitor> {
         let source = opts.source.unwrap_or(if opts.sim {
             SourceKind::Fake
         } else {
@@ -62,9 +75,10 @@ impl Monitor {
         });
         let fps = opts.fps.unwrap_or(cfg.display.fps);
         let (tx, rx) = mpsc::channel();
+        let (control_tx, control_rx) = mpsc::channel();
         let shutdown = CancellationToken::new();
         let ctx = SourceCtx {
-            tx,
+            tx: tx.clone(),
             shutdown: shutdown.clone(),
         };
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -172,7 +186,26 @@ impl Monitor {
             },
             show_order: cfg.shows.screen_order(panels.handles.len()),
             play_path: crate::play::state_dir().map(|d| crate::play::request_path(&d)),
+            control_rx,
+            hub: hub.clone(),
+            links: LinkCfg {
+                k8s: matches!(source, SourceKind::K8s),
+                qbit: cfg.qbittorrent.enabled,
+                electricity: cfg.electricity.enabled && !cfg.electricity.token.is_empty(),
+                weather: cfg.weather.enabled && cfg.location().is_some(),
+                rain: cfg.rain.enabled && cfg.location().is_some(),
+                github: cfg.github.enabled && !cfg.github.token.is_empty(),
+                argocd: cfg.argocd.enabled,
+            },
+            gif_names: cfg.gifs.iter().map(|g| g.name.clone()).collect(),
+            cycle_secs_cfg: cfg.screens.iter().map(|s| s.cycle_secs).collect(),
         };
+        if let Some(h) = &hub {
+            h.set_control(Some(ControlHandle {
+                events: tx.clone(),
+                control: control_tx,
+            }));
+        }
         let render_thread = std::thread::Builder::new()
             .name("render".into())
             .spawn(move || {
@@ -192,6 +225,7 @@ impl Monitor {
             runtime,
             render_thread: Some(render_thread),
             panels: Some(panels),
+            hub,
         })
     }
 
@@ -201,6 +235,11 @@ impl Monitor {
 
     pub fn is_stopped(&self) -> bool {
         self.stop.load(Ordering::Relaxed)
+    }
+
+    /// The flag the render loop raises when it stops on its own.
+    pub fn stop_flag(&self) -> Arc<AtomicBool> {
+        self.stop.clone()
     }
 
     /// Block until SIGINT, SIGTERM or the stop flag, then shut down.
@@ -220,6 +259,9 @@ impl Monitor {
 
 impl Drop for Monitor {
     fn drop(&mut self) {
+        if let Some(h) = self.hub.take() {
+            h.set_control(None);
+        }
         self.stop.store(true, Ordering::Relaxed);
         self.shutdown.cancel();
         if let Some(t) = self.render_thread.take() {
@@ -273,13 +315,13 @@ fn spawn_energy_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &S
 
 /// The token file the Spotify source reads, when Spotify is on and has a
 /// client ID. The source starts even before a login exists and picks one
-/// up once `rackscreen setup` writes it.
+/// up once the web UI writes it.
 fn spotify_token_path(cfg: &Config) -> Option<std::path::PathBuf> {
     if !cfg.spotify.enabled {
         return None;
     }
     if cfg.spotify.client_id.trim().is_empty() {
-        tracing::warn!("spotify enabled but no client id set; log in with rackscreen setup");
+        tracing::warn!("spotify enabled but no client id set; add one in the web UI");
         return None;
     }
     let path = crate::spotify::token_path();
@@ -462,7 +504,7 @@ fn spawn_k8s_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: Sourc
 
 /// Resolves on SIGINT, SIGTERM (systemd stop/restart) or when the render loop
 /// has already stopped on its own (renderer error, panic, or window closed).
-async fn wait_for_shutdown(stop: &AtomicBool) {
+pub async fn wait_for_shutdown(stop: &AtomicBool) {
     let render_stopped = async {
         while !stop.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -475,7 +517,7 @@ async fn wait_for_shutdown(stop: &AtomicBool) {
     }
 }
 
-async fn sigterm() {
+pub async fn sigterm() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};

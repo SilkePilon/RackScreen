@@ -2,6 +2,7 @@
 //! orient, diff, hand frames to display threads. Also night mode.
 
 use rackscreen_core::p2::ui::ScreenUi;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -11,16 +12,17 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono::Timelike;
 use rackscreen_core::anim::Secs;
-use rackscreen_core::event::Event;
+use rackscreen_core::event::{Event, LinkTarget};
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::is_night;
 use rackscreen_core::p2::status::night_scene;
 use rackscreen_core::shows::schedule::{Request, ShowScheduler};
 use rackscreen_core::shows::world::Layout;
 use rackscreen_core::theme::Role;
-use rackscreen_display::{DisplayCmd, Mailbox};
+use rackscreen_display::{DisplayCmd, Mailbox, PushStats};
 use rackscreen_render::frame::Orient;
 
+use crate::hub::{Control, Hub, LinkStatus, NightStatus, ScreenStat, ScreenStatus, StatusSnapshot};
 use crate::night::{NightFrame, NightPhase};
 use crate::worker::{Job, ScreenWorker};
 
@@ -62,6 +64,163 @@ pub struct NightWindow {
     pub enabled: bool,
     pub start_min: u32,
     pub end_min: u32,
+}
+
+/// Which links the config has turned on, so the status can say `off` for
+/// the rest instead of `down`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LinkCfg {
+    pub k8s: bool,
+    pub qbit: bool,
+    pub electricity: bool,
+    pub weather: bool,
+    pub rain: bool,
+    pub github: bool,
+    pub argocd: bool,
+}
+
+/// The calibration pattern on every panel: `identify` for a few seconds,
+/// or `pattern` until turned off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatternKind {
+    Identify,
+    Pattern,
+}
+
+impl PatternKind {
+    fn showing(self) -> &'static str {
+        match self {
+            PatternKind::Identify => "identify",
+            PatternKind::Pattern => "pattern",
+        }
+    }
+}
+
+/// How long `pattern on` stays without being turned off.
+pub const PATTERN_MAX: Duration = Duration::from_secs(600);
+/// The longest `identify`.
+pub const IDENTIFY_MAX_SECS: f64 = 60.0;
+
+/// How often the status snapshot goes to the hub.
+const STATUS_EVERY: Duration = Duration::from_secs(1);
+
+/// The link rows of the status, from the model's link flags, what the config
+/// turned on and which links have reported at all since the start.
+pub fn link_rows(
+    link: rackscreen_core::model::LinkState,
+    cfg: LinkCfg,
+    heard: &HashSet<LinkTarget>,
+    model: &Model,
+) -> Vec<LinkStatus> {
+    let st = model.state();
+    let rows: [(LinkTarget, &'static str, bool, bool, String); 8] = [
+        (
+            LinkTarget::K8sApi,
+            "Kubernetes",
+            cfg.k8s,
+            link.api,
+            if st.have_nodes {
+                format!("{} nodes", st.nodes_total)
+            } else {
+                String::new()
+            },
+        ),
+        (
+            LinkTarget::Prometheus,
+            "Prometheus",
+            cfg.k8s,
+            link.prom,
+            if st.have_metrics {
+                format!("{} alerts", st.alerts.len())
+            } else {
+                String::new()
+            },
+        ),
+        (
+            LinkTarget::QBittorrent,
+            "qBittorrent",
+            cfg.k8s && cfg.qbit,
+            link.qbit,
+            if link.qbit {
+                format!("{} torrents", st.torrents.len())
+            } else {
+                String::new()
+            },
+        ),
+        (
+            LinkTarget::Electricity,
+            "Electricity Maps",
+            cfg.electricity,
+            link.electricity,
+            if model.electricity().have {
+                model.electricity().zone.clone()
+            } else {
+                String::new()
+            },
+        ),
+        (
+            LinkTarget::Weather,
+            "Weather",
+            cfg.weather,
+            link.weather,
+            if model.weather().have {
+                format!("{:.1} °C", model.weather().temp_c)
+            } else {
+                String::new()
+            },
+        ),
+        (LinkTarget::Rain, "Rain", cfg.rain, link.rain, String::new()),
+        (
+            LinkTarget::Github,
+            "GitHub",
+            cfg.github,
+            link.github,
+            if model.github().have {
+                format!("{} today", model.github().today())
+            } else {
+                String::new()
+            },
+        ),
+        (
+            LinkTarget::ArgoCd,
+            "Argo CD",
+            cfg.k8s && cfg.argocd,
+            link.argocd,
+            if model.apps().have {
+                format!("{} apps", model.apps().apps.len())
+            } else {
+                String::new()
+            },
+        ),
+    ];
+    rows.into_iter()
+        .map(|(target, name, on, up, detail)| LinkStatus {
+            name,
+            state: if !on {
+                "off"
+            } else if up {
+                "ok"
+            } else if heard.contains(&target) {
+                "down"
+            } else {
+                "warn"
+            },
+            detail: if !on {
+                String::new()
+            } else if !up && !heard.contains(&target) {
+                "waiting".into()
+            } else {
+                detail
+            },
+        })
+        .collect()
+}
+
+fn merge_push(acc: &mut PushStats, p: PushStats) {
+    acc.frames += p.frames;
+    acc.total_ms += p.total_ms;
+    acc.max_ms = acc.max_ms.max(p.max_ms);
+    acc.bytes += p.bytes;
 }
 
 /// The next frame deadline: one tick after the last, or `now` when the loop
@@ -146,6 +305,16 @@ pub struct RenderLoop {
     pub show_order: Vec<usize>,
     /// The play-now request file; `None` when there is no home directory.
     pub play_path: Option<PathBuf>,
+    /// Controls from the web UI (identify, pattern, jump, play).
+    pub control_rx: Receiver<Control>,
+    /// Where the status snapshot goes and the live frames come from.
+    pub hub: Option<Arc<Hub>>,
+    /// Which links the config turned on.
+    pub links: LinkCfg,
+    /// Names of the config's `gifs:`, so `Role::Gif(i)` can be named.
+    pub gif_names: Vec<String>,
+    /// Each screen's configured dwell, for the status.
+    pub cycle_secs_cfg: Vec<u64>,
 }
 
 /// How often the Spotify token file is looked for, so a login made in
@@ -160,8 +329,7 @@ pub fn music_ready(configured: bool, spotify_token: Option<&Path>) -> bool {
 /// How often the play-now request file is checked.
 const PLAY_POLL: Duration = Duration::from_secs(1);
 
-/// Consume a play-now request, if one is waiting: refused at night (it is
-/// dropped, not kept for the morning) and with fewer than two screens.
+/// Consume a play-now request, if one is waiting.
 fn poll_play(path: &Path, model: &mut Model, phase: NightPhase) {
     let req = match crate::play::take(path) {
         None => return,
@@ -171,6 +339,12 @@ fn poll_play(path: &Path, model: &mut Model, phase: NightPhase) {
         }
         Some(Ok(r)) => r,
     };
+    apply_play(req, model, phase);
+}
+
+/// Start a show now: refused at night (it is dropped, not kept for the
+/// morning), while one plays, and with fewer than two screens.
+fn apply_play(req: Request, model: &mut Model, phase: NightPhase) {
     let name = match req {
         Request::Id(d) => d.id,
         Request::Random => "random",
@@ -194,11 +368,18 @@ impl RenderLoop {
         );
         // Declared after `_guard`, so the render threads are joined before the
         // guard sends `Quit` to the display threads.
+        let tap = self.hub.as_ref().map(|h| h.frames.clone());
         let workers: Vec<ScreenWorker> = self
             .screens
             .iter()
             .map(|s| {
-                ScreenWorker::spawn(s.index, s.orient.clone(), s.mailbox.clone(), s.brightness)
+                ScreenWorker::spawn(
+                    s.index,
+                    s.orient.clone(),
+                    s.mailbox.clone(),
+                    s.brightness,
+                    tap.clone(),
+                )
             })
             .collect::<Result<_>>()?;
         let mut force_full = true;
@@ -237,6 +418,18 @@ impl RenderLoop {
         let mut phase = NightPhase::Day;
         let mut stats = crate::stats::FrameStats::new(self.screens.len(), 60.0, 0.0);
         let mut deadline = Instant::now();
+        // push stats accumulate per second for the status and per minute for the log
+        let mut push_acc: Vec<PushStats> = vec![PushStats::default(); self.screens.len()];
+        let mut web_stats: Vec<ScreenStat> = (0..self.screens.len())
+            .map(|index| ScreenStat {
+                index,
+                ..ScreenStat::default()
+            })
+            .collect();
+        let mut next_status = Instant::now();
+        let mut last_status = Instant::now();
+        let mut heard: HashSet<LinkTarget> = HashSet::new();
+        let mut pattern: Option<(PatternKind, Instant)> = None;
 
         while !self.stop.load(Ordering::Relaxed) {
             let now = start.elapsed().as_secs_f64();
@@ -245,7 +438,50 @@ impl RenderLoop {
             model.set_unix_now(unix);
             model.set_utc_offset_secs(offset);
             while let Ok(ev) = self.rx.try_recv() {
+                if let Event::Link { target, .. } = &ev {
+                    heard.insert(*target);
+                }
                 model.apply(ev, now);
+            }
+            while let Ok(c) = self.control_rx.try_recv() {
+                match c {
+                    Control::Identify { secs } => {
+                        let secs = secs.clamp(1.0, IDENTIFY_MAX_SECS);
+                        tracing::info!("identify: panels show their number for {secs:.0} s");
+                        pattern = Some((
+                            PatternKind::Identify,
+                            Instant::now() + Duration::from_secs_f64(secs),
+                        ));
+                    }
+                    Control::Pattern { on: true } => {
+                        tracing::info!("test pattern on");
+                        pattern = Some((PatternKind::Pattern, Instant::now() + PATTERN_MAX));
+                    }
+                    Control::Pattern { on: false } => {
+                        if pattern.is_some() {
+                            tracing::info!("test pattern off");
+                        }
+                        pattern = None;
+                    }
+                    Control::Jump { screen, role } => {
+                        if model.jump_to(screen, role, now) {
+                            tracing::info!("screen {} jumps to {}", screen + 1, role.name());
+                        } else {
+                            tracing::warn!(
+                                "screen {} cannot jump to {}: not in its list, or a show plays",
+                                screen + 1,
+                                role.name()
+                            );
+                        }
+                    }
+                    Control::Play(req) => apply_play(req, &mut model, phase),
+                }
+            }
+            if let Some((_, until)) = pattern {
+                if Instant::now() >= until {
+                    pattern = None;
+                    tracing::info!("test pattern off");
+                }
             }
 
             let night = match model.night_override() {
@@ -278,6 +514,51 @@ impl RenderLoop {
             // so none starts on the tick the night fade begins.
             model.set_night_day(phase == NightPhase::Day);
             model.tick(now);
+            if let Some(hub) = &self.hub {
+                if Instant::now() >= next_status {
+                    let t = Instant::now();
+                    let secs = t.duration_since(last_status).as_secs_f32().max(1e-3);
+                    last_status = t;
+                    next_status = t + STATUS_EVERY;
+                    for (i, s) in self.screens.iter().enumerate() {
+                        let p = s.mailbox.take_push_stats();
+                        let st = stats.screen(i);
+                        web_stats[i] = ScreenStat {
+                            index: i,
+                            render_ms: st.render.avg(),
+                            render_p95_ms: st.render.p95(),
+                            push_ms: if p.frames > 0 {
+                                (p.total_ms / p.frames as f64) as f32
+                            } else {
+                                0.0
+                            },
+                            fps: p.frames as f32 / secs,
+                        };
+                        merge_push(&mut push_acc[i], p);
+                    }
+                    hub.publish_status(
+                        self.snapshot(&model, phase, now, pattern, &heard, &web_stats),
+                    );
+                }
+            }
+            if let Some((_, _)) = pattern {
+                for (i, s) in self.screens.iter().enumerate() {
+                    workers[i].send(Job {
+                        scene: crate::calibrate::test_pattern(s.index, s.role),
+                        fade: None,
+                        force_full,
+                    })?;
+                }
+                force_full = false;
+                for w in &workers {
+                    w.wait()?;
+                }
+                deadline = advance(deadline, tick, Instant::now());
+                if let Some(d) = deadline.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(d);
+                }
+                continue;
+            }
             let run = model.show_run().copied();
             if run.map(|r| r.started) != show_started {
                 if let Some(r) = run {
@@ -304,15 +585,17 @@ impl RenderLoop {
             }
             if prev == NightPhase::Icon && phase != NightPhase::Icon {
                 // the hours under the moon belong to no stats period
-                for s in &self.screens {
+                for (i, s) in self.screens.iter().enumerate() {
                     let _ = s.mailbox.take_push_stats();
+                    push_acc[i] = PushStats::default();
                 }
                 stats.reset(now);
             }
             if prev.shows_icon() && phase == NightPhase::Day {
-                for s in &self.screens {
+                for (i, s) in self.screens.iter().enumerate() {
                     // pushes from before the night belong to no period
                     let _ = s.mailbox.take_push_stats();
+                    push_acc[i] = PushStats::default();
                 }
                 force_full = true;
                 // the night is not part of the stats period
@@ -356,10 +639,9 @@ impl RenderLoop {
             }
             if stats.due(now) {
                 for (i, s) in self.screens.iter().enumerate() {
-                    tracing::info!(
-                        "{}",
-                        stats.line(i, s.mailbox.take_push_stats(), stats.elapsed(now))
-                    );
+                    let mut p = std::mem::take(&mut push_acc[i]);
+                    merge_push(&mut p, s.mailbox.take_push_stats());
+                    tracing::info!("{}", stats.line(i, p, stats.elapsed(now)));
                 }
                 stats.reset(now);
             }
@@ -371,6 +653,70 @@ impl RenderLoop {
         }
         // `_guard` sends Quit to every mailbox and sets `stop` on drop.
         Ok(())
+    }
+
+    /// The name a role has in the config: `gif:<name>` for a GIF.
+    fn role_name(&self, role: Role) -> String {
+        match role {
+            Role::Gif(i) => format!(
+                "{}{}",
+                crate::config::GIF_ROLE_PREFIX,
+                self.gif_names.get(i as usize).map_or("?", |n| n.as_str())
+            ),
+            r => r.name().to_string(),
+        }
+    }
+
+    fn snapshot(
+        &self,
+        model: &Model,
+        phase: NightPhase,
+        now: Secs,
+        pattern: Option<(PatternKind, Instant)>,
+        heard: &HashSet<LinkTarget>,
+        stats: &[ScreenStat],
+    ) -> StatusSnapshot {
+        let show_on = model.show_run().is_some_and(|r| r.phase(now).is_some());
+        let showing = match pattern {
+            Some((k, _)) => k.showing(),
+            None if phase != NightPhase::Day => "night",
+            None if show_on => "show",
+            None => "role",
+        };
+        let screens = self
+            .screens
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let st = model.screen(s.index);
+                let role = model.current_role(s.index);
+                ScreenStatus {
+                    index: s.index,
+                    role: self.role_name(role),
+                    title: role.title().to_string(),
+                    roles: st.map_or_else(Vec::new, |st| {
+                        st.roles().iter().map(|r| self.role_name(*r)).collect()
+                    }),
+                    cycle_secs: self.cycle_secs_cfg.get(i).copied().unwrap_or(15),
+                    cycle_progress: st.map_or(0.0, |st| st.progress(now)),
+                    showing,
+                }
+            })
+            .collect();
+        StatusSnapshot {
+            night: NightStatus {
+                mode: match model.night_override() {
+                    None => "auto",
+                    Some(true) => "on",
+                    Some(false) => "off",
+                },
+                active: phase != NightPhase::Day,
+            },
+            screens,
+            links: link_rows(model.link(), self.links, heard, model),
+            stats: stats.to_vec(),
+            tiles: model.tiles().into_iter().map(Into::into).collect(),
+        }
     }
 }
 
@@ -420,5 +766,57 @@ mod tests {
         assert!(stop.load(Ordering::Relaxed));
         assert!(matches!(a.take(), DisplayCmd::Quit));
         assert!(matches!(b.take(), DisplayCmd::Quit));
+    }
+
+    #[test]
+    fn link_rows_distinguish_off_waiting_ok_and_down() {
+        let mut model = Model::new(Thresholds {
+            hot_cpu: 90.0,
+            hot_mem: 90.0,
+            hot_temp: 70.0,
+        });
+        let cfg = LinkCfg {
+            k8s: true,
+            qbit: false,
+            electricity: true,
+            ..LinkCfg::default()
+        };
+        let mut heard = HashSet::new();
+        let rows = link_rows(model.link(), cfg, &heard, &model);
+        let by = |rows: &[LinkStatus], n: &str| rows.iter().find(|r| r.name == n).cloned().unwrap();
+        assert_eq!(rows.len(), 8);
+        assert_eq!(by(&rows, "Kubernetes").state, "warn");
+        assert_eq!(by(&rows, "Kubernetes").detail, "waiting");
+        assert_eq!(by(&rows, "qBittorrent").state, "off");
+        assert_eq!(by(&rows, "Weather").state, "off");
+        assert_eq!(by(&rows, "Electricity Maps").state, "warn");
+        model.apply(
+            Event::Link {
+                target: LinkTarget::K8sApi,
+                up: true,
+            },
+            0.0,
+        );
+        heard.insert(LinkTarget::K8sApi);
+        model.apply(
+            Event::NodeSnapshot {
+                ready: 3,
+                total: 3,
+                not_ready: vec![],
+            },
+            0.0,
+        );
+        model.apply(
+            Event::Link {
+                target: LinkTarget::Electricity,
+                up: false,
+            },
+            0.0,
+        );
+        heard.insert(LinkTarget::Electricity);
+        let rows = link_rows(model.link(), cfg, &heard, &model);
+        assert_eq!(by(&rows, "Kubernetes").state, "ok");
+        assert_eq!(by(&rows, "Kubernetes").detail, "3 nodes");
+        assert_eq!(by(&rows, "Electricity Maps").state, "down");
     }
 }

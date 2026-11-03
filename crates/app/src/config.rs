@@ -42,6 +42,9 @@ pub struct Config {
     pub spotify: SpotifyCfg,
     #[serde(default)]
     pub shows: ShowsCfg,
+    /// The web UI served by the running service.
+    #[serde(default)]
+    pub web: WebCfg,
     /// GIPHY/Tenor/`.gif` links a screen can show as `gif:<name>`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gifs: Vec<GifCfg>,
@@ -285,6 +288,29 @@ pub struct SpotifyCfg {
     pub enabled: bool,
     /// Client ID of your own Spotify developer app.
     pub client_id: String,
+}
+
+/// The web UI the service serves on the LAN.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct WebCfg {
+    pub enabled: bool,
+    /// Address to bind; `0.0.0.0` is every interface.
+    pub bind: String,
+    pub port: u16,
+    /// Empty: no login. Otherwise the UI asks for it once per browser.
+    pub password: String,
+}
+
+impl Default for WebCfg {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: "0.0.0.0".into(),
+            port: 8740,
+            password: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -664,7 +690,7 @@ impl Config {
             std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
         }
         let text = format!(
-            "# RackScreen configuration (written by rackscreen setup)\n{}",
+            "# RackScreen configuration (written by rackscreen)\n{}",
             self.to_yaml()?
         );
         let tmp = path.with_extension("yaml.tmp");
@@ -854,6 +880,12 @@ impl Config {
             id.chars().all(|c| c.is_ascii_alphanumeric()),
             "spotify.client_id must be letters and digits only (got {id})"
         );
+        anyhow::ensure!(
+            self.web.bind.trim().parse::<std::net::IpAddr>().is_ok(),
+            "web.bind must be an IP address (got {})",
+            self.web.bind
+        );
+        anyhow::ensure!(self.web.port != 0, "web.port must be 1..65535");
         Ok(())
     }
 }
@@ -1303,6 +1335,32 @@ mod tests {
         let c = Config::from_yaml(yaml).unwrap();
         assert!(c.spotify.enabled && c.spotify.client_id == "abc123");
         assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+    }
+
+    #[test]
+    fn web_block_defaults_round_trips_and_validates() {
+        let c = Config::default();
+        assert!(c.web.enabled);
+        assert_eq!((c.web.bind.as_str(), c.web.port), ("0.0.0.0", 8740));
+        assert!(c.web.password.is_empty());
+        c.validate().unwrap();
+        let c = Config::from_yaml(
+            "web: { port: 9000, password: hunter2, bind: 127.0.0.1 }\nscreens:\n  - { roles: [cpu], spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
+        assert_eq!((c.web.port, c.web.password.as_str()), (9000, "hunter2"));
+        assert!(c.web.enabled, "enabled unless the file says otherwise");
+        c.validate().unwrap();
+        assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+        let mut bad = c.clone();
+        bad.web.bind = "everywhere".into();
+        assert!(bad.validate().unwrap_err().to_string().contains("web.bind"));
+        bad.web.bind = "::".into();
+        bad.web.port = 0;
+        assert!(bad.validate().unwrap_err().to_string().contains("web.port"));
+        // an old file without the block gets the defaults
+        let c = Config::from_yaml("night: { enabled: false }\n").unwrap();
+        assert_eq!(c.web, WebCfg::default());
     }
 
     #[test]

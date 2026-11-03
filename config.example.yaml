@@ -76,7 +76,7 @@ jellyfin:
 
 spotify:
   enabled: false           # now playing from Spotify on the music role
-  client_id: ""            # your own app at developer.spotify.com; log in with rackscreen setup
+  client_id: ""            # your own app at developer.spotify.com; log in from the web UI
 
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
@@ -84,6 +84,12 @@ shows:
   gap_mm: 25               # bezel gap between two panels
   # list: [freight]        # show ids to pick from (default: every show)
   # order: [0, 1, 2, 3]    # config index of each screen from the left (default: config order)
+
+web:
+  enabled: true            # the web UI the service serves; open http://<pi>:8740
+  bind: 0.0.0.0            # every interface; 127.0.0.1 for local only
+  port: 8740
+  password: ""             # empty = no login; set one when the LAN is shared
 
 # GIFs a screen can show as the role gif:<name>: paste a GIPHY or Tenor link, or
 # any https link ending in .gif. Each GIF a screen uses takes up to ~35 MB of RAM;
