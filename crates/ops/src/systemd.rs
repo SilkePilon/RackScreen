@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::ops::shell::Shell;
+use crate::shell::Shell;
 
 pub fn unit_text() -> String {
     "[Unit]\nDescription=RackScreen Kubernetes rack monitor\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=%i\nExecStart=/usr/local/bin/rackscreen run --config /etc/rackscreen/config.yaml\nRestart=always\nRestartSec=3\nEnvironment=RUST_LOG=info\n\n[Install]\nWantedBy=multi-user.target\n".to_string()
@@ -121,76 +121,10 @@ pub fn parse_show(stdout: &str, now_monotonic_usecs: Option<u64>) -> ServiceInfo
     info
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dot {
-    Up,
-    Down,
-    Unknown,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkDots {
-    pub api: Dot,
-    pub prometheus: Dot,
-    pub qbittorrent: Dot,
-    pub electricity: Dot,
-    pub weather: Dot,
-    pub rain: Dot,
-    pub github: Dot,
-    pub argocd: Dot,
-}
-
-/// Newest matching log line decides each dot. Lines come oldest first.
-pub fn links_from_logs(lines: &[String]) -> LinkDots {
-    let mut d = LinkDots {
-        api: Dot::Unknown,
-        prometheus: Dot::Unknown,
-        qbittorrent: Dot::Unknown,
-        electricity: Dot::Unknown,
-        weather: Dot::Unknown,
-        rain: Dot::Unknown,
-        github: Dot::Unknown,
-        argocd: Dot::Unknown,
-    };
-    for l in lines {
-        let lower = l.to_ascii_lowercase();
-        let warn = lower.contains("warn") || lower.contains("error");
-        if lower.contains("prometheus: forwarding") {
-            d.prometheus = Dot::Up;
-        } else if lower.contains("prometheus") && warn {
-            d.prometheus = Dot::Down;
-        }
-        if lower.contains("qbittorrent: forwarding") {
-            d.qbittorrent = Dot::Up;
-        } else if lower.contains("qbittorrent") && warn {
-            d.qbittorrent = Dot::Down;
-        }
-        if lower.contains("electricity:") {
-            d.electricity = if warn { Dot::Down } else { Dot::Up };
-        }
-        for (needle, dot) in [
-            ("weather:", &mut d.weather),
-            ("rain:", &mut d.rain),
-            ("github:", &mut d.github),
-            ("argocd:", &mut d.argocd),
-        ] {
-            if lower.contains(needle) {
-                *dot = if warn { Dot::Down } else { Dot::Up };
-            }
-        }
-        if lower.contains("pod watch") && warn {
-            d.api = Dot::Down;
-        } else if lower.contains("running (") {
-            d.api = Dot::Up;
-        }
-    }
-    d
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::shell::{FakeShell, Output};
+    use crate::shell::{FakeShell, Output};
 
     #[test]
     fn unit_text_has_required_lines() {
@@ -239,61 +173,12 @@ mod tests {
     }
 
     #[test]
-    fn journal_and_links() {
+    fn journal_tail_reads_the_unit() {
         let sh = FakeShell::new();
-        sh.respond("journalctl", Output::ok("INFO prometheus: forwarding to monitoring/p (service prometheus)\nWARN qbittorrent: login failed\nINFO electricity: poll ok (7 sources)\nINFO running (4 screens, 30 fps, source K8s)\n"));
+        sh.respond("journalctl", Output::ok("INFO one\nWARN two\n"));
         let sd = Systemd::new(&sh, "pi");
         let lines = sd.journal_tail(20).unwrap();
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines, vec!["INFO one", "WARN two"]);
         assert!(sh.called("journalctl -u rackscreen@pi -n 20"));
-        let d = links_from_logs(&lines);
-        assert_eq!(
-            d,
-            LinkDots {
-                api: Dot::Up,
-                prometheus: Dot::Up,
-                qbittorrent: Dot::Down,
-                electricity: Dot::Up,
-                weather: Dot::Unknown,
-                rain: Dot::Unknown,
-                github: Dot::Unknown,
-                argocd: Dot::Unknown,
-            }
-        );
-        // the newest line wins for each dot
-        let later = links_from_logs(&[
-            "INFO electricity: poll ok (7 sources)".to_string(),
-            "WARN electricity: token rejected".to_string(),
-        ]);
-        assert_eq!(later.electricity, Dot::Down);
-        assert_eq!(links_from_logs(&[]).api, Dot::Unknown);
-    }
-
-    #[test]
-    fn new_link_dots_follow_their_log_prefixes() {
-        let d = links_from_logs(&[
-            "INFO weather: poll ok (21.2 °C, code 3)".to_string(),
-            "WARN rain: request: timed out".to_string(),
-            "INFO github: calendar ok (28 today, 230 this window)".to_string(),
-            "INFO argocd: watching applications in argocd".to_string(),
-        ]);
-        assert_eq!(d.weather, Dot::Up);
-        assert_eq!(d.rain, Dot::Down);
-        assert_eq!(d.github, Dot::Up);
-        assert_eq!(d.argocd, Dot::Up);
-        let d = links_from_logs(&["WARN argocd: watch: 410 Gone".to_string()]);
-        assert_eq!(d.argocd, Dot::Down);
-        assert_eq!(d.weather, Dot::Unknown);
-        // a cluster without the CRD is a degraded deploys role, not a healthy one
-        let d = links_from_logs(&[
-            "WARN argocd: no applications.argoproj.io in argocd; deploys stays on no-data, retry in 600s"
-                .to_string(),
-        ]);
-        assert_eq!(d.argocd, Dot::Down);
-        // failures that leave their link up must miss the dot's needle
-        let d = links_from_logs(&["WARN air quality: request timed out".to_string()]);
-        assert_eq!(d.weather, Dot::Unknown);
-        let d = links_from_logs(&["WARN github runs for x/y: HTTP 404".to_string()]);
-        assert_eq!(d.github, Dot::Unknown);
     }
 }

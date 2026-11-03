@@ -13,9 +13,9 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::ops::paths::{service_user, Paths};
-use crate::ops::shell::{RealShell, Shell};
-use crate::ops::systemd::Systemd;
+use crate::paths::{service_user, Paths};
+use crate::shell::{RealShell, Shell};
+use crate::systemd::Systemd;
 
 pub const LATEST_URL: &str = "https://api.github.com/repos/silkepilon/RackScreen/releases/latest";
 pub const ASSET: &str = "rackscreen-aarch64";

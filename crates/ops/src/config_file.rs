@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 pub use rackscreen_app::config::Config;
 use rackscreen_core::theme::Role;
 
-use crate::ops::paths::{is_root, service_user};
+use crate::paths::{is_root, service_user};
 
 /// Save the config and, when running as root, hand the file to the service user.
 /// `Config::save` writes mode 0640 (it may hold the qBittorrent password), so the

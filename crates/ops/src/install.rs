@@ -7,27 +7,31 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::ops::boot::{self, BootChange};
-use crate::ops::config_file::{save_config, set_spi_chunk, Config};
-use crate::ops::paths::Paths;
-use crate::ops::shell::Shell;
-use crate::ops::systemd::{unit_text, Systemd};
+use crate::boot::{self, BootChange};
+use crate::config_file::{save_config, set_spi_chunk, Config};
+use crate::paths::Paths;
+use crate::shell::Shell;
+use crate::systemd::{unit_text, Systemd};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepId {
     Platform,
     Binary,
     Config,
+    Owner,
+    Sudoers,
     Groups,
     Service,
     Boot,
 }
 
 impl StepId {
-    pub const ALL: [StepId; 6] = [
+    pub const ALL: [StepId; 8] = [
         StepId::Platform,
         StepId::Binary,
         StepId::Config,
+        StepId::Owner,
+        StepId::Sudoers,
         StepId::Groups,
         StepId::Service,
         StepId::Boot,
@@ -38,11 +42,18 @@ impl StepId {
             StepId::Platform => "Check platform",
             StepId::Binary => "Install binary to /usr/local/bin",
             StepId::Config => "Write config /etc/rackscreen/config.yaml",
+            StepId::Owner => "Hand /etc/rackscreen to the service user",
+            StepId::Sudoers => "Allow the service user to run rackscreen update",
             StepId::Groups => "Add user to spi and gpio groups",
             StepId::Service => "Install and start systemd service",
             StepId::Boot => "Enable SPI in boot files",
         }
     }
+}
+
+/// The sudoers drop-in: only `rackscreen update`, as root, no password.
+pub fn sudoers_text(user: &str, binary: &str) -> String {
+    format!("{user} ALL=(root) NOPASSWD: {binary} update\n")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +80,31 @@ pub struct Installer {
     pub paths: Paths,
     pub user: String,
     pub self_exe: PathBuf,
+}
+
+/// `(uid, gid)` of `user`, if it exists.
+pub fn user_ids(user: &str) -> Option<(u32, u32)> {
+    nix::unistd::User::from_name(user)
+        .ok()
+        .flatten()
+        .map(|u| (u.uid.as_raw(), u.gid.as_raw()))
+}
+
+/// Give `dir` and every file directly in it to `(uid, gid)`.
+pub fn chown_tree(dir: &std::path::Path, (uid, gid): (u32, u32)) -> Result<()> {
+    use nix::unistd::{chown, Gid, Uid};
+    let own = |p: &std::path::Path| {
+        chown(p, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+            .with_context(|| format!("chown {}", p.display()))
+    };
+    own(dir)?;
+    for e in std::fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let e = e?;
+        if e.file_type()?.is_file() {
+            own(&e.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn sha256(path: &std::path::Path) -> Result<Vec<u8>> {
@@ -192,6 +228,56 @@ impl Installer {
                 save_config(&Config::default(), &path)?;
                 Ok(Outcome::Done(path.display().to_string()))
             }
+            StepId::Owner => {
+                let dir = self.paths.config_dir();
+                std::fs::create_dir_all(&dir)?;
+                let Some(ids) = user_ids(&self.user) else {
+                    return Ok(Outcome::Warn(format!(
+                        "user {} not found; the web UI cannot save the config",
+                        self.user
+                    )));
+                };
+                chown_tree(&dir, ids)?;
+                Ok(Outcome::Done(format!(
+                    "{} owned by {}",
+                    dir.display(),
+                    self.user
+                )))
+            }
+            StepId::Sudoers => {
+                let path = self.paths.sudoers();
+                // the real binary path, not the temp download this runs from
+                let text = sudoers_text(&self.user, "/usr/local/bin/rackscreen");
+                if std::fs::read_to_string(&path).is_ok_and(|t| t == text) {
+                    return Ok(Outcome::Skipped("already in place".into()));
+                }
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let tmp = path.with_extension("tmp");
+                std::fs::write(&tmp, &text).with_context(|| format!("write {}", tmp.display()))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o440))?;
+                }
+                let tmp_s = tmp.display().to_string();
+                match self.sh.run("visudo", &["-cf", &tmp_s]) {
+                    Ok(o) if o.success() => {}
+                    Ok(o) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        anyhow::bail!("visudo rejected the drop-in: {}", o.stderr.trim());
+                    }
+                    Err(_) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        return Ok(Outcome::Warn(
+                            "visudo not found; skipped (the web UI cannot self-update)".into(),
+                        ));
+                    }
+                }
+                std::fs::rename(&tmp, &path).context("move sudoers drop-in")?;
+                Ok(Outcome::Done(path.display().to_string()))
+            }
             StepId::Groups => {
                 let mut missing = Vec::new();
                 for g in ["spi", "gpio"] {
@@ -262,7 +348,7 @@ impl Installer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::shell::{FakeShell, Output};
+    use crate::shell::{FakeShell, Output};
     use std::sync::mpsc;
 
     fn setup(with_boot: bool) -> (tempfile::TempDir, Installer, Arc<FakeShell>) {
@@ -293,6 +379,61 @@ mod tests {
     }
 
     #[test]
+    fn owner_step_chowns_the_config_dir_or_warns_for_an_unknown_user() {
+        let (dir, mut inst, _sh) = setup(false);
+        inst.step(StepId::Config, None).unwrap();
+        assert!(
+            matches!(
+                inst.step(StepId::Owner, None).unwrap(),
+                Outcome::Warn(m) if m.contains("silke")
+            ) || user_ids("silke").is_some()
+        );
+        // the current user exists and may own its own files
+        let me = nix::unistd::User::from_uid(nix::unistd::getuid())
+            .unwrap()
+            .unwrap()
+            .name;
+        inst.user = me.clone();
+        assert!(matches!(
+            inst.step(StepId::Owner, None).unwrap(),
+            Outcome::Done(m) if m.contains(&me)
+        ));
+        assert!(dir.path().join("etc/rackscreen/config.yaml").exists());
+    }
+
+    #[test]
+    fn sudoers_step_checks_with_visudo_and_installs_mode_0440() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, inst, sh) = setup(false);
+        let out = inst.step(StepId::Sudoers, None).unwrap();
+        assert!(matches!(out, Outcome::Done(_)), "{out:?}");
+        let path = dir.path().join("etc/sudoers.d/rackscreen");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "silke ALL=(root) NOPASSWD: /usr/local/bin/rackscreen update\n"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o440
+        );
+        assert!(sh
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("visudo -cf ") && c.ends_with(".tmp")));
+        assert!(!path.with_extension("tmp").exists());
+        assert!(matches!(
+            inst.step(StepId::Sudoers, None).unwrap(),
+            Outcome::Skipped(_)
+        ));
+        // a rejected drop-in is never moved into place
+        std::fs::remove_file(&path).unwrap();
+        sh.respond("visudo", Output::fail(1, "syntax error"));
+        let e = inst.step(StepId::Sudoers, None).unwrap_err().to_string();
+        assert!(e.contains("syntax error"), "{e}");
+        assert!(!path.exists() && !path.with_extension("tmp").exists());
+    }
+
+    #[test]
     fn fresh_install_runs_all_steps_and_applies_boot() {
         let (dir, inst, sh) = setup(true);
         let (tx, rx) = mpsc::channel();
@@ -309,6 +450,7 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::AskBoot(c) if c.len() == 3)));
+        assert!(dir.path().join("etc/sudoers.d/rackscreen").exists());
         assert!(events
             .iter()
             .any(|e| matches!(e, Event::Finished(StepId::Binary, Outcome::Done(_)))));

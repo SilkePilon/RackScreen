@@ -1,5 +1,5 @@
 [package]
-name = "rackscreen-setup"
+name = "rackscreen-ops"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,26 +7,18 @@ license.workspace = true
 [dependencies]
 rackscreen-app = { path = "../app", default-features = false }
 rackscreen-core = { path = "../core" }
-rackscreen-sources = { path = "../sources" }
-rackscreen-render = { path = "../render" }
-rackscreen-display = { path = "../display", default-features = false }
 anyhow.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ratatui = "0.30"
-tiny-skia.workspace = true
 nix = { version = "0.31", features = ["user", "fs"] }
 sha2 = "0.11"
 serde_json.workspace = true
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "blocking", "form"] }
-qrcode = { version = "0.14", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [dev-dependencies]
-url = "2"
 tempfile = "3"
 
 [features]
 default = []
-sim = ["rackscreen-app/sim", "rackscreen-display/sim"]
-pi = ["rackscreen-app/pi", "rackscreen-display/pi"]
+sim = ["rackscreen-app/sim"]
+pi = ["rackscreen-app/pi"]

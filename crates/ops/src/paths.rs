@@ -33,6 +33,10 @@ impl Paths {
     pub fn unit(&self) -> PathBuf {
         self.p("etc/systemd/system/rackscreen@.service")
     }
+    /// The sudoers drop-in that lets the service user run `rackscreen update`.
+    pub fn sudoers(&self) -> PathBuf {
+        self.p("etc/sudoers.d/rackscreen")
+    }
     /// `/boot/firmware` on current Raspberry Pi OS, `/boot` on older images, None elsewhere.
     pub fn boot_dir(&self) -> Option<PathBuf> {
         [self.p("boot/firmware"), self.p("boot")]
@@ -76,6 +80,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = Paths::under(dir.path());
         assert!(p.binary().ends_with("usr/local/bin/rackscreen"));
+        assert!(p.sudoers().ends_with("etc/sudoers.d/rackscreen"));
         assert_eq!(p.boot_dir(), None);
         std::fs::create_dir_all(dir.path().join("boot/firmware")).unwrap();
         std::fs::write(dir.path().join("boot/firmware/config.txt"), "").unwrap();
