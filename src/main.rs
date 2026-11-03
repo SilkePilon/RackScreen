@@ -142,7 +142,10 @@ fn main() -> Result<()> {
             std::process::exit(code);
         }
         Some(Cmd::Play { show }) => {
-            rackscreen_app::play::write_for_service_user(&show)?;
+            let (_, warning) = rackscreen_app::play::write_for_service_user(&show)?;
+            if let Some(w) = warning {
+                eprintln!("warning: {w}");
+            }
             println!("requested {}", show.trim());
             Ok(())
         }

@@ -1030,12 +1030,15 @@ impl Configure {
     /// Write a play-now request, as `rackscreen play <arg>` does.
     fn play(&mut self, arg: &str) -> Result<(), String> {
         let res = match &self.play_state {
-            Some(dir) => play::write_in(dir, arg),
+            Some(dir) => play::write_in(dir, arg).map(|p| (p, None)),
             None => play::write_for_service_user(arg),
         };
-        res.map_err(|e| format!("{e:#}"))?;
+        let (_, warning) = res.map_err(|e| format!("{e:#}"))?;
         self.error = None;
-        self.note = Some(format!("requested {}", arg.trim()));
+        self.note = Some(match warning {
+            Some(w) => format!("requested {}; {w}", arg.trim()),
+            None => format!("requested {}", arg.trim()),
+        });
         Ok(())
     }
 

@@ -55,21 +55,45 @@ pub fn write_in(state: &Path, arg: &str) -> Result<PathBuf> {
 
 /// Write the request for the service user: under sudo into the invoking
 /// user's state dir (`~/.local/state`, owned by them), else into ours.
-pub fn write_for_service_user(arg: &str) -> Result<PathBuf> {
+/// Returns the file and a warning for the user, when there is one.
+pub fn write_for_service_user(arg: &str) -> Result<(PathBuf, Option<&'static str>)> {
     match crate::config::sudo_user() {
-        Some(u) => write_owned(
-            &u.dir.join(".local").join("state"),
-            arg,
-            Some((u.uid.as_raw(), u.gid.as_raw())),
-        ),
-        None => write_in(&state_dir().context("no home directory")?, arg),
+        Some(u) => Ok((
+            write_owned(
+                &u.dir.join(".local").join("state"),
+                arg,
+                Some((u.uid.as_raw(), u.gid.as_raw())),
+            )?,
+            None,
+        )),
+        None => {
+            let root = nix::unistd::geteuid().is_root();
+            let sudo_set = std::env::var_os("SUDO_USER").is_some_and(|u| !u.is_empty());
+            let path = write_in(&state_dir().context("no home directory")?, arg)?;
+            Ok((path, no_sudo_warning(root, sudo_set)))
+        }
     }
+}
+
+/// As root without `SUDO_USER` the request lands in root's own state dir,
+/// which the service (running as its user) never reads.
+fn no_sudo_warning(root: bool, sudo_user_set: bool) -> Option<&'static str> {
+    (root && !sudo_user_set).then_some(
+        "running as root without sudo: the request went to /root/.local/state; \
+         run it with sudo from the service user's login, or as that user",
+    )
 }
 
 /// Validate, then write via a temp file and rename, so the run loop never
 /// reads half a request. With `owner`, every directory created on the way
-/// and the file are chowned to it.
+/// and the file are chowned to it. Run as root into a user's directory, so
+/// it never follows a link: the temp file is created fresh (a stale regular
+/// one is removed first, anything else is an error), chowned through its
+/// handle, and a link at the final path is refused.
 fn write_owned(state: &Path, arg: &str, owner: Option<(u32, u32)>) -> Result<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
     parse(arg)?;
     let path = request_path(state);
     let dir = path.parent().expect("request path has a parent");
@@ -80,15 +104,37 @@ fn write_owned(state: &Path, arg: &str, owner: Option<(u32, u32)>) -> Result<Pat
         d = p.parent();
     }
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, format!("{}\n", arg.trim()))
-        .with_context(|| format!("write {}", tmp.display()))?;
     if let Some((uid, gid)) = owner {
-        for p in missing.iter().chain([&tmp.to_path_buf()]) {
+        for p in &missing {
             std::os::unix::fs::chown(p, Some(uid), Some(gid))
                 .with_context(|| format!("chown {}", p.display()))?;
         }
     }
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+        anyhow::bail!("{} is a symlink; not writing through it", path.display());
+    }
+    let tmp = path.with_extension("tmp");
+    match std::fs::symlink_metadata(&tmp) {
+        Ok(m) if m.file_type().is_file() => {
+            std::fs::remove_file(&tmp).with_context(|| format!("remove stale {}", tmp.display()))?
+        }
+        Ok(_) => anyhow::bail!("{} exists and is not a regular file", tmp.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).with_context(|| format!("stat {}", tmp.display())),
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o644)
+        .open(&tmp)
+        .with_context(|| format!("create {}", tmp.display()))?;
+    file.write_all(format!("{}\n", arg.trim()).as_bytes())
+        .with_context(|| format!("write {}", tmp.display()))?;
+    if let Some((uid, gid)) = owner {
+        std::os::unix::fs::fchown(&file, Some(uid), Some(gid))
+            .with_context(|| format!("chown {}", tmp.display()))?;
+    }
+    drop(file);
     std::fs::rename(&tmp, &path).with_context(|| format!("rename to {}", path.display()))?;
     Ok(path)
 }
@@ -146,5 +192,39 @@ mod tests {
         std::fs::write(&path, "bogus").unwrap();
         assert!(matches!(take(&path), Some(Err(_))));
         assert!(!path.exists(), "an unknown id is deleted too");
+    }
+
+    #[test]
+    fn a_symlink_at_the_temp_path_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = request_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let target = dir.path().join("victim");
+        std::fs::write(&target, "keep me").unwrap();
+        let tmp = path.with_extension("tmp");
+        std::os::unix::fs::symlink(&target, &tmp).unwrap();
+        assert!(write_in(dir.path(), "freight").is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep me");
+        assert!(!path.exists(), "no request written");
+        std::fs::remove_file(&tmp).unwrap();
+        // a stale regular temp file is replaced
+        std::fs::write(&tmp, "stale").unwrap();
+        write_in(dir.path(), "freight").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "freight\n");
+        // a symlink at the final path is refused too
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(write_in(dir.path(), "freight").is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep me");
+        assert!(std::fs::symlink_metadata(&path).unwrap().is_symlink());
+    }
+
+    #[test]
+    fn root_without_sudo_user_warns() {
+        assert!(no_sudo_warning(true, false)
+            .unwrap()
+            .contains("running as root without sudo"));
+        assert!(no_sudo_warning(true, true).is_none());
+        assert!(no_sudo_warning(false, false).is_none());
     }
 }
