@@ -44,6 +44,8 @@ pub struct AppState {
     pub config_lock: tokio::sync::Mutex<()>,
     /// The port the server listens on (for the address list).
     pub port: u16,
+    /// Recent GIPHY/Tenor answers.
+    pub gif_cache: crate::gif_search::SearchCache,
 }
 
 impl AppState {
@@ -71,6 +73,7 @@ impl AppState {
             png_cache: Mutex::new(vec![None; screens]),
             config_lock: tokio::sync::Mutex::new(()),
             port,
+            gif_cache: Default::default(),
         }
     }
 

@@ -2312,6 +2312,7 @@ dependencies = [
  "rackscreen-ops",
  "rackscreen-sources",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

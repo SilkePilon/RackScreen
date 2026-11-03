@@ -693,3 +693,75 @@ async fn yaml_goes_through_the_same_checks_as_the_form() {
     .await;
     assert_eq!(body, json!({"ok": true, "restart": "none"}));
 }
+
+#[tokio::test]
+async fn gif_search_needs_a_key_and_keys_stay_secret() {
+    let f = fixture("");
+    let rx = f.hub.supervisor_mailbox();
+    let (st, _, body) = send(&f.app, get("/api/gifs/providers")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body, json!({"giphy": false, "tenor": false}));
+    // no key: 400 before any network call
+    for path in [
+        "/api/gifs/search?provider=giphy&q=cat",
+        "/api/gifs/trending?provider=tenor",
+        "/api/gifs/trending-terms?provider=giphy",
+    ] {
+        let (st, _, body) = send(&f.app, get(path)).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{path}");
+        assert!(
+            body["error"].as_str().unwrap().contains("API key"),
+            "{body}"
+        );
+    }
+    let (st, _, _) = send(&f.app, get("/api/gifs/search?provider=imgur&q=cat")).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    let (st, _, body) = send(&f.app, get("/api/gifs/search?provider=giphy&q=%20")).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("q must be"));
+    let long = "a".repeat(101);
+    let (st, _, _) = send(
+        &f.app,
+        get(&format!("/api/gifs/search?provider=giphy&q={long}")),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // set the keys: masked like every secret, saved without a restart
+    let (_, _, body) = send(&f.app, get("/api/config")).await;
+    assert_eq!(body["config"]["gif_search"]["giphy_key"], Value::Null);
+    assert_eq!(body["secrets"]["gif_search.giphy_key"], false);
+    let mut cfg = body["config"].clone();
+    cfg["gif_search"]["giphy_key"] = json!("giphy-secret-key");
+    cfg["gif_search"]["rating"] = json!("pg");
+    let (st, _, body) = send(
+        &f.app,
+        post_json("PUT", "/api/config", json!({"config": cfg}), true, None),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert_eq!(body["restart"], "none");
+    assert_eq!(body["secrets"]["gif_search.giphy_key"], true);
+    assert!(!body.to_string().contains("giphy-secret-key"));
+    assert!(rx.try_recv().is_err(), "no monitor restart for search keys");
+    let stored = Config::load_or_default(&f.hub.config_path).unwrap();
+    assert_eq!(stored.gif_search.giphy_key, "giphy-secret-key");
+    assert_eq!(stored.gif_search.rating, "pg");
+    let (_, _, body) = send(&f.app, get("/api/gifs/providers")).await;
+    assert_eq!(body, json!({"giphy": true, "tenor": false}));
+    // a bad rating is refused
+    cfg["gif_search"]["rating"] = json!("x");
+    let (st, _, _) = send(
+        &f.app,
+        post_json("PUT", "/api/config", json!({"config": cfg}), true, None),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    // a bad offset never reaches the provider
+    let (st, _, _) = send(
+        &f.app,
+        get("/api/gifs/search?provider=giphy&q=cat&offset=-1"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+}

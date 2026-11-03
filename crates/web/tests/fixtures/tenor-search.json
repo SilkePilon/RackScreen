@@ -1,0 +1,79 @@
+{
+  "results": [
+    {
+      "id": "16596288935386558830",
+      "title": "",
+      "media_formats": {
+        "tinygif": {
+          "url": "https://media.tenor.com/5lLcKZgmIhgAAAAM/excited-happy.gif",
+          "duration": 0,
+          "preview": "",
+          "dims": [220, 124],
+          "size": 115236
+        },
+        "gif": {
+          "url": "https://media.tenor.com/5lLcKZgmIhgAAAAC/excited-happy.gif",
+          "duration": 0,
+          "preview": "",
+          "dims": [498, 280],
+          "size": 1520312
+        }
+      },
+      "created": 1592232215.585357,
+      "content_description": "Excited Happy GIF",
+      "itemurl": "https://tenor.com/view/excited-happy-gif-16596288935386558830",
+      "url": "https://tenor.com/bwVbS.gif",
+      "tags": ["excited", "happy", "yay"],
+      "flags": [],
+      "hasaudio": false
+    },
+    {
+      "id": "17716924125618423290",
+      "title": "Yay Dance",
+      "media_formats": {
+        "tinygif": {
+          "url": "https://media.tenor.com/9sz6rrK4QvoAAAAM/yay-dance.gif",
+          "duration": 0,
+          "preview": "",
+          "dims": [220, 220],
+          "size": 210044
+        }
+      },
+      "created": 1601112003.12,
+      "content_description": "Yay Dance GIF",
+      "itemurl": "https://tenor.com/view/yay-dance-gif-17716924125618423290",
+      "url": "https://tenor.com/bA1xY.gif",
+      "tags": [],
+      "flags": [],
+      "hasaudio": false
+    },
+    {
+      "id": "8392839184712983",
+      "title": "Party",
+      "media_formats": {
+        "tinygif": {
+          "url": "https://media.tenor.com/Xa1bQ0cXcQoAAAAM/party.gif",
+          "duration": 0,
+          "preview": "",
+          "dims": [220, 165],
+          "size": 98012
+        },
+        "gif": {
+          "url": "https://media.tenor.com/Xa1bQ0cXcQoAAAAC/party.gif",
+          "duration": 0,
+          "preview": "",
+          "dims": [498, 374],
+          "size": 1120312
+        }
+      },
+      "created": 1501112003.12,
+      "content_description": "Party GIF",
+      "itemurl": "https://tenor.com/view/party-gif-8392839184712983",
+      "url": "https://tenor.com/bQ1xY.gif",
+      "tags": [],
+      "flags": [],
+      "hasaudio": false
+    }
+  ],
+  "next": "CAgQ7gEaHgoKAD-_xTqJ4oQdEhD"
+}

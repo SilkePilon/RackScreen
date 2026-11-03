@@ -1,0 +1,80 @@
+{
+  "data": [
+    {
+      "type": "gif",
+      "id": "3o7TKSjRrfIPjeiVyM",
+      "url": "https://giphy.com/gifs/cheezburger-cat-happy-3o7TKSjRrfIPjeiVyM",
+      "slug": "cheezburger-cat-happy-3o7TKSjRrfIPjeiVyM",
+      "bitly_gif_url": "https://gph.is/2c3Ebl4",
+      "bitly_url": "https://gph.is/2c3Ebl4",
+      "embed_url": "https://giphy.com/embed/3o7TKSjRrfIPjeiVyM",
+      "username": "cheezburger",
+      "source": "",
+      "title": "Happy Cat GIF by Cheezburger",
+      "rating": "g",
+      "content_url": "",
+      "source_tld": "",
+      "source_post_url": "",
+      "is_sticker": 0,
+      "import_datetime": "2016-08-30 19:14:05",
+      "trending_datetime": "0000-00-00 00:00:00",
+      "images": {
+        "original": {
+          "height": "270",
+          "width": "480",
+          "size": "1520463",
+          "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/giphy.gif?cid=790b7611&rid=giphy.gif&ct=g",
+          "mp4_size": "391837",
+          "mp4": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/giphy.mp4?cid=790b7611&rid=giphy.mp4&ct=g",
+          "webp_size": "471326",
+          "webp": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/giphy.webp?cid=790b7611&rid=giphy.webp&ct=g",
+          "frames": "38",
+          "hash": "6b1f0bbbd8a0c74de8b39b0e8e0c0ab0"
+        },
+        "fixed_width": {
+          "height": "113",
+          "width": "200",
+          "size": "301838",
+          "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/200w.gif?cid=790b7611&rid=200w.gif&ct=g"
+        },
+        "fixed_width_small": {
+          "height": "56",
+          "width": "100",
+          "size": "93120",
+          "url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/100w.gif?cid=790b7611&rid=100w.gif&ct=g",
+          "mp4_size": "33720",
+          "mp4": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/100w.mp4?cid=790b7611&rid=100w.mp4&ct=g",
+          "webp_size": "48360",
+          "webp": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/3o7TKSjRrfIPjeiVyM/100w.webp?cid=790b7611&rid=100w.webp&ct=g"
+        }
+      },
+      "analytics_response_payload": "e=Z2lmX2lkPTNvN1RLU2pScmZJUGplaVZ5TSZldmVudF90eXBlPUdJRl9TRUFSQ0g"
+    },
+    {
+      "type": "gif",
+      "id": "../../etc/passwd",
+      "url": "https://giphy.com/gifs/bad",
+      "title": "Hostile id",
+      "images": {
+        "fixed_width_small": { "height": "56", "width": "100", "url": "https://media0.giphy.com/media/bad/100w.gif" }
+      }
+    },
+    {
+      "type": "gif",
+      "id": "l0MYt5jPR6QX5pnqM",
+      "url": "https://giphy.com/gifs/dance-l0MYt5jPR6QX5pnqM",
+      "slug": "dance-l0MYt5jPR6QX5pnqM",
+      "rating": "g",
+      "images": {
+        "fixed_width_small": {
+          "height": "100",
+          "width": "100",
+          "size": "120533",
+          "url": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjEx/l0MYt5jPR6QX5pnqM/100w.gif?cid=790b7611&rid=100w.gif&ct=g"
+        }
+      }
+    }
+  ],
+  "pagination": { "total_count": 9131, "count": 25, "offset": 3 },
+  "meta": { "status": 200, "msg": "OK", "response_id": "bdtm0xm4w6r5p2u6m31k3uw0hhm8uy2nnhrjz7tc" }
+}

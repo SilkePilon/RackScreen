@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 use crate::{ApiError, ApiResult, AppState};
 
 /// Dotted paths of the fields that never reach the browser.
-pub const SECRET_PATHS: [&str; 8] = [
+pub const SECRET_PATHS: [&str; 10] = [
     "qbittorrent.pass",
     "electricity.token",
     "github.token",
@@ -26,6 +26,8 @@ pub const SECRET_PATHS: [&str; 8] = [
     "media.lidarr.api_key",
     "jellyfin.api_key",
     "web.password",
+    "gif_search.giphy_key",
+    "gif_search.tenor_key",
 ];
 
 fn get_path<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
@@ -95,11 +97,16 @@ pub fn masked(cfg: &Config) -> Result<(Value, Map<String, Value>), ApiError> {
 }
 
 /// What a save needs: the monitor only, the whole process (the `web:`
-/// block changed), or nothing (no change).
+/// block changed), or nothing (no change, or only `gif_search:`, which the
+/// web server reads from the file on every search).
 pub fn restart_kind(old: &Config, new: &Config) -> &'static str {
+    let monitor_sees = Config {
+        gif_search: new.gif_search.clone(),
+        ..old.clone()
+    };
     if old.web != new.web {
         "process"
-    } else if old != new {
+    } else if monitor_sees != *new {
         "monitor"
     } else {
         "none"
@@ -195,7 +202,7 @@ async fn save_and_restart(
 ) -> Result<Response, ApiError> {
     let kind = restart_kind(&stored, &cfg);
     let mut new_cookie = None;
-    if kind != "none" {
+    if stored != cfg {
         cfg.save(&state.hub.config_path)
             .map_err(|e| ApiError::internal(format!("{e:#}; {}", crate::host::FIX_HINT)))?;
         let current = crate::auth::session_from(headers).filter(|s| state.session_valid(s));
@@ -310,13 +317,20 @@ mod tests {
         let mut cfg = Config::default();
         cfg.github.token = "ghp_x".into();
         cfg.web.password = "pw".into();
+        cfg.gif_search.tenor_key = "AIza-tenor".into();
         let (v, secrets) = masked(&cfg).unwrap();
         assert_eq!(v["github"]["token"], Value::Null);
         assert_eq!(v["web"]["password"], Value::Null);
+        assert_eq!(v["gif_search"]["tenor_key"], Value::Null);
+        assert_eq!(v["gif_search"]["giphy_key"], Value::Null);
+        assert_eq!(v["gif_search"]["rating"], "g");
+        assert_eq!(secrets["gif_search.tenor_key"], true);
+        assert!(!v.to_string().contains("AIza-tenor"));
         assert_eq!(v["qbittorrent"]["pass"], Value::Null);
         assert_eq!(secrets["github.token"], true);
         assert_eq!(secrets["web.password"], true);
         assert_eq!(secrets["qbittorrent.pass"], false);
+        assert_eq!(secrets["gif_search.giphy_key"], false);
         assert_eq!(secrets.len(), SECRET_PATHS.len());
         assert_eq!(v["github"]["enabled"], false, "the rest is untouched");
         assert_eq!(v["screens"].as_array().unwrap().len(), 4);
@@ -383,5 +397,12 @@ mod tests {
         let mut d = b.clone();
         d.web.password = "x".into();
         assert_eq!(restart_kind(&a, &d), "process");
+        let mut e = a.clone();
+        e.gif_search.giphy_key = "k".into();
+        assert_eq!(
+            restart_kind(&a, &e),
+            "none",
+            "the search keys need no restart"
+        );
     }
 }

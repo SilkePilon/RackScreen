@@ -98,6 +98,14 @@ web:
 #   - { name: party, url: "https://giphy.com/gifs/some-slug-AbCdEf123" }
 #   - { name: nod,   url: "https://tenor.com/view/some-slug-12345678" }
 
+# GIF search on the web UI's GIFs page. Both keys are free and optional:
+# GIPHY at developers.giphy.com (create an app, pick API), Tenor as a Google
+# Cloud API key with the Tenor API enabled. Only the web server uses them.
+gif_search:
+  giphy_key: ""
+  tenor_key: ""
+  rating: g                # the most a result may be rated: g, pg, pg-13 or r
+
 display:
   brightness: 1.0
   fps: 60

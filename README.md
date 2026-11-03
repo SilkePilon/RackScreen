@@ -196,7 +196,7 @@ The running service serves a website on port 8740 (`web:` in the config; `bind: 
 - **Overview** — the four panels mirrored live (what the glass shows, as PNG frames over a WebSocket), each with its current role, cycle progress and a quick role switch; identify (every panel shows its number), play a show, night auto/on/off, restart; summary tiles (cluster CPU, memory, pods, nodes, alerts, weather, now playing, ...), link health and an update banner.
 - **Screens** — per screen the role list (drag to reorder, add from a picker grouped by category with a hint when a role needs a setting), the cycle interval and presets.
 - **Calibrate** — rotate 0/90/180/270 and mirror per screen with the test pattern on the glass; the advanced section has the SPI bus, CS, DC, RST and clock.
-- **Integrations** — Cluster (kubeconfig, Prometheus, Argo CD, qBittorrent), Energy, Sky (location, weather, rain, ISS), Media & Jellyfin, Spotify (client ID and the login flow with a link, a QR code and the paste field), GitHub and GIFs.
+- **Integrations** — Cluster (kubeconfig, Prometheus, Argo CD, qBittorrent), Energy, Sky (location, weather, rain, ISS), Media & Jellyfin, Spotify (client ID and the login flow with a link, a QR code and the paste field), GitHub and GIFs (search GIPHY and Tenor, or paste a link).
 - **Display**, **Shows**, **Logs** (live stream with level filter and search) and **System** (version and one-click update, web password, the raw YAML with validation, config backup and restore, restart).
 
 Saving validates the config, writes it atomically and restarts the monitor in-process (about a second; the panels go dark briefly) while the website stays up. A change to the `web:` block restarts the whole process; systemd brings it back and the page reconnects. Secrets (tokens, API keys, passwords) are never sent to the browser; a field shows whether one is set and can be replaced or cleared.
@@ -314,7 +314,7 @@ screens:
   - { roles: [cpu, "gif:party", mem], cycle_secs: 10, ... }
 ```
 
-Paste the link from the browser; no API key is needed. A GIPHY page (`giphy.com/gifs/...`) or media link (`media*.giphy.com/media/<id>/...`) becomes `i.giphy.com/<id>.gif`; a Tenor page (`tenor.com/view/...`) is fetched once for its `.gif`; `media*.tenor.com` links and any other `https` link ending in `.gif` are used as is. Names are lowercase letters, digits and `-`.
+Paste the link from the browser; no API key is needed. To search GIPHY and Tenor right on the GIFs page instead, add a free key under `gif_search:` (GIPHY from developers.giphy.com, Tenor as a Google Cloud API key with the Tenor API enabled); the Pi makes the search calls, the keys never reach the browser, and results are cached for 10 minutes. With the box empty the page shows what is trending. A GIPHY page (`giphy.com/gifs/...`) or media link (`media*.giphy.com/media/<id>/...`) becomes `i.giphy.com/<id>.gif`; a Tenor page (`tenor.com/view/...`) is fetched once for its `.gif`; `media*.tenor.com` links and any other `https` link ending in `.gif` are used as is. Names are lowercase letters, digits and `-`.
 
 The Pi downloads each GIF a screen uses once (at most 20 MB) and keeps it in `~/.cache/rackscreen/gifs` of the service user (`$XDG_CACHE_HOME/rackscreen/gifs` when that is set), so a restart works offline. It is scaled to fill the round panel (centre crop) and plays at its own frame timing; frames of 0 or 10 ms play at 100 ms, as in browsers. GIFs longer than 150 frames keep every n-th frame, with the timing kept. **Memory:** a decoded GIF takes up to about 35 MB (150 frames × 230 KB), so mind the Pi 3B+'s 1 GB when adding many. Until a GIF is ready the screen says "Loading"; if it cannot be fetched or decoded it says "GIF failed" (the reason is in the log). A failed download is tried again after 1, 5 and 15 minutes, then hourly, so a Pi that boots before its network is up still gets its GIFs; a GIF that downloads but does not decode (a canvas over 4 megapixels, say) is left until the next restart. GIFs are fetched only over `https` from internet hosts, redirects included: a link to `localhost` or a private, loopback or link-local address is refused. Two GIFs may not share a link.
 
@@ -423,6 +423,14 @@ web:
 # gifs:
 #   - { name: party, url: "https://giphy.com/gifs/some-slug-AbCdEf123" }
 #   - { name: nod,   url: "https://tenor.com/view/some-slug-12345678" }
+
+# GIF search on the web UI's GIFs page. Both keys are free and optional:
+# GIPHY at developers.giphy.com (create an app, pick API), Tenor as a Google
+# Cloud API key with the Tenor API enabled. Only the web server uses them.
+gif_search:
+  giphy_key: ""
+  tenor_key: ""
+  rating: g                # the most a result may be rated: g, pg, pg-13 or r
 
 display:
   brightness: 1.0

@@ -48,6 +48,9 @@ pub struct Config {
     /// GIPHY/Tenor/`.gif` links a screen can show as `gif:<name>`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gifs: Vec<GifCfg>,
+    /// API keys for the GIF search on the web UI's GIFs page.
+    #[serde(default)]
+    pub gif_search: GifSearchCfg,
     #[serde(default)]
     pub screens: Vec<ScreenCfg>,
 }
@@ -60,6 +63,32 @@ pub struct GifCfg {
     /// A GIPHY or Tenor page or media link, or any https link ending in `.gif`.
     pub url: String,
 }
+
+/// GIPHY and Tenor keys for searching GIFs in the web UI. Only the web
+/// server uses them; the panels never search.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct GifSearchCfg {
+    /// From developers.giphy.com (free); empty: no GIPHY search.
+    pub giphy_key: String,
+    /// A Google Cloud key with the Tenor API enabled; empty: no Tenor search.
+    pub tenor_key: String,
+    /// The most a result may be rated: g, pg, pg-13 or r.
+    pub rating: String,
+}
+
+impl Default for GifSearchCfg {
+    fn default() -> Self {
+        Self {
+            giphy_key: String::new(),
+            tenor_key: String::new(),
+            rating: "g".into(),
+        }
+    }
+}
+
+/// Ratings `gif_search.rating` accepts, mildest first.
+pub const GIF_RATINGS: [&str; 4] = ["g", "pg", "pg-13", "r"];
 
 /// Four-screen pixel shows.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -784,6 +813,11 @@ impl Config {
                 );
             }
         }
+        anyhow::ensure!(
+            GIF_RATINGS.contains(&self.gif_search.rating.as_str()),
+            "gif_search.rating must be g, pg, pg-13 or r (got {})",
+            self.gif_search.rating
+        );
         for s in &self.screens {
             let roles = self.screen_roles(s)?;
             let name = self.role_name(roles[0]);
@@ -1500,6 +1534,21 @@ mod tests {
             e.contains("'party'") && e.contains("'nod'") && e.contains("same link"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn gif_search_defaults_to_no_keys_and_rating_g() {
+        let c = Config::from_yaml(GIF_YAML).unwrap();
+        assert_eq!(c.gif_search, GifSearchCfg::default());
+        assert_eq!(c.gif_search.rating, "g");
+        let mut c = Config::default();
+        for r in GIF_RATINGS {
+            c.gif_search.rating = r.into();
+            assert!(c.validate().is_ok(), "{r}");
+        }
+        c.gif_search.rating = "nc-17".into();
+        let e = format!("{:#}", c.validate().unwrap_err());
+        assert!(e.contains("gif_search.rating"), "{e}");
     }
 
     #[test]
