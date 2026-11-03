@@ -1,0 +1,211 @@
+<style>
+.strip{background:#070707;border-radius:12px;padding:14px 10px;margin:0 0 6px}
+.strip canvas{width:100%;max-width:760px;display:block;margin:0 auto;image-rendering:pixelated}
+.cards.shows{grid-template-columns:1fr}
+.cards.shows .card-body h3{margin:6px 0 4px}
+</style>
+
+<h2>Four-screen pixel shows</h2>
+<p class="subtitle">Original pixel-art scenes played across your four round panels side by side (left to right). Each scene is one 264×60 pixel world scaled ×4 per panel, animated "on twos" at 12 fps with hand-picked palettes, held impact frames and anticipation. Black between circles = the bezel gap. Click every one you like (pick as many as you want).</p>
+
+<div class="cards shows" data-multiselect id="shows"></div>
+
+<script>
+(function(){
+const W=264,H=60,PW=60,GAP=8,PANEL=240,BEZ=32,FPS=12;
+const host=document.getElementById('shows');
+const rnd=i=>{const x=Math.sin(i*127.1+311.7)*43758.5453;return x-Math.floor(x);};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const ease=x=>{x=clamp(x,0,1);return x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;};
+function P(g,c,x,y,w=1,h=1){g.fillStyle=c;g.fillRect(Math.round(x),Math.round(y),w,h);}
+function spr(g,rows,pal,x,y,flip=false){x=Math.round(x);y=Math.round(y);for(let r=0;r<rows.length;r++){const row=rows[r];for(let c=0;c<row.length;c++){const ch=row[flip?row.length-1-c:c];if(ch==='.'||ch===' ')continue;const col=pal[ch];if(col){g.fillStyle=col;g.fillRect(x+c,y+r,1,1);}}}}
+function dith(g,c,x,y,w,h,ph=0){g.fillStyle=c;for(let j=0;j<h;j++)for(let i=0;i<w;i++)if((i+j+ph)%2===0)g.fillRect(x+i,y+j,1,1);}
+function disc(g,c,cx,cy,r){g.fillStyle=c;for(let y=-r;y<=r;y++){const w=Math.floor(Math.sqrt(r*r-y*y+r*0.6));g.fillRect(Math.round(cx-w),Math.round(cy+y),2*w+1,1);}}
+function ring(g,c,cx,cy,r){g.fillStyle=c;const n=Math.max(8,Math.floor(r*6.3));for(let k=0;k<n;k++){const a=k/n*Math.PI*2;g.fillRect(Math.round(cx+Math.cos(a)*r),Math.round(cy+Math.sin(a)*r),1,1);}}
+function bands(g,list){let y=0;for(const [c,h] of list){P(g,c,0,y,W,h);y+=h;}let yy=0;for(let i=0;i<list.length-1;i++){yy+=list[i][1];dith(g,list[i+1][0],0,yy-1,W,1);dith(g,list[i][0],0,yy,W,1,1);}}
+const px0=i=>i*(PW+GAP);
+
+// ---------- 1 Night drive ----------
+const CAR=["....kkkkkkkk........","...kgggkggggk.......","..kgggkkggggrk......",".kkrrrrrrrrrrrrkk...","krrrrrrrrrrrrrrrrrh.","krrddrrrrrrrrrddrrrk","kkdwwdkkkkkkkdwwdkkk","...ww.........ww...."];
+const CARP={k:'#1b0f1e',g:'#7fd1e8',r:'#e8574b',d:'#8f2a33',w:'#0c0c10',h:'#fff3c4'};
+function nightDrive(g,f,t,L){
+ bands(g,[['#0d0a1e',22],['#171236',26],['#16151d',12]]);
+ for(let i=0;i<40;i++){const x=Math.floor(rnd(i)*W),y=Math.floor(rnd(i+99)*20);P(g,((f+i*7)%31<2)?'#ffffff':'#8f86c8',x,y);}
+ disc(g,'#f4e7b8',178,9,4);P(g,'#d8c78f',176,8);P(g,'#d8c78f',179,10);
+ for(let x=0,i=0;x<W;i++){const w=8+Math.floor(rnd(i+5)*10),h=10+Math.floor(rnd(i+50)*14);P(g,'#221b47',x,48-h,w,h);x+=w+1;}
+ for(let x=-4,i=0;x<W;i++){const w=10+Math.floor(rnd(i+17)*8),h=8+Math.floor(rnd(i+70)*10);P(g,'#2d2759',x,48-h,w,h);for(let wy=48-h+2;wy<46;wy+=3)for(let wx=x+2;wx<x+w-1;wx+=3){const on=rnd(wx*3+wy)>0.55;const fl=rnd(wx+wy+Math.floor(f/40))>0.9;if(on&&!fl)P(g,'#ffcc66',wx,wy);else if(on)P(g,'#7a5a3a',wx,wy);}x+=w+2;}
+ P(g,'#2b2838',0,48,W,1);
+ for(let x=0;x<W;x+=8)P(g,'#6f6c84',x+2,54,4,1);
+ for(let i=0;i<4;i++){const lx=px0(i)+46;P(g,'#4a4560',lx,30,1,18);P(g,'#4a4560',lx-3,30,4,1);P(g,'#ffe9a8',lx-4,31,2,1);for(let y=32;y<48;y++){const w=Math.floor((y-32)/2);dith(g,'#3d3550',lx-3-w,y,2*w+2,1,y);}dith(g,'#4a4258',lx-11,49,16,3);}
+ const p=t/L, cx=-24+p*(W+48), bump=(f%8===0)?-1:0;
+ for(let y=0;y<6;y++)dith(g,'#5f5640',cx+20,44+y-Math.floor(y/2),6+y*2,1,y);
+ spr(g,CAR,CARP,cx,40+bump);
+ const hub=(f>>1)%2;P(g,'#6a6a78',cx+3+hub,47+bump);P(g,'#6a6a78',cx+14+hub,47+bump);
+ for(let k=0;k<4;k++){const age=(f+k*6)%24;if(age>18)continue;const ex=cx-2-age*0.7,ey=46-age*0.3;P(g,age<8?'#8f86a8':'#4e4766',ex,ey,age<6?2:1,age<6?2:1);}
+}
+// ---------- 2 Dusk freight ----------
+const LOCO=["....cc..............kk......","....cc.............kmmk.....","..kkkkkkkkkkkkkkkkkkmmkk....",".kbbbbbbbbbbbbbbbbbbbbbbbk..",".kbyybbyybbyybbbbbbbbbbbbbk.",".kbyybbyybbyybbbbbbbbbbbbbbk",".kbbbbbbbbbbbbbbbbbbbbbbbbbk",".kddddddddddddddddddddddddddk","..kwwk..kwwk..kwwk..kwwk....","...kk....kk....kk....kk....."];
+const CARR=["kkkkkkkkkkkkkkkkkkkkkkk","kbbbbbbbbbbbbbbbbbbbbbk","kbyybbyybbyybbyybbyybbk","kbyybbyybbyybbyybbyybbk","kbbbbbbbbbbbbbbbbbbbbbk","kdddddddddddddddddddddk",".kwwk.............kwwk.","..kk...............kk.."];
+const TRP={k:'#120a16',b:'#2f6f6a',d:'#1d4744',y:'#ffd98a',w:'#0e0a12',c:'#3a2a30',m:'#2a1e24'};
+function freight(g,f,t,L){
+ bands(g,[['#2b1d4a',14],['#6b2f5e',10],['#c4505a',8],['#f08c5a',8],['#3a1f45',20]]);
+ disc(g,'#ffd27a',120,40,9);P(g,'#f08c5a',100,40,40,1);
+ g.fillStyle='#3a1f45';for(let x=0;x<W;x++){const h=Math.round(6+3*Math.sin(x*0.05)+2*Math.sin(x*0.13));g.fillRect(x,40-h+6,1,h);}
+ g.fillStyle='#24142e';for(let x=0;x<W;x++){const h=Math.round(4+2*Math.sin(x*0.09+1)+Math.sin(x*0.21));g.fillRect(x,46-h,1,h+14);}
+ P(g,'#1a0f1f',0,51,W,1);for(let x=(-(f*3))%6;x<W;x+=6)P(g,'#3b2433',x,52,3,1);
+ const len=28+6*24, x0=-len-10+(t/L)*(W+len+30);
+ for(let k=0;k<6;k++)spr(g,CARR,TRP,x0+k*24,43);
+ spr(g,LOCO,TRP,x0+6*24,41);
+ for(let k=0;k<7;k++){const age=(f+k*5)%35;const sx=x0+6*24+5-age*1.6,sy=40-age*0.8;const sz=age<10?2:age<22?3:2;P(g,age<14?'#d9c3c9':age<26?'#9e7f93':'#6b4f66',sx,sy,sz,sz);}
+ for(let i=0;i<4;i++){const px=px0(i)+8;P(g,'#140b18',px,18,1,34);P(g,'#140b18',px-3,20,7,1);}
+ g.fillStyle='#140b18';for(let i=0;i<3;i++){const a=px0(i)+8,b=px0(i+1)+8;for(let x=a;x<=b;x++){const u=(x-a)/(b-a);g.fillRect(x,21+Math.round(4*u*(1-u)*3),1,1);}}
+}
+// ---------- 3 Rack runner ----------
+const BOT=[["..kkkk..",".keeeek.",".kvvvvk.",".keeeek.","..kaak..",".keeeek.","kkeeeekk","..k..k..",".kk..kk."],["..kkkk..",".keeeek.",".kvvvvk.",".keeeek.","..kaak..",".keeeek.",".keeeek.","..kk.k..","..k..kk."],["..kkkk..",".keeeek.",".kvvvvk.",".keeeek.","..kaak..",".keeeek.","kkeeeekk","..k..k..","kk....kk"],["..kkkk..",".keeeek.",".kvvvvk.",".keeeek.","..kaak..",".keeeek.",".keeeek.","..k.kk..","..kk..k."]];
+const JUMP=["..kkkk..",".keeeek.",".kvvvvk.",".keeeek.","k.kaak.k",".keeeek.","..eeee..",".k....k.","k......k"];
+const SQ=["........","..kkkk..",".keeeek.",".kvvvvk.",".keeeek.",".kkaakk.","keeeeeek","kkeeeekk",".kk..kk."];
+const BOTP={k:'#2a2f3a',e:'#e8e3d8',v:'#5ad1ff',a:'#ff6b5a'};
+function racks(g,f,t,L){
+ P(g,'#0b1016',0,0,W,H);
+ for(let i=0;i<4;i++){const x=px0(i)+16;P(g,'#1c2530',x,6,28,44);for(let u=0;u<7;u++){const y=8+u*6;P(g,'#141b24',x+2,y,24,5);for(let l=0;l<3;l++){const on=rnd(i*50+u*7+l+Math.floor((f+u*3)/(6+l*3)))>0.4;P(g,on?(l===2?'#ffb547':'#3ddc84'):'#1f2a24',x+4+l*3,y+2);}P(g,'#2a3644',x+16,y+2,8,1);}}
+ P(g,'#141a22',0,50,W,10);for(let x=0;x<W;x+=12)P(g,'#1f2733',x,50,1,10);P(g,'#1f2733',0,50,W,1);
+ const x=-12+(t/L)*(W+24);let y=41,frame=BOT[(f>>1)%4];
+ for(let i=0;i<3;i++){const gx=px0(i)+PW+GAP/2;const d=x+4-gx;if(Math.abs(d)<14){const u=(d+14)/28;y=41-Math.round(14*4*u*(1-u));frame=JUMP;}if(d>=14&&d<17)frame=SQ;}
+ const sh=Math.max(2,6-Math.round((41-y)/3));P(g,'#0a0e14',x+4-sh/2,50,sh,1);
+ spr(g,frame,BOTP,x,y);
+}
+// ---------- 4 Packet relay ----------
+function relay(g,f,t,L){
+ P(g,'#0a0d14',0,0,W,H);for(let i=0;i<60;i++)P(g,'#131a26',Math.floor(rnd(i)*W),Math.floor(rnd(i+3)*H));
+ const hop=1.25,k=Math.floor(t/hop),u=(t%hop)/hop;
+ for(let i=0;i<4;i++){const x=px0(i)+18;P(g,'#20262f',x,18,24,30);P(g,'#2b3340',x,18,24,2);for(let r=0;r<4;r++)P(g,'#151a22',x+3,23+r*6,18,4);
+  const lit=(k===i&&u<0.5)||(k===i-1&&u>0.85)||(k>=4&&i===3);for(let l=0;l<4;l++)P(g,lit?'#73eff7':(rnd(i*9+l+Math.floor(f/5))>0.5?'#2f6b4f':'#18322a'),x+4+l*4,44);
+  P(g,'#0f1218',x-2,48,28,2);}
+ if(k<3){const a=px0(k)+30,b=px0(k+1)+30,e=ease(u);for(let s=4;s>=0;s--){const ue=ease(Math.max(0,u-s*0.03));const xx=a+(b-a)*ue,yy=18-Math.sin(Math.PI*ue)*14;P(g,s===0?'#ffffff':s<2?'#73eff7':'#2f7f8f',xx-1,yy-1,s===0?3:2,s===0?3:2);}
+  if(u>0.85){const r=Math.floor((u-0.85)*60);ring(g,'#73eff7',b,30,r+2);}}
+ else{const r=Math.floor(((t-3*hop)%hop)*10);if(r<14)ring(g,r<7?'#73eff7':'#2f7f8f',px0(3)+30,30,r);}
+}
+// ---------- 5 Deep sea ----------
+const FISH=["..oo.",".oooe","ooooo",".ooo."];const FISHP={o:'#ffb347',e:'#3a1a0a'};
+function deep(g,f,t,L){
+ bands(g,[['#123a6b',14],['#0d2a52',18],['#0a1a3a',22],['#2b2742',6]]);
+ for(let k=0;k<8;k++){const x0=((k*37+Math.floor(f/6))%(W+40))-20;for(let y=0;y<40;y++)if((y+k)%3!==0)P(g,'#1b4c80',x0+y*0.6,y);}
+ for(let k=0;k<11;k++){const kx=8+k*24+Math.floor(rnd(k)*8);for(let s=0;s<9;s++){const yy=54-s*3;const ox=Math.round(Math.sin(t*1.6+s*0.5+k)*1.4*(s/3));P(g,s%2?'#2fa36f':'#1f7a5a',kx+ox,yy,2,3);}}
+ const bx=-60+(t/L)*(W+120)*0.6;spr(g,["....ssssssss........","..ssssssssssss....ss",".ssssssssssssssss.ss","ssssssssssssssssssss",".ssssssssssssssss.ss","..ssssssssssss....ss","....ssssssss........"],{s:'#0b2244'},bx,22);
+ for(let n=0;n<9;n++){const fx=-30+(t/L)*(W+60)+ (n%3)*7-(Math.floor(n/3))*5,fy=30+Math.floor(n/3)*4+Math.round(Math.sin(t*3+n)*1.5);spr(g,FISH,FISHP,fx,fy);}
+ for(let b=0;b<14;b++){const bx2=10+b*19,cyc=(t*0.6+rnd(b))%1,by=56-cyc*56;P(g,'#8fd3ff',bx2+Math.round(Math.sin(cyc*12+b)),by,cyc>0.7?1:2,cyc>0.7?1:2);}
+}
+// ---------- 6 Paper plane ----------
+const PLANE=[["wwww.....","swwwwww..","..sswwwww","...sss..."],["..wwww...","wwwwwww..","sswwwwwww","....sss.."]];const PLP={w:'#ffffff',s:'#9ec3dd'};
+const CLOUD=[".....cccc.......","...cccccccc.....","..cccccccccccc..",".cccccccccccccc.","cddddddddddddddc"];
+function plane(g,f,t,L){
+ bands(g,[['#5aaee6',20],['#7cc6f0',24],['#a6dcf5',16]]);
+ for(let k=0;k<7;k++){const cx=((k*53+t*(k%2?4:7))%(W+30))-20,cy=8+(k*11)%36;spr(g,CLOUD,{c:'#f4f8ff',d:'#cfe3f5'},cx,cy);}
+ const p=t/L;let x,y;
+ const loopA=0.55,loopB=0.75;
+ if(p<loopA){x=-12+p/loopA*170;y=28+Math.round(Math.sin(p*14)*3);}
+ else if(p<loopB){const a=(p-loopA)/(loopB-loopA)*Math.PI*2;x=158+Math.sin(a)*12;y=28-(1-Math.cos(a))*12;}
+ else{x=158+(p-loopB)/(1-loopB)*120;y=28+Math.round(Math.sin(p*12)*2);}
+ for(let s=1;s<14;s++){if(s%2)continue;const q=Math.max(0,p-s*0.006);let tx,ty;if(q<loopA){tx=-12+q/loopA*170;ty=28+Math.round(Math.sin(q*14)*3);}else if(q<loopB){const a=(q-loopA)/(loopB-loopA)*Math.PI*2;tx=158+Math.sin(a)*12;ty=28-(1-Math.cos(a))*12;}else{tx=158+(q-loopB)/(1-loopB)*120;ty=28+Math.round(Math.sin(q*12)*2);}P(g,'#e8f4fc',tx,ty+2);}
+ spr(g,PLANE[(f>>2)%2],PLP,x,y);
+}
+// ---------- 7 Storm ----------
+function storm(g,f,t,L){
+ const fl=t>3.9&&t<4.05,fl2=t>4.3&&t<4.38;
+ P(g,fl?'#cdd6ff':fl2?'#4a5378':'#1a1d2b',0,0,W,H);
+ for(let k=0;k<16;k++){const cx=((k*29+t*5)%(W+40))-20,cy=4+(k*7)%10;disc(g,fl?'#9aa6d8':'#2b3043',cx,cy,7+(k%3));disc(g,fl?'#b8c2ec':'#3a4058',cx+3,cy-2,4);}
+ for(let d=0;d<90;d++){const x=(rnd(d)*W+t*40)%W,y=(rnd(d+7)*H+t*110)%H;P(g,fl?'#ffffff':'#6f7fa8',x,y,1,2);P(g,'#4b5679',x-1,y-1);}
+ P(g,fl?'#3a3f58':'#14161f',0,54,W,6);for(let s=0;s<12;s++){const sx=Math.floor(rnd(s+Math.floor(f/3))*W);P(g,'#5d6a92',sx,53,1,1);P(g,'#5d6a92',sx-1,54);P(g,'#5d6a92',sx+1,54);}
+ if(t>3.9&&t<4.6&&!(t>4.15&&t<4.3)){let x=148,y=12;g.fillStyle='#ffffff';for(let s=0;s<14;s++){const nx=x+Math.round((rnd(s*3+1)-0.5)*7),ny=y+3;for(let i=0;i<=3;i++)g.fillRect(Math.round(x+(nx-x)*i/3),y+i,1,1);P(g,'#a9b8ff',x+1,y);x=nx;y=ny;}}
+}
+// ---------- 8 Day cycle ----------
+function daycycle(g,f,t,L){
+ const p=t/L;const steps=[['#f6a35c','#f9c98a','#5a3a3a'],['#6ec3ef','#a6dcf5','#2e5a3e'],['#6ec3ef','#a6dcf5','#2e5a3e'],['#e2685a','#f2a65a','#3a2a3e'],['#141a3a','#22305a','#141826']];
+ const st=steps[Math.min(4,Math.floor(p*5))];bands(g,[[st[0],30],[st[1],14],[st[2],16]]);
+ g.fillStyle=st[2];for(let x=0;x<W;x++){const h=Math.round(5+3*Math.sin(x*0.07)+2*Math.sin(x*0.17+2));g.fillRect(x,44-h,1,h+1);}
+ if(p<0.8){const sx=p/0.8*W,sy=44-Math.sin(Math.PI*p/0.8)*36;disc(g,'#fff1a8',sx,sy,4);const ro=(f>>1)%2;for(let k=0;k<8;k++){const a=k/8*Math.PI*2+ro*0.39;P(g,'#ffe27a',sx+Math.cos(a)*7,sy+Math.sin(a)*7);}}
+ else{for(let i=0;i<30;i++)P(g,((f+i)%19<2)?'#ffffff':'#8f9ad8',Math.floor(rnd(i)*W),Math.floor(rnd(i+5)*30));const mx=(p-0.8)/0.2*W;disc(g,'#e6e2cf',mx,12,4);disc(g,'#141a3a',mx+2,11,3);}
+}
+// ---------- 9 Cat & laser ----------
+const CAT={sit:["..k...k...","..kk.kk...",".kgggggk..",".kgegegk..",".kgggpgk..","..kgggk...",".kgggggk..","kgggggggk.","kgggggggk.",".kk..kk..."],crouch:["..........","..k...k...","..kk.kk...",".kgggggk..",".kgegegkkk","kgggpggggk","kgggggggggk",".kk.kk.kk.."],leap:["...........k..k.","..........kkkkk.","kk......kggegek.",".kkggggggggpgk..","..kggggggggggk..",".kk.......kk....","k..........k...."]};
+const CATP={k:'#2a2d3a',g:'#9aa0b5',e:'#e8f06a',p:'#ff9aa8'};
+function catlaser(g,f,t,L){
+ P(g,'#5a4a63',0,0,W,40);dith(g,'#4e4057',0,38,W,2);P(g,'#2e2433',0,40,W,2);P(g,'#3b2f3f',0,42,W,18);
+ for(let x=0;x<W;x+=22)P(g,'#33283a',x,42,1,18);
+ for(let i=0;i<4;i++){P(g,'#6b5a74',px0(i)+20,10,20,14);P(g,'#2e2433',px0(i)+20,10,20,1);P(g,'#2e2433',px0(i)+29,10,1,14);}
+ const seg=L/4,i=Math.min(3,Math.floor(t/seg)),u=(t%seg)/seg;
+ const dotX=px0(i)+40,from=i===0?-10:px0(i-1)+40;
+ let dx=dotX+Math.round(Math.sin(f*0.9)*1.5),dy=50+Math.round(Math.cos(f*1.3));
+ if(u<0.08){dx=from+(dotX-from)*(u/0.08);}
+ P(g,'#ff3b3b',dx,dy,2,2);P(g,'#8f2030',dx-1,dy,1,2);P(g,'#8f2030',dx+2,dy,1,2);
+ let cx,cy,fr,flip=false;
+ if(u<0.45){cx=from-12;cy=42;fr=u<0.2?CAT.sit:CAT.crouch;if(fr===CAT.crouch&&(f%4<2))cx+=1;cy=fr===CAT.crouch?44:42;}
+ else if(u<0.7){const v=(u-0.45)/0.25;cx=from-12+(dotX-from)*ease(v);cy=44-Math.round(Math.sin(Math.PI*v)*14);fr=CAT.leap;}
+ else{cx=dotX-12;cy=44;fr=CAT.crouch;}
+ spr(g,fr,CATP,cx,cy,flip);
+}
+// ---------- 10 Space cruise ----------
+const SHIP=["..kk..........",".kddkk........","kddddddkkk....","kdddcccddddkk..","kddddddddddddk.","kdddcccddddkk..","kddddddkkk....",".kddkk........","..kk.........."];
+const SHIPP={k:'#3a3f52',d:'#d8dde8',c:'#5ad1ff'};
+function space(g,f,t,L){
+ P(g,'#05040d',0,0,W,H);
+ for(const [n,sp,c] of [[50,4,'#3a3a5a'],[30,10,'#8a8ab0'],[14,22,'#ffffff']])for(let i=0;i<n;i++){const x=((rnd(i+sp)*W-t*sp)%W+W)%W;P(g,c,x,Math.floor(rnd(i+sp*3)*H));}
+ const pc=[178,28];for(let y=-16;y<=16;y++)for(let x=-16;x<=16;x++){if(x*x+y*y>196)continue;const band=Math.floor((y+16)/5)%2;let c=band?'#d9784a':'#b95a3a';if(x>6&&(x+y)%2===0)c='#5a2a20';if(x>10)c='#3a1a14';P(g,c,pc[0]+x,pc[1]+y);}
+ g.fillStyle='#e8c48a';for(let a=0;a<120;a++){const th=a/120*Math.PI*2;const rx=Math.cos(th)*24,ry=Math.sin(th)*5;if(Math.sin(th)<0&&Math.abs(rx)<14)continue;g.fillRect(Math.round(pc[0]+rx),Math.round(pc[1]+ry-rx*0.15),1,1);}
+ const ax=(220-t*6),ay=12+Math.round(Math.sin(t)*2);spr(g,[".mm.","mmmm","mmm.",".m.."].map((r,ri)=>((f>>2)%2)?r.split('').reverse().join(''):r),{m:'#6a6070'},ax,ay);
+ const sx=-16+(t/L)*(W+32),sy=26+Math.round(Math.sin(t*2)*2);
+ const fl=(f>>1)%2;P(g,fl?'#ffb347':'#ff6a3d',sx-3,sy+3,3,3);P(g,'#ffe27a',sx-1,sy+4,1,1);if(fl)P(g,'#ff6a3d',sx-5,sy+4,2,1);
+ spr(g,SHIP,SHIPP,sx,sy);
+}
+// ---------- 11 Birds at sunset ----------
+const BIRD=[["k...k",".k.k.","..k.."],["kk.kk","..k.."],["..k..","kk.kk"]];
+function birds(g,f,t,L){
+ bands(g,[['#f2a65a',14],['#e2685a',12],['#a8466a',8],['#3a2a5e',4],['#1d2b55',22]]);
+ disc(g,'#ffe08a',140,37,10);P(g,'#1d2b55',120,38,40,8);
+ for(let k=0;k<30;k++){const x=Math.floor(rnd(k)*W),y=40+Math.floor(rnd(k+9)*18);const on=((f>>1)+k)%7<3;if(on)P(g,Math.abs(x-140)<26?'#ffd27a':'#5a6aa0',x,y,2+Math.floor(rnd(k+4)*3),1);}
+ const bx=-30+(t/L)*(W+60);const V=[[0,0],[-5,-3],[-5,3],[-10,-6],[-10,6],[-15,-9],[-15,9]];
+ V.forEach(([ox,oy],n)=>{const ph=((f>>1)+n)%3;spr(g,BIRD[ph],{k:'#1c1426'},bx+ox,20+oy+Math.round(Math.sin(t*2+n)));});
+}
+// ---------- 12 Fireworks ----------
+const FWC=[['#ff6b5a','#ffb547','#7a2a2a'],['#73eff7','#ffffff','#2f6b8f'],['#a7f070','#ffe27a','#3a6a30'],['#c58bff','#ffb3f0','#4a2a6a']];
+function fireworks(g,f,t,L){
+ P(g,'#0a0a1a',0,0,W,H);for(let i=0;i<25;i++)P(g,'#2a2a4a',Math.floor(rnd(i)*W),Math.floor(rnd(i+1)*40));
+ for(let x=0,i=0;x<W;i++){const w=6+Math.floor(rnd(i+3)*9),h=6+Math.floor(rnd(i+33)*10);P(g,'#13132a',x,60-h,w,h);for(let wy=60-h+2;wy<58;wy+=3)if(rnd(x+wy)>0.6)P(g,'#3a3a20',x+2,wy);x+=w;}
+ const shows=[[0,0.2,0],[1,1.4,1],[2,2.6,2],[3,3.8,3],[0,5.2,1],[1,5.2,2],[2,5.2,3],[3,5.2,0]];
+ for(const [pi,t0,ci] of shows){const lt=t-t0;if(lt<0)continue;const cx=px0(pi)+30,cy=16+(pi%2)*4;const col=FWC[ci];
+  if(lt<0.7){const y=58-(58-cy)*ease(lt/0.7);P(g,'#ffe9a8',cx,y,1,2);P(g,'#7a5a3a',cx,y+2,1,2);continue;}
+  const e=lt-0.7;if(e>1.8)continue;if(e<0.1){disc(g,'#ffffff',cx,cy,3);continue;}
+  for(let k=0;k<26;k++){const a=k/26*Math.PI*2+rnd(k+ci)*0.2,sp=14+rnd(k*3+pi)*8;const x=cx+Math.cos(a)*sp*Math.min(e,1)*0.9,y=cy+Math.sin(a)*sp*Math.min(e,1)*0.9+e*e*6;const c=e<0.6?col[1]:e<1.2?col[0]:col[2];if(e>1.2&&((f+k)%3===0))continue;P(g,c,x,y);if(e<0.9)P(g,col[0],x-Math.cos(a),y-Math.sin(a));}}
+}
+
+const SHOWS=[
+ ['night','Night drive','A little hatchback crosses town at night: lit windows flicker, street lamps pool light on the road, a 1-pixel bump every few frames, exhaust puffs.',nightDrive,8],
+ ['freight','Dusk freight','A long teal train with lit windows rolls through all four screens at sunset, steam trailing behind, telegraph wires sagging between poles.',freight,9],
+ ['racks','Rack runner','A tiny robot runs along your server racks (LEDs blinking) and jumps the bezel gap between screens: anticipation arc, squash on landing.',racks,7],
+ ['relay','Packet relay','Each screen is a server. A packet arcs from one to the next; the receiver flashes cyan and a ring ripples out. Cluster-themed.',relay,6],
+ ['deep','Deep sea','Kelp sways, light rays drift, bubbles rise, a school of orange fish swims across while a big shadow passes slowly behind.',deep,10],
+ ['plane','Paper plane','A paper plane glides through drifting clouds and does a loop in the third screen, leaving a dotted trail.',plane,8],
+ ['storm','Thunderstorm','Clouds roll, rain streaks fall; then the whole sky flashes white (held two frames), a bolt cracks across screen 3, a second flicker after.',storm,8],
+ ['day','Day in a minute','The sun rises on the left, arcs over all four screens and sets on the right; sky steps through dawn, day, dusk and night (stepped colours, no gradients).',daycycle,12],
+ ['cat','Cat & laser','A grey cat waits, wiggles, then pounces on a red laser dot that hops from screen to screen.',catlaser,9],
+ ['space','Space cruise','A small ship flies past a ringed planet; three layers of stars, a tumbling asteroid, flickering engine.',space,8],
+ ['birds','Birds at sunset','A V of birds flaps across a pixel sunset over the sea, glints on the water flickering.',birds,9],
+ ['fireworks','Fireworks','Rockets launch one screen at a time over a city skyline, bursting in four colours, then a finale on all four screens at once.',fireworks,8],
+];
+const items=SHOWS.map(([id,title,desc,fn,len])=>{
+ const card=document.createElement('div');card.className='card';card.dataset.choice=id;card.onclick=function(){toggleSelect(this);};
+ card.innerHTML=`<div class="card-image strip"><canvas></canvas></div><div class="card-body"><h3>${title}</h3><p>${desc}</p></div>`;
+ host.appendChild(card);
+ const c=card.querySelector('canvas');c.width=4*PANEL+3*BEZ;c.height=PANEL;const g=c.getContext('2d');g.imageSmoothingEnabled=false;
+ const w=document.createElement('canvas');w.width=W;w.height=H;const wg=w.getContext('2d');
+ return {fn,len,g,w,wg,last:-1};
+});
+function frame(ms){const t=ms/1000,f=Math.floor(t*FPS);
+ for(const it of items){const lf=f;if(lf===it.last)continue;it.last=lf;const lt=(lf/FPS)%it.len,ff=Math.floor(lt*FPS);
+  it.wg.clearRect(0,0,W,H);try{it.fn(it.wg,ff,lt,it.len);}catch(e){console.error(e);}
+  const g=it.g;g.fillStyle='#070707';g.fillRect(0,0,g.canvas.width,g.canvas.height);
+  for(let i=0;i<4;i++){const ox=i*(PANEL+BEZ);g.save();g.beginPath();g.arc(ox+120,120,120,0,Math.PI*2);g.clip();g.drawImage(it.w,px0(i),0,PW,H,ox,0,PANEL,PANEL);g.restore();g.strokeStyle='#1c1c1c';g.lineWidth=6;g.beginPath();g.arc(ox+120,120,121,0,Math.PI*2);g.stroke();}}
+ requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+})();
+</script>

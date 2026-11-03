@@ -1,0 +1,137 @@
+<style>
+.strip{background:#070707;border-radius:12px;padding:14px 10px;margin:0 0 6px}
+.strip canvas{width:100%;max-width:760px;display:block;margin:0 auto;image-rendering:pixelated}
+.cards.shows{grid-template-columns:1fr}
+</style>
+
+<h2>Four-screen pixel shows, round 2: jungle, mountains, desert</h2>
+<p class="subtitle">Two scenes each, same pixel engine as before (264×60 world, ×4, 12 fps on twos, hand-picked palettes). Your 8 picks from round 1 are saved. Click every new one you like.</p>
+
+<div class="cards shows" data-multiselect id="shows"></div>
+
+<script>
+(function(){
+const W=264,H=60,PW=60,GAP=8,PANEL=240,BEZ=32,FPS=12;
+const host=document.getElementById('shows');
+const rnd=i=>{const x=Math.sin(i*127.1+311.7)*43758.5453;return x-Math.floor(x);};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const ease=x=>{x=clamp(x,0,1);return x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;};
+function P(g,c,x,y,w=1,h=1){g.fillStyle=c;g.fillRect(Math.round(x),Math.round(y),w,h);}
+function spr(g,rows,pal,x,y,flip=false){x=Math.round(x);y=Math.round(y);for(let r=0;r<rows.length;r++){const row=rows[r];for(let c=0;c<row.length;c++){const ch=row[flip?row.length-1-c:c];if(ch==='.'||ch===' ')continue;const col=pal[ch];if(col){g.fillStyle=col;g.fillRect(x+c,y+r,1,1);}}}}
+function dith(g,c,x,y,w,h,ph=0){g.fillStyle=c;for(let j=0;j<h;j++)for(let i=0;i<w;i++)if((i+j+ph)%2===0)g.fillRect(x+i,y+j,1,1);}
+function disc(g,c,cx,cy,r){g.fillStyle=c;for(let y=-r;y<=r;y++){const w=Math.floor(Math.sqrt(r*r-y*y+r*0.6));g.fillRect(Math.round(cx-w),Math.round(cy+y),2*w+1,1);}}
+function ring(g,c,cx,cy,r){g.fillStyle=c;const n=Math.max(8,Math.floor(r*6.3));for(let k=0;k<n;k++){const a=k/n*Math.PI*2;g.fillRect(Math.round(cx+Math.cos(a)*r),Math.round(cy+Math.sin(a)*r),1,1);}}
+function bands(g,list){let y=0;for(const [c,h] of list){P(g,c,0,y,W,h);y+=h;}let yy=0;for(let i=0;i<list.length-1;i++){yy+=list[i][1];dith(g,list[i+1][0],0,yy-1,W,1);dith(g,list[i][0],0,yy,W,1,1);}}
+const px0=i=>i*(PW+GAP);
+
+// ---------- Jungle: vine swing ----------
+const MONKEY=[["..kk...",".kbbk..","kbffbk.","kbffbkk",".kbbk.k","kbbbbk.",".k..k.."],["..kk...",".kbbk..","kbffbk.","kbffbk.",".kbbkk.","kbbbbkk","k....k."]];
+const MONP={k:'#3a2214',b:'#7a4a2a',f:'#e8b98a'};
+function vines(g,f,t,L){
+ bands(g,[['#0f2a1c',12],['#163a26',16],['#1d4a2c',18],['#123222',14]]);
+ for(let k=0;k<9;k++){const x0=k*34-10+((f>>3)%2);for(let y=0;y<46;y++)if((y+k)%3===0)P(g,'#2f6a3e',x0+y*0.5,y);}
+ for(let k=0;k<26;k++){const cx=Math.floor(rnd(k)*W),cy=4+Math.floor(rnd(k+4)*30);disc(g,k%2?'#24603a':'#2f7a45',cx,cy,3+Math.floor(rnd(k+8)*4));}
+ for(let k=0;k<12;k++){const x=(rnd(k+20)*W+t*3)%W,y=(rnd(k+30)*50+Math.sin(t+k)*3);P(g,'#d8f07a',x,y);}
+ const seg=L/4,i=Math.min(3,Math.floor(t/seg)),u=(t%seg)/seg;
+ const ax=k=>px0(k)+30,ay=0,len=30;
+ for(let k=0;k<4;k++)if(k!==i){for(let y=0;y<26;y++)P(g,'#3f7a2a',ax(k)+Math.round(Math.sin(t*1.2+k+y*0.1)*(y/14)),y);}
+ let mx,my,fr=0,ang;
+ if(u<0.75){ang=-0.7+1.4*ease(u/0.75);mx=ax(i)+Math.sin(ang)*len;my=ay+Math.cos(ang)*len;for(let s=0;s<=len;s+=1){P(g,'#4f8f34',ax(i)+Math.sin(ang)*s,ay+Math.cos(ang)*s);}fr=u>0.6?1:0;}
+ else{const v=(u-0.75)/0.25,sx=ax(i)+Math.sin(0.7)*len,sy=ay+Math.cos(0.7)*len,ex=i<3?ax(i+1)-Math.sin(0.7)*len:W+20,ey=sy;mx=sx+(ex-sx)*v;my=sy-Math.sin(Math.PI*v)*8+(ey-sy)*v;fr=1;for(let y=0;y<26;y++)P(g,'#3f7a2a',ax(i)+Math.round(Math.sin(t*3)*2*(y/26)),y);}
+ spr(g,MONKEY[fr],MONP,mx-3,my-1);
+ for(let k=0;k<7;k++){const lx=k*40-8,sway=Math.round(Math.sin(t*1.5+k)*1.5);g.fillStyle=k%2?'#0b2416':'#0e2c1b';for(let y=0;y<12;y++){const w=12-Math.abs(y-6)*2;g.fillRect(lx+sway+(6-w/2),48+y,w,1);}P(g,'#163a26',lx+sway+6,48,1,12);}
+}
+// ---------- Jungle: waterfall & bird ----------
+const TBIRD=[["...kk.....","..kkkoooo.",".kkwkoooo.","kkkkk.....","kkkk......",".k........"],["kk........",".kkkk.....","..kkkoooo.",".kkwkoooo.","kkkk......",".k........"]];
+const TBP={k:'#14121a',w:'#f4efe2',o:'#ff9a2a'};
+function waterfall(g,f,t,L){
+ bands(g,[['#cfe9a8',10],['#8fca78',10],['#3f8a4a',14],['#24603a',26]]);
+ for(let k=0;k<14;k++)disc(g,k%2?'#2f7a45':'#3f8a4a',k*20+5,22+(k%3)*3,7);
+ P(g,'#4a4a3a',136,6,36,8);P(g,'#5a5a48',138,6,32,2);
+ for(let y=12;y<50;y++)for(let x=146;x<164;x++){const s=((y*2-f*3+x*7)%9+9)%9;P(g,s<2?'#ffffff':s<5?'#9fd8f0':'#5aaed8',x,y);}
+ P(g,'#3a5a6a',120,50,70,6);for(let k=0;k<20;k++){const x=144+Math.floor(rnd(k+f)*22),y=48+Math.floor(rnd(k+f*3)*4);P(g,'#ffffff',x,y);}
+ dith(g,'#e8f4fc',140,44,30,6,f%2);
+ for(let y=50;y<60;y++)P(g,'#24603a',0,y,120,1),P(g,'#24603a',190,y,74,1);
+ P(g,'#3a3a2e',112,46,12,10);P(g,'#3a3a2e',186,44,14,12);
+ for(let b=0;b<2;b++){const bx=(t*(9+b*4)+b*90)%W,by=34+Math.round(Math.sin(t*4+b)*4);const o=(f>>1)%2;P(g,b?'#ff6bd0':'#ffd23a',bx-o,by,1,1);P(g,b?'#ff6bd0':'#ffd23a',bx+1+o,by,1,1);P(g,'#2a1a2a',bx,by,1,1);}
+ const x=-14+(t/L)*(W+28),y=18+Math.round(Math.sin(t*2.2)*3);spr(g,TBIRD[(f>>2)%2],TBP,x,y);
+ for(let k=0;k<8;k++){const lx=k*36-6,sway=Math.round(Math.sin(t*1.3+k)*1.2);g.fillStyle='#0e2c1b';for(let y=0;y<10;y++){const w=10-Math.abs(y-5)*2;g.fillRect(lx+sway+5-w/2,50+y,w,1);}}
+}
+// ---------- Mountains: alpine dawn ----------
+function ridge(seed,base,amp,x){return base-Math.abs(Math.sin(x*0.031+seed))*amp-Math.abs(Math.sin(x*0.083+seed*2))*amp*0.45;}
+const EAGLE=[["k.......k",".kk...kk.","...kkk..."],[".........","kkkkkkkkk","...kkk..."]];
+function alpine(g,f,t,L){
+ bands(g,[['#1c2a4a',10],['#3a4f7a',10],['#8a7aa0',8],['#e8a07a',10],['#f6c48a',22]]);
+ const sy=40-ease(t/L)*22;disc(g,'#fff1c8',96,sy,6);
+ for(const [seed,base,amp,c,snow] of [[1.3,42,22,'#4a5a85','#dde4f2'],[2.7,48,18,'#344470','#c8d2ea'],[4.1,56,12,'#1f2a4a',null]]){
+  for(let x=0;x<W;x++){const top=Math.round(ridge(seed,base,amp,x));P(g,c,x,top,1,H-top);if(snow&&top<base-amp*0.8){P(g,snow,x,top,1,2+Math.floor((base-amp*0.8-top)/2));}}
+  if(seed>2&&seed<3){const off=Math.floor(t*4);for(let y=0;y<3;y++)dith(g,'#9aa8cc',0,40+y,W,1,(y+off)%2);}
+ }
+ for(let k=0;k<22;k++){const x=k*12+Math.floor(rnd(k)*6),y=Math.round(ridge(4.1,56,12,x));for(let r=0;r<6;r++)P(g,'#14203a',x-Math.floor(r/2),y-6+r,1+r,1);}
+ const p=t/L,ex=-10+p*(W+20),ey=14+Math.round(Math.sin(p*9)*5);spr(g,EAGLE[(f>>3)%2],{k:'#14121a'},ex,ey);
+}
+// ---------- Mountains: cable car ----------
+const GOND=["....kk....","....kk....","kkkkkkkkkk","krrrrrrrrk","krwwrrwwrk","krwwrrwwrk","krrrrrrrrk","kkkkkkkkkk"];
+function cablecar(g,f,t,L){
+ bands(g,[['#9ac4e8',20],['#c8e0f2',18],['#e8f0f8',22]]);
+ for(const [seed,base,amp,c] of [[0.7,40,26,'#8a9ab8'],[2.1,50,20,'#5a6a8a']])for(let x=0;x<W;x++){const top=Math.round(ridge(seed,base,amp,x));P(g,c,x,top,1,H-top);if(top<base-amp*0.75)P(g,'#f4f8ff',x,top,1,3);}
+ for(let x=0;x<W;x++)P(g,'#e8eef6',x,54,1,6);
+ const cy=x=>{const i=Math.floor(x/68),a=px0(i)+4,u=(x-a)/64;return 10+Math.round(Math.max(0,4*u*(1-u))*5);};
+ for(let x=0;x<W;x++)P(g,'#2a2a34',x,cy(x));
+ for(let i=0;i<4;i++){const px=px0(i)+4;P(g,'#3a3a46',px,10,2,46);P(g,'#3a3a46',px-3,9,8,2);}
+ for(let k=0;k<16;k++){const x=k*17,y=Math.round(ridge(2.1,50,20,x));for(let r=0;r<7;r++)P(g,'#1f3a2a',x-Math.floor(r/2),y-4+r,1+r,1);}
+ const p=t/L,gx=-12+p*(W+24),sway=Math.round(Math.sin(t*2)*1);const top=cy(clamp(Math.round(gx+5),0,W-1));spr(g,GOND,{k:'#2a2a34',r:'#d8483a',w:'#bfe6ff'},gx+sway,top);
+ for(let s=0;s<60;s++){const x=(rnd(s)*W+Math.sin(t+s)*4+t*6)%W,y=(rnd(s+3)*H+t*12)%H;P(g,'#ffffff',x,y);}
+}
+// ---------- Desert: caravan ----------
+const CAMEL=[["......kk........","....kkbbk.......","....kbbbbk..kk..","...kbbbbbbkkbbk.","..kbbbbbbbbbbbk.","kkbbbbbbbbbbbk..","kbbbbbbbbbbbk...",".kbbbbbbbbbbk...","..kb.kb..kb.kb..","..kb.kb..kb.kb..","..k...k..k...k.."],["......kk........","....kkbbk.......","....kbbbbk..kk..","...kbbbbbbkkbbk.","..kbbbbbbbbbbbk.","kkbbbbbbbbbbbk..","kbbbbbbbbbbbk...",".kbbbbbbbbbbk...","...kb.kbkb.kb...","...kb.kbkb.kb...","...k...kk...k..."]];
+const CAMP={k:'#5a3a1e',b:'#c8904a'};
+function caravan(g,f,t,L){
+ bands(g,[['#8fc8e8',14],['#b8dcef',10],['#f2e2b0',10],['#e0b070',26]]);
+ disc(g,'#fffbe0',210,10,5);
+ for(let y=32;y<36;y++){const off=Math.round(Math.sin(f*0.7+y)*1);for(let k=0;k<5;k++){const mx=20+k*52+off;P(g,'#c89a6a',mx,y,14-(y-32)*2,1);}}
+ g.fillStyle='#d8a460';for(let x=0;x<W;x++){const h=Math.round(5+3*Math.sin(x*0.04)+2*Math.sin(x*0.11+1));g.fillRect(x,38-h+4,1,h+20);}
+ g.fillStyle='#c8904a';for(let x=0;x<W;x++){const h=Math.round(3+2*Math.sin(x*0.06+2));g.fillRect(x,50-h,1,h+10);}
+ for(let x=0;x<W;x+=1)if((x*7)%11<3)dith(g,'#a8703a',x,50,1,3,x);
+ const lead=-20+(t/L)*(W+70);
+ for(let n=0;n<3;n++){const cx=lead-n*20,ph=((f>>2)+n)%2;spr(g,CAMEL[ph],CAMP,cx,39+(ph?1:0));if(n>0)P(g,'#5a3a1e',cx+14,44,6,1);}
+ for(let k=0;k<30;k++){const fx=lead-60-k*4;if(fx<0)break;if(k%2===0)P(g,'#a8703a',fx,52+(k%4?0:1));}
+}
+// ---------- Desert: night tumbleweed ----------
+function desertNight(g,f,t,L){
+ bands(g,[['#1a1430',16],['#2a1f4a',16],['#3e2a5a',10],['#2a1e3a',18]]);
+ for(let i=0;i<45;i++)P(g,((f+i*3)%29<2)?'#ffffff':'#9a8fd0',Math.floor(rnd(i)*W),Math.floor(rnd(i+5)*34));
+ disc(g,'#f4ead0',34,14,7);P(g,'#d8cba8',31,12,2,2);P(g,'#d8cba8',36,16,2,1);
+ if(t>4.8&&t<5.6){const u=(t-4.8)/0.8;const sx=100+u*90,sy=6+u*14;for(let k=0;k<8;k++)P(g,k<2?'#ffffff':'#8f86c8',sx-k*2,sy-k*0.6);}
+ g.fillStyle='#22182e';for(let x=0;x<W;x++){const h=Math.round(5+3*Math.sin(x*0.05)+2*Math.sin(x*0.13));g.fillRect(x,46-h,1,h+14);}
+ g.fillStyle='#1a1226';for(let x=0;x<W;x++){const h=Math.round(2+2*Math.sin(x*0.08+1));g.fillRect(x,52-h,1,h+8);}
+ for(const cx of [58,142,220]){P(g,'#120c1c',cx,30,3,22);P(g,'#120c1c',cx-4,36,4,2);P(g,'#120c1c',cx-4,32,2,4);P(g,'#120c1c',cx+3,39,4,2);P(g,'#120c1c',cx+5,35,2,4);}
+ const p=t/L,tx=-10+p*(W+20),hop=Math.abs(Math.sin(p*Math.PI*9)),ty=44-Math.round(hop*10),rot=Math.floor(f/2);
+ for(let k=0;k<26;k++){const a=k*2.4+rot*0.5,r=1+(k%5);P(g,k%3?'#8a6a4a':'#5a4030',tx+Math.round(Math.cos(a)*r),ty+Math.round(Math.sin(a)*r));}
+ P(g,'#120c1c',tx-3,51,7,1);
+}
+const SHOWS=[
+ ['jungle-vines','Jungle: vine swing','A little monkey swings from vine to vine, one vine per screen, letting go and flying over each bezel gap; leaves sway, pollen drifts in light shafts.',vines,9],
+ ['jungle-falls','Jungle: waterfall','A waterfall pours in the third screen with foam and mist; butterflies flutter while a black-and-orange beaked bird flies across.',waterfall,9],
+ ['mountain-dawn','Mountains: alpine dawn','Three snowy ranges in layers, mist drifting in the valley, pines in front; the sun rises behind the peaks while an eagle glides across.',alpine,10],
+ ['mountain-cable','Mountains: cable car','A red gondola rides a sagging cable from pylon to pylon across all four screens in falling snow.',cablecar,10],
+ ['desert-caravan','Desert: caravan','Three camels walk in line over the dunes, roped together, leaving footprints; distant mesas shimmer in the heat.',caravan,10],
+ ['desert-night','Desert: night tumbleweed','A tumbleweed bounces and rolls past cactus silhouettes under a big moon; a shooting star streaks over the middle screens.',desertNight,9],
+];
+const items=SHOWS.map(([id,title,desc,fn,len])=>{
+ const card=document.createElement('div');card.className='card';card.dataset.choice=id;card.onclick=function(){toggleSelect(this);};
+ card.innerHTML=`<div class="card-image strip"><canvas></canvas></div><div class="card-body"><h3>${title}</h3><p>${desc}</p></div>`;
+ host.appendChild(card);
+ const c=card.querySelector('canvas');c.width=4*PANEL+3*BEZ;c.height=PANEL;const g=c.getContext('2d');g.imageSmoothingEnabled=false;
+ const w=document.createElement('canvas');w.width=W;w.height=H;const wg=w.getContext('2d');
+ return {fn,len,g,w,wg,last:-1};
+});
+function frame(ms){const t=ms/1000,f=Math.floor(t*FPS);
+ for(const it of items){const lf=f;if(lf===it.last)continue;it.last=lf;const lt=(lf/FPS)%it.len,ff=Math.floor(lt*FPS);
+  it.wg.clearRect(0,0,W,H);try{it.fn(it.wg,ff,lt,it.len);}catch(e){console.error(e);}
+  const g=it.g;g.fillStyle='#070707';g.fillRect(0,0,g.canvas.width,g.canvas.height);
+  for(let i=0;i<4;i++){const ox=i*(PANEL+BEZ);g.save();g.beginPath();g.arc(ox+120,120,120,0,Math.PI*2);g.clip();g.drawImage(it.w,px0(i),0,PW,H,ox,0,PANEL,PANEL);g.restore();g.strokeStyle='#1c1c1c';g.lineWidth=6;g.beginPath();g.arc(ox+120,120,121,0,Math.PI*2);g.stroke();}}
+ requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+})();
+</script>
