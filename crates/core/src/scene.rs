@@ -199,6 +199,9 @@ mod tests {
         );
         let dl = role_scene(&m, Role::Health, 1.0, &mut ScreenUi::new());
         assert_eq!(icons(&dl), vec!["ms-monitor_heart"], "same role, same icon");
-        assert!(has_run(&dl, "dl-a"), "the torrent's name in the pill");
+        assert!(
+            has_run(&dl, "Downloads · dl-a"),
+            "Downloads and the torrent's name in the pill"
+        );
     }
 }

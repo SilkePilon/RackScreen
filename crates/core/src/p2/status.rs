@@ -6,7 +6,8 @@ use crate::p2::font::FontId;
 use crate::p2::layout::*;
 use crate::p2::ring::RingSpec;
 use crate::p2::screen::P2Screen;
-use crate::p2::text::{middle_baseline, run_centred, top_icon};
+use crate::p2::text::{marquee_run, middle_baseline, top_icon};
+use crate::p2::ui::ScreenUi;
 use crate::scene::{Drawable, Scene};
 use crate::theme::layout::CX;
 use crate::theme::p2::{TEXT2, TEXT3, TRACK, WARN};
@@ -46,8 +47,9 @@ pub const CONNECT_LAP_SECS: Secs = 1.6;
 pub const CONNECT_RUNNER_FRAC: f32 = 0.12;
 
 /// The cluster link is down: a `TRACK` ring with a short `TEXT2` arc running
-/// round it, `icon` in the ring gap and the link's name in the pill.
-pub fn connecting_scene(icon: &'static str, now: Secs) -> Scene {
+/// round it, `icon` in the ring gap and "Connecting to <link>" in the pill,
+/// scrolling like any wide pill.
+pub fn connecting_scene(icon: &'static str, ui: &mut ScreenUi, now: Secs) -> Scene {
     let mut s = Scene::new();
     let spec = RingSpec::empty();
     s.items.extend(spec.drawables());
@@ -58,8 +60,9 @@ pub fn connecting_scene(icon: &'static str, now: Secs) -> Scene {
         s.items.extend(spec.arc(0.0, f1 - 1.0, TEXT2, 1.0));
     }
     s.push(top_icon(icon));
-    let text = "Kubernetes API";
-    let w = crate::p2::font::measure(FontId::SemiBold, PILL_PX, text, 0.0) + PILL_PAD;
+    let text = "Connecting to Kubernetes API";
+    let tw = crate::p2::font::measure(FontId::SemiBold, PILL_PX, text, 0.0);
+    let w = tw.min(PILL_MAX_TEXT_W) + PILL_PAD;
     s.push(Drawable::RoundRect {
         x: CX - w / 2.0,
         y: PILL_CY - PILL_H / 2.0,
@@ -69,15 +72,19 @@ pub fn connecting_scene(icon: &'static str, now: Secs) -> Scene {
         color: TRACK,
         alpha: 1.0,
     });
-    s.push(run_centred(
+    s.items.extend(marquee_run(
+        ui,
+        ("connect", 0),
+        text,
         CX,
         middle_baseline(FontId::SemiBold, PILL_PX, PILL_CY + 0.5),
-        text,
+        PILL_MAX_TEXT_W,
         FontId::SemiBold,
         PILL_PX,
-        0.0,
         TEXT2,
-        1.0,
+        PILL_CY - PILL_H / 2.0,
+        PILL_H,
+        now,
     ));
     s
 }
@@ -128,7 +135,7 @@ mod tests {
 
     #[test]
     fn connecting_runs_an_arc_round_the_track() {
-        let a = connecting_scene("ms-memory", 0.0);
+        let a = connecting_scene("ms-memory", &mut ScreenUi::new(), 0.0);
         let arcs: Vec<(f32, f32)> = a
             .items
             .iter()
@@ -150,11 +157,10 @@ mod tests {
             .items
             .iter()
             .any(|d| matches!(d, Drawable::Icon { name, .. } if *name == "ms-memory")));
-        assert!(a
-            .items
-            .iter()
-            .any(|d| matches!(d, Drawable::Run { text, .. } if text == "Kubernetes API")));
-        let b = connecting_scene("ms-memory", 0.8);
+        assert!(a.items.iter().any(
+            |d| matches!(d, Drawable::Run { text, .. } if text == "Connecting to Kubernetes API")
+        ));
+        let b = connecting_scene("ms-memory", &mut ScreenUi::new(), 0.8);
         let half = match &b.items[2] {
             Drawable::Arc { start_deg, .. } => *start_deg,
             _ => panic!("arc"),
@@ -164,8 +170,8 @@ mod tests {
             "half a lap in 0.8 s"
         );
         assert_eq!(
-            connecting_scene("ms-memory", 1.6),
-            connecting_scene("ms-memory", 0.0),
+            connecting_scene("ms-memory", &mut ScreenUi::new(), 1.6),
+            connecting_scene("ms-memory", &mut ScreenUi::new(), 0.0),
             "one lap every 1.6 s"
         );
         let mut ui = ScreenUi::new();
@@ -175,5 +181,53 @@ mod tests {
             .items
             .iter()
             .any(|d| matches!(d, Drawable::Run { text, .. } if text == "—")));
+    }
+
+    #[test]
+    fn the_connecting_pill_names_the_link_and_scrolls_when_wide() {
+        use crate::p2::marquee::HOLD_SECS;
+        let text = "Connecting to Kubernetes API";
+        let tw = crate::p2::font::measure(FontId::SemiBold, PILL_PX, text, 0.0);
+        assert!(tw > PILL_MAX_TEXT_W, "{tw} px is wider than the slot");
+        let runs = |s: &Scene| -> Vec<(f32, bool)> {
+            s.items
+                .iter()
+                .filter_map(|d| match d {
+                    Drawable::Run {
+                        text: t, x, clip, ..
+                    } if t == text => Some((*x, clip.is_some())),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut ui = ScreenUi::new();
+        let held = runs(&connecting_scene("ms-memory", &mut ui, 10.0));
+        assert_eq!(held.len(), 2, "two clipped copies for the wrap");
+        assert!(held.iter().all(|r| r.1));
+        assert!(
+            (held[0].0 - (CX - PILL_MAX_TEXT_W / 2.0)).abs() < 1e-3,
+            "holds at the slot start"
+        );
+        let later = runs(&connecting_scene(
+            "ms-memory",
+            &mut ui,
+            10.0 + HOLD_SECS + 1.0,
+        ));
+        assert!(
+            (held[0].0 - later[0].0 - 30.0).abs() < 1e-3,
+            "scrolls at 30 px/s"
+        );
+        let rect = connecting_scene("ms-memory", &mut ui, 10.0)
+            .items
+            .into_iter()
+            .find_map(|d| match d {
+                Drawable::RoundRect { w, color, .. } if color == TRACK => Some(w),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            (rect - (PILL_MAX_TEXT_W + PILL_PAD)).abs() < 1e-3,
+            "the pill caps at the slot"
+        );
     }
 }

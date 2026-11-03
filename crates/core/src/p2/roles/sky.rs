@@ -26,6 +26,15 @@ pub fn condition(code: u16) -> &'static str {
     }
 }
 
+/// The condition in sentence case for the pill: "Partly cloudy".
+pub fn condition_name(code: u16) -> String {
+    let lower = condition(code).to_lowercase();
+    let mut c = lower.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
 pub fn weather(model: &Model, _now: Secs) -> P2Screen {
     let w = model.weather();
     let (lo, hi) = match (w.day_min_c, w.day_max_c) {
@@ -37,11 +46,12 @@ pub fn weather(model: &Model, _now: Secs) -> P2Screen {
     s.ring = RingSpec::fill((w.temp_c - lo) / (hi - lo), AMBER);
     s.ends = Some((format!("{lo:.0}°"), format!("{hi:.0}°")));
     let hour = model.local_hour();
-    s.pill = Some(match w.hourly_precip_mm.iter().position(|p| *p >= 0.1) {
-        Some(0) => ("Raining now".into(), CYAN),
+    let (hint, color) = match w.hourly_precip_mm.iter().position(|p| *p >= 0.1) {
+        Some(0) => ("Raining now".to_string(), CYAN),
         Some(i) => (format!("Rain from {:02}:00", (hour + i) % 24), CYAN),
-        None => ("Dry next 12 h".into(), TEXT2),
-    });
+        None => ("Dry next 12 h".to_string(), TEXT2),
+    };
+    s.pill = Some((format!("{} · {hint}", condition_name(w.code)), color));
     s.card = Some(Card::Spark {
         series: w
             .hourly_temp_c
@@ -168,15 +178,20 @@ mod tests {
             matches!(s.ring.kind, RingKind::Fill { frac, color } if (frac - 0.6).abs() < 1e-5 && color == AMBER)
         );
         assert_eq!(s.ends, Some(("11°".into(), "21°".into())));
-        assert_eq!(s.pill, Some(("Rain from 18:00".into(), CYAN)));
+        assert_eq!(
+            s.pill,
+            Some(("Partly cloudy · Rain from 18:00".into(), CYAN))
+        );
         assert!(
             matches!(&s.card, Some(Card::Spark { series, now_idx, min, max, caption, .. }) if series.len() == 12 && *now_idx == Some(0) && *min == 9.0 && *max == 23.0 && caption == "next 12 h")
         );
         let dry = weather(&weather_model(0, 24.0, vec![0.0; 12]), 0.0);
         assert_eq!(dry.title, "CLEAR");
-        assert_eq!(dry.pill, Some(("Dry next 12 h".into(), TEXT2)));
+        assert_eq!(dry.pill, Some(("Clear · Dry next 12 h".into(), TEXT2)));
         let wet = weather(&weather_model(61, 9.0, vec![2.0; 12]), 0.0);
-        assert_eq!(wet.pill, Some(("Raining now".into(), CYAN)));
+        assert_eq!(wet.pill, Some(("Rain · Raining now".into(), CYAN)));
+        assert_eq!(condition_name(85), "Snow showers");
+        assert_eq!(condition_name(1), "Mainly clear");
         assert_eq!(condition(95), "THUNDER");
         assert_eq!(condition(48), "FOG");
         assert_eq!(condition(123), "WEATHER");

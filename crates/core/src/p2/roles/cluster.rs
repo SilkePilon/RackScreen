@@ -199,7 +199,12 @@ pub fn torrent(model: &Model, _now: Secs) -> P2Screen {
     let mut s = P2Screen::new("DOWNLOADS", format!("{progress:.0}"));
     s.unit = Some("%".into());
     s.ring = RingSpec::fill(progress / 100.0, CYAN);
-    s.pill = Some((name, CYAN));
+    let label = if name.is_empty() {
+        "Downloads".to_string()
+    } else {
+        format!("Downloads · {name}")
+    };
+    s.pill = Some((label, CYAN));
     let speed: i64 = list.iter().map(|t| t.speed_bps).sum();
     let eta = list
         .iter()
@@ -496,7 +501,10 @@ mod tests {
         assert!(
             matches!(s.ring.kind, RingKind::Fill { frac, color } if (frac - 0.78).abs() < 1e-5 && color == CYAN)
         );
-        assert_eq!(pill(&s).0, "ubuntu-24.04.2-live-server-amd64.iso");
+        assert_eq!(
+            pill(&s).0,
+            "Downloads · ubuntu-24.04.2-live-server-amd64.iso"
+        );
         assert!(
             matches!(&s.card, Some(Card::Stats(items)) if items[0] == ("11.4M".to_string(), "speed".to_string(), TEXT) && items[1] == ("15m".to_string(), "ETA".to_string(), TEXT))
         );

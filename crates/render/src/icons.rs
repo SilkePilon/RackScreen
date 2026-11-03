@@ -146,7 +146,7 @@ mod tests {
                 r.icon(),
                 20.0,
                 20.0,
-                18.0,
+                22.0,
                 Color::hex(0xFFFFFF),
                 1.0,
                 1.0,
@@ -166,15 +166,15 @@ mod tests {
                 lit.iter().map(|p| p.1).max().unwrap(),
             );
             assert!(
-                (x1 - x0).max(y1 - y0) >= 12,
-                "{r:?} fills most of its 18 px box: {}x{}",
+                (x1 - x0).max(y1 - y0) >= 15,
+                "{r:?} fills most of its 22 px box: {}x{}",
                 x1 - x0,
                 y1 - y0
             );
             assert!(
                 lit.iter()
-                    .all(|&(x, y)| (10..=30).contains(&x) && (10..=30).contains(&y)),
-                "{r:?} spills out of its 18 px box"
+                    .all(|&(x, y)| (8..=32).contains(&x) && (8..=32).contains(&y)),
+                "{r:?} spills out of its 22 px box"
             );
         }
     }

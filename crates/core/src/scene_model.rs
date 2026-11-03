@@ -54,7 +54,7 @@ impl crate::model::Model {
     pub fn scene(&self, screen: usize, now: Secs, ui: &mut ScreenUi) -> Scene {
         let state = match self.screen(screen) {
             Some(s) => s,
-            None => return connecting_scene("ms-sync", now),
+            None => return connecting_scene("ms-sync", ui, now),
         };
         let role = state.current();
         if let Some(tr) = state.transition(now) {
@@ -75,7 +75,7 @@ impl crate::model::Model {
     /// Role scene without a transition (tests, goldens, calibrate).
     pub fn scene_for_role(&self, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
         if self.wants_connecting(role) {
-            return connecting_scene(role.icon(), now);
+            return connecting_scene(role.icon(), ui, now);
         }
         if role == Role::Jellyfin && !self.jellyfin_configured() {
             ui.for_role(role);
@@ -185,11 +185,11 @@ mod tests {
         runs.find(|t| t.chars().count() > 1 && t != "—")
     }
 
-    /// The connecting scene: the runner arc and the Kubernetes API pill.
+    /// The connecting scene: the runner arc and the "Connecting to Kubernetes API" pill.
     fn connecting(s: &Scene) -> bool {
-        s.items
-            .iter()
-            .any(|d| matches!(d, Drawable::Run { text, .. } if text == "Kubernetes API"))
+        s.items.iter().any(
+            |d| matches!(d, Drawable::Run { text, .. } if text == "Connecting to Kubernetes API"),
+        )
     }
 
     fn link(target: LinkTarget, up: bool) -> Event {

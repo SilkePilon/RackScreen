@@ -182,7 +182,7 @@ mod tests {
     use crate::p2::ring::RingSpec;
     use crate::p2::ui::ScreenUi;
     use crate::theme::layout::CY;
-    use crate::theme::p2::{BLUE, CARD, OK, TEXT2, TRACK};
+    use crate::theme::p2::{BLUE, CARD, OK, TEXT, TEXT2, TRACK};
 
     fn sample() -> P2Screen {
         let mut s = P2Screen::new("cpu", "42");
@@ -223,8 +223,8 @@ mod tests {
             "fill right after the base"
         );
         assert!(
-            matches!(&items[4], Drawable::Icon { name, cx, cy, size, color, .. }
-                if *name == "ms-memory" && *cx == CX && *cy == ICON_CY && *size == ICON_PX && *color == TEXT2),
+            matches!(&items[4], Drawable::Icon { name, cx, cy, size, color, alpha, .. }
+                if *name == "ms-memory" && *cx == CX && *cy == ICON_CY && *size == ICON_PX && *color == TEXT && *alpha == 0.70),
             "icon after the fill, outside the base"
         );
         let runs: Vec<&String> = items
@@ -254,7 +254,7 @@ mod tests {
         let cap = (CX + RING_R * a.sin(), CY - RING_R * a.cos());
         let dx = (cap.0 - CX).abs() - ICON_PX / 2.0;
         assert!(dx > RING_W / 2.0, "icon box edge {dx} px from a cap centre");
-        assert_eq!((ICON_CY, ICON_PX), (CY - RING_R, 18.0));
+        assert_eq!((ICON_CY, ICON_PX), (CY - RING_R, 22.0));
     }
 
     #[test]

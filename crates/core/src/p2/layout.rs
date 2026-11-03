@@ -13,7 +13,8 @@ pub const EDGE_R: f32 = 116.0;
 
 /// The role icon in the ring gap: Material Symbols Rounded at this size,
 /// centred on the ring's radius at 12 o'clock.
-pub const ICON_PX: f32 = 18.0;
+pub const ICON_PX: f32 = 22.0;
+pub const ICON_ALPHA: f32 = 0.70;
 pub const ICON_CY: f32 = CY - RING_R;
 
 pub const HERO_PX: f32 = 64.0;

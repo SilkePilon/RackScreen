@@ -8,7 +8,7 @@ use crate::p2::marquee::GAP_PX;
 use crate::p2::ui::{ScreenUi, UiKey};
 use crate::scene::{ClipRect, Drawable};
 use crate::theme::layout::CX;
-use crate::theme::p2::{TEXT2, TEXT3};
+use crate::theme::p2::{TEXT, TEXT2, TEXT3};
 use crate::theme::Color;
 
 /// Baseline that puts the cap height of `font` at `px` centred on `cy`.
@@ -41,15 +41,15 @@ pub fn run_centred(
     }
 }
 
-/// The role icon in the ring gap at the top, `ICON_PX` across in `TEXT2`.
+/// The role icon in the ring gap at the top, `ICON_PX` across in `TEXT` at 70 %.
 pub fn top_icon(name: &'static str) -> Drawable {
     Drawable::Icon {
         name,
         cx: CX,
         cy: ICON_CY,
         size: ICON_PX,
-        color: TEXT2,
-        alpha: 1.0,
+        color: TEXT,
+        alpha: ICON_ALPHA,
         scale: 1.0,
         dy: 0.0,
     }
@@ -338,7 +338,7 @@ mod tests {
     use super::*;
     use crate::p2::font::{cap_height, digit_width, measure};
     use crate::p2::ui::ScreenUi;
-    use crate::theme::p2::{BLUE, TEXT, TEXT2};
+    use crate::theme::p2::{BLUE, TEXT};
 
     fn runs(ds: &[Drawable]) -> Vec<(f32, f32, String, f32, f32, bool)> {
         ds.iter()
@@ -365,9 +365,9 @@ mod tests {
                 name: "ms-memory",
                 cx: 120.0,
                 cy: 120.0 - RING_R,
-                size: 18.0,
-                color: TEXT2,
-                alpha: 1.0,
+                size: 22.0,
+                color: TEXT,
+                alpha: 0.70,
                 scale: 1.0,
                 dy: 0.0,
             }

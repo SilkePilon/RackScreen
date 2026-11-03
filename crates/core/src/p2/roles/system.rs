@@ -206,15 +206,15 @@ pub fn sun(model: &Model, _now: Secs) -> P2Screen {
         s.pill = Some(("Polar day or night".into(), TEXT2));
         return s;
     };
-    let title = match event {
-        SunEvent::Sunset => "SUNSET",
-        SunEvent::Sunrise => "SUNRISE",
+    let (title, name) = match event {
+        SunEvent::Sunset => ("SUNSET", "Sunset"),
+        SunEvent::Sunrise => ("SUNRISE", "Sunrise"),
     };
     let mut s = P2Screen::new(title, fmt_hhmm(at + offset));
     s.hero_scale = 0.82;
     let progress = sun_progress(sky.sunrise, sky.sunset, unix).unwrap_or(0.0);
     s.ring = RingSpec::parts(vec![(progress, AMBER), (1.0 - progress, NIGHT)]);
-    s.pill = Some((fmt_in(at - unix), AMBER));
+    s.pill = Some((format!("{name} · {}", fmt_in(at - unix)), AMBER));
     let (other_label, other) = match event {
         SunEvent::Sunset => ("sunrise", sky.sunrise),
         SunEvent::Sunrise => ("sunset", sky.sunset),
@@ -526,7 +526,7 @@ mod tests {
         assert!(
             matches!(&s.ring.kind, RingKind::Parts(p) if p.len() == 2 && (p[0].0 - 7.0 / 13.0).abs() < 1e-5 && p[0].1 == AMBER && p[1].1 == NIGHT)
         );
-        assert_eq!(s.pill, Some(("in 6h 00m".into(), AMBER)));
+        assert_eq!(s.pill, Some(("Sunset · in 6h 00m".into(), AMBER)));
         assert!(
             matches!(&s.card, Some(Card::Stats(items)) if items[0] == ("07:00".to_string(), "sunrise".to_string(), TEXT) && items[1] == ("13h 00m".to_string(), "daylight".to_string(), TEXT))
         );
@@ -536,6 +536,7 @@ mod tests {
             ("SUNRISE", "07:00")
         );
         assert!(matches!(&night.card, Some(Card::Stats(items)) if items[0].1 == "sunset"));
+        assert_eq!(night.pill, Some(("Sunrise · in 8h 00m".into(), AMBER)));
         let s = moon(&m, 0.0);
         assert_eq!(
             (s.title.as_str(), s.hero.as_str(), s.unit.as_deref()),
