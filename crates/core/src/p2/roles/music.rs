@@ -9,7 +9,9 @@ use crate::model::Model;
 use crate::music::{fmt_played_ago, position, COVER_PX};
 use crate::p2::chart::{card_drawables, Card, CardLine};
 use crate::p2::font::FontId;
-use crate::p2::layout::{CARD_H, CARD_R, CARD_W, CHART_INSET_TOP, CHART_INSET_X};
+use crate::p2::layout::{
+    CARD_H, CARD_R, CARD_W, CHART_INSET_BOTTOM, CHART_INSET_TOP, CHART_INSET_X,
+};
 use crate::p2::ring::RingSpec;
 use crate::p2::text::{pill, top_icon};
 use crate::p2::ui::ScreenUi;
@@ -180,7 +182,7 @@ pub fn music_scene(model: &Model, now: Secs, ui: &mut ScreenUi) -> Scene {
             card_x + CHART_INSET_X,
             CARD_Y + CHART_INSET_TOP,
             CARD_W - 2.0 * CHART_INSET_X,
-            CARD_H - CHART_INSET_TOP - 14.0,
+            CARD_H - CHART_INSET_TOP - CHART_INSET_BOTTOM,
         );
         scene.items.extend(card_drawables(&lines(t), ui, area, now));
     }
