@@ -20,7 +20,7 @@ pub fn condition(code: u16) -> &'static str {
         61..=67 => "RAIN",
         71..=77 => "SNOW",
         80..=82 => "SHOWERS",
-        85 | 86 => "SNOW SHOWERS",
+        85 | 86 => "SNOW SHOWER", // "Snow showers · Dry next 12 h" overflows the pill
         95..=99 => "THUNDER",
         _ => "WEATHER",
     }
@@ -48,7 +48,7 @@ pub fn weather(model: &Model, _now: Secs) -> P2Screen {
     let hour = model.local_hour();
     let (hint, color) = match w.hourly_precip_mm.iter().position(|p| *p >= 0.1) {
         Some(0) => ("Raining now".to_string(), CYAN),
-        Some(i) => (format!("Rain from {:02}:00", (hour + i) % 24), CYAN),
+        Some(i) => (format!("Rain {:02}:00", (hour + i) % 24), CYAN),
         None => ("Dry next 12 h".to_string(), TEXT2),
     };
     let name = condition_name(w.code);
@@ -56,8 +56,11 @@ pub fn weather(model: &Model, _now: Secs) -> P2Screen {
         .iter()
         .any(|k| name.to_lowercase().contains(k));
     // "Rain · Raining now" says it twice: a wet condition already says it is raining
+    // the generic fallback has nothing to say: the hint alone
     let text = if hint == "Raining now" && wet {
         name
+    } else if condition(w.code) == "WEATHER" {
+        hint
     } else {
         format!("{name} · {hint}")
     };
@@ -188,10 +191,7 @@ mod tests {
             matches!(s.ring.kind, RingKind::Fill { frac, color } if (frac - 0.6).abs() < 1e-5 && color == AMBER)
         );
         assert_eq!(s.ends, Some(("11°".into(), "21°".into())));
-        assert_eq!(
-            s.pill,
-            Some(("Partly cloudy · Rain from 18:00".into(), CYAN))
-        );
+        assert_eq!(s.pill, Some(("Partly cloudy · Rain 18:00".into(), CYAN)));
         assert!(
             matches!(&s.card, Some(Card::Spark { series, now_idx, min, max, caption, .. }) if series.len() == 12 && *now_idx == Some(0) && *min == 9.0 && *max == 23.0 && caption == "next 12 h")
         );
@@ -204,7 +204,7 @@ mod tests {
             Some(("Rain".into(), CYAN)),
             "a wet condition says it once"
         );
-        assert_eq!(condition_name(85), "Snow showers");
+        assert_eq!(condition_name(85), "Snow shower");
         assert_eq!(condition_name(1), "Mainly clear");
         assert_eq!(condition(95), "THUNDER");
         assert_eq!(condition(48), "FOG");
@@ -229,6 +229,32 @@ mod tests {
             "no daily range: ±5 around now"
         );
         assert!(matches!(&s.card, Some(Card::Spark { series, .. }) if series.is_empty()));
+    }
+
+    #[test]
+    fn every_weather_pill_fits_its_slot() {
+        use crate::p2::font::{measure, FontId};
+        use crate::p2::layout::{PILL_MAX_TEXT_W, PILL_PX};
+        // every WMO code (0–99) that has a name of its own
+        for code in (0..=99).filter(|c| condition(*c) != "WEATHER") {
+            let name = condition_name(code);
+            for hint in ["Rain 23:00", "Dry next 12 h"] {
+                let text = format!("{name} · {hint}");
+                let tw = measure(FontId::SemiBold, PILL_PX, &text, 0.0);
+                assert!(
+                    tw <= PILL_MAX_TEXT_W,
+                    "{text:?} is {tw:.1} px, wider than {PILL_MAX_TEXT_W}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_code_shows_only_the_hint() {
+        let s = weather(&weather_model(123, 10.0, vec![0.0; 12]), 0.0);
+        assert_eq!(s.pill, Some(("Dry next 12 h".into(), TEXT2)));
+        let s = weather(&weather_model(123, 10.0, vec![0.0, 0.0, 1.0]), 0.0);
+        assert_eq!(s.pill, Some(("Rain 16:00".into(), CYAN)));
     }
 
     fn iss_model(unix: i64, pass: Option<IssPass>) -> Model {
