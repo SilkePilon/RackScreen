@@ -717,6 +717,17 @@ impl Model {
         self.screens.get(screen)
     }
 
+    /// Show `role` on `screen` now; false when the screen or the role (in
+    /// that screen's list) does not exist. Ignored while a show plays.
+    pub fn jump_to(&mut self, screen: usize, role: Role, now: Secs) -> bool {
+        if self.shows.current().is_some() {
+            return false;
+        }
+        self.screens
+            .get_mut(screen)
+            .is_some_and(|s| s.jump_to(role, now))
+    }
+
     /// Serialise transitions: at most one screen at a time, the next one
     /// picked at random from those whose dwell has elapsed.
     pub fn set_one_at_a_time(&mut self, on: bool) {

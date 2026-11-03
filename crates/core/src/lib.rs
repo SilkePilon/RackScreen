@@ -16,3 +16,4 @@ pub mod screens;
 pub mod shows;
 pub mod sky;
 pub mod theme;
+pub mod tiles;

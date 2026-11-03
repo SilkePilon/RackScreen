@@ -114,6 +114,30 @@ impl ScreenState {
         self.since = self.since.max(now - self.cycle_secs + MIN_CYCLE_SECS) + secs;
     }
 
+    /// How far the current dwell has run, 0..=1; a static screen stays at 0.
+    pub fn progress(&self, now: Secs) -> f64 {
+        if self.roles.len() < 2 {
+            return 0.0;
+        }
+        ((now - self.since) / self.cycle_secs).clamp(0.0, 1.0)
+    }
+
+    pub fn cycle_secs(&self) -> Secs {
+        self.cycle_secs
+    }
+
+    /// Show `role` now (it must be in the list) and start its dwell afresh;
+    /// a running transition is dropped. Returns whether the role was found.
+    pub fn jump_to(&mut self, role: Role, now: Secs) -> bool {
+        let Some(i) = self.roles.iter().position(|r| *r == role) else {
+            return false;
+        };
+        self.current = i;
+        self.since = now;
+        self.transition_started = None;
+        true
+    }
+
     /// When the running transition began, if one is running.
     pub fn transition_started(&self) -> Option<Secs> {
         self.transition_started
@@ -285,5 +309,28 @@ mod tests {
     #[test]
     fn transition_lasts_four_tenths() {
         assert_eq!(TRANSITION_SECS, 0.4);
+    }
+
+    #[test]
+    fn progress_and_jump() {
+        let mut s = ScreenState::new(vec![Role::Cpu, Role::Mem, Role::Pods], 10.0);
+        assert_eq!(s.progress(0.0), 0.0);
+        assert!((s.progress(5.0) - 0.5).abs() < 1e-9);
+        assert_eq!(s.progress(50.0), 1.0);
+        assert_eq!(s.cycle_secs(), 10.0);
+        assert!(s.jump_to(Role::Pods, 20.0));
+        assert_eq!(s.current(), Role::Pods);
+        assert_eq!(s.progress(20.0), 0.0);
+        assert!(!s.transitioning());
+        assert!(!s.jump_to(Role::Weather, 21.0), "not in the list");
+        assert_eq!(s.current(), Role::Pods);
+        // a jump drops a running transition
+        s.start_transition(30.0);
+        assert!(s.transitioning());
+        assert!(s.jump_to(Role::Cpu, 30.1));
+        assert!(!s.transitioning());
+        assert_eq!(s.current(), Role::Cpu);
+        let single = ScreenState::new(vec![Role::Cpu], 10.0);
+        assert_eq!(single.progress(100.0), 0.0, "a static screen never cycles");
     }
 }
