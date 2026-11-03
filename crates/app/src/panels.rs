@@ -139,8 +139,8 @@ pub fn open_panels(
                 .recv()
                 .context("simulator window thread stopped before opening the window")??;
             for (i, (scr, panel)) in cfg.screens.iter().zip(sim_panels).enumerate() {
-                let roles = scr.roles()?;
-                let name = roles[0].name().to_string();
+                let roles = cfg.screen_roles(scr)?;
+                let name = cfg.role_name(roles[0]);
                 let mb = Mailbox::new();
                 let p = building.get();
                 p.handles.push(PanelHandle {
@@ -175,8 +175,8 @@ pub fn open_panels(
         {
             let _ = (sim_grid, key_tx);
             for (i, scr) in cfg.screens.iter().enumerate() {
-                let roles = scr.roles()?;
-                let name = roles[0].name().to_string();
+                let roles = cfg.screen_roles(scr)?;
+                let name = cfg.role_name(roles[0]);
                 let pins = rackscreen_display::gc9a01::Pins {
                     bus: scr.spi,
                     cs: scr.cs,

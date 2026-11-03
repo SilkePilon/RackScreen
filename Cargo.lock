@@ -2588,6 +2588,7 @@ dependencies = [
  "anyhow",
  "fontdue",
  "rackscreen-core",
+ "rackscreen-sources",
  "tiny-skia",
  "usvg",
 ]
@@ -2623,6 +2624,7 @@ dependencies = [
  "chrono-tz",
  "fastrand",
  "futures",
+ "gif",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2634,6 +2636,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sgp4",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",

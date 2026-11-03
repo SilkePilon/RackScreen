@@ -82,6 +82,9 @@ pub enum Role {
     Load,
     Ci,
     Jellyfin,
+    /// `gif:<name>`: the GIF at this index of the config's `gifs:` list. Not
+    /// in `ALL`; the config knows which exist and what they are called.
+    Gif(u16),
 }
 
 impl Role {
@@ -116,12 +119,17 @@ impl Role {
         Role::Jellyfin,
     ];
 
+    /// Position in `ALL`; `Gif(i)` counts on after it, so indices stay unique.
     pub fn index(self) -> usize {
+        if let Role::Gif(i) = self {
+            return Role::ALL.len() + i as usize;
+        }
         Role::ALL
             .iter()
             .position(|r| *r == self)
             .expect("role in ALL")
     }
+    /// The built-in role at `i` in `ALL`.
     pub fn from_index(i: usize) -> Option<Role> {
         Role::ALL.get(i).copied()
     }
@@ -156,6 +164,7 @@ impl Role {
             Role::Load => "LOAD",
             Role::Ci => "CI",
             Role::Jellyfin => "NOW PLAYING",
+            Role::Gif(_) => "GIF",
         }
     }
 
@@ -191,6 +200,7 @@ impl Role {
             Role::Load => "ms-speed",
             Role::Ci => "ms-build",
             Role::Jellyfin => "ms-movie",
+            Role::Gif(_) => "ms-gif_box",
         }
     }
 
@@ -224,8 +234,11 @@ impl Role {
             Role::Load => "load",
             Role::Ci => "ci",
             Role::Jellyfin => "jellyfin",
+            // `gif:<name>` comes from the config (`Config::role_name`).
+            Role::Gif(_) => "gif",
         }
     }
+    /// A built-in role by name; `gif:<name>` is resolved by the config.
     pub fn parse(s: &str) -> Option<Role> {
         Role::ALL.iter().copied().find(|r| r.name() == s)
     }
@@ -312,6 +325,25 @@ mod tests {
         }
         assert_eq!(Role::Cpu.icon(), "ms-memory");
         assert_eq!(Role::Jellyfin.icon(), "ms-movie");
+    }
+
+    #[test]
+    fn gif_roles_sit_outside_all_with_their_own_icon() {
+        let g = Role::Gif(3);
+        assert!(!Role::ALL.contains(&g));
+        assert_eq!(g.icon(), "ms-gif_box");
+        assert_eq!(g.title(), "GIF");
+        assert_eq!(g.name(), "gif", "the full gif:<name> needs the config");
+        assert!(!g.is_cluster() && !g.is_sky());
+        assert_eq!(Role::parse("gif"), None);
+        assert_eq!(Role::Gif(0).index(), Role::ALL.len());
+        assert_eq!(g.index(), Role::ALL.len() + 3);
+        assert_ne!(Role::Gif(0), Role::Gif(1));
+        assert_eq!(
+            Role::from_index(g.index()),
+            None,
+            "only built-in roles map back"
+        );
     }
 
     #[test]

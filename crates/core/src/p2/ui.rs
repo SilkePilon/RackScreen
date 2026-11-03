@@ -44,6 +44,8 @@ pub struct ScreenUi {
     rolls: HashMap<UiKey, Roll>,
     marquees: HashMap<UiKey, Marquee>,
     fades: HashMap<UiKey, ColorFade>,
+    /// When each key was first asked for (`since`).
+    starts: HashMap<UiKey, Secs>,
     /// The outgoing role's state while a transition runs.
     out: Option<Box<ScreenUi>>,
 }
@@ -86,6 +88,12 @@ impl ScreenUi {
 
     pub fn role(&self) -> Option<Role> {
         self.role
+    }
+
+    /// The first `now` this key was asked for under the current role: a
+    /// clock that starts when something first shows.
+    pub fn since(&mut self, key: UiKey, now: Secs) -> Secs {
+        *self.starts.entry(key).or_insert(now)
     }
 
     pub fn glide(&mut self, key: UiKey, target: f32, now: Secs) -> f32 {
@@ -258,5 +266,15 @@ mod tests {
             None,
             "after the transition the slot starts empty"
         );
+    }
+
+    #[test]
+    fn since_keeps_the_first_sight_until_the_role_changes() {
+        let mut ui = ScreenUi::new();
+        ui.for_role(Role::Gif(0));
+        assert_eq!(ui.since(("gif", 0), 3.0), 3.0);
+        assert_eq!(ui.since(("gif", 0), 7.0), 3.0);
+        ui.for_role(Role::Gif(1));
+        assert_eq!(ui.since(("gif", 0), 9.0), 9.0, "a new role starts over");
     }
 }

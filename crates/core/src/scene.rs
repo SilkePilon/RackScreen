@@ -87,6 +87,11 @@ pub enum Drawable {
         frame: WorldRef,
         x0: u32,
     },
+    /// Frame `frame` of a decoded GIF, copied over the whole screen.
+    Image {
+        frames: crate::gif::GifRef,
+        frame: u16,
+    },
 }
 
 /// A shared world frame, compared by identity: all screens of one tick hold
@@ -145,6 +150,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Sc
     ui.for_role(role);
     match role {
         Role::PowerMix => crate::p2::roles::power_mix::power_mix_scene(model, now, ui),
+        Role::Gif(index) => model.gif_scene(index, now, ui),
         _ => {
             let screen = crate::p2::roles::screen(model, role, now)
                 .expect("every other role has a P2 builder");

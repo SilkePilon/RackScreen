@@ -1,6 +1,7 @@
 //! Turns a `Scene` into pixels.
 
 use anyhow::Result;
+use rackscreen_core::gif::GifFrames;
 use rackscreen_core::scene::{Drawable, Scene};
 use rackscreen_core::shows::world::{WorldFrame, SCALE, WORLD_H};
 use tiny_skia::Pixmap;
@@ -72,6 +73,7 @@ impl Painter {
         match d {
             Drawable::Clear(c) => px.fill(skia_color(*c, 1.0)),
             Drawable::World { frame, x0 } => blit_world(px, &frame.0, *x0),
+            Drawable::Image { frames, frame } => blit_image(px, &frames.0, *frame),
             Drawable::Icon {
                 name,
                 cx,
@@ -194,6 +196,15 @@ fn blit_world(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
             let dst = py as usize * stride;
             data[dst..dst + row.len()].copy_from_slice(&row);
         }
+    }
+}
+
+/// Copy a GIF frame over the whole pixmap. Frames are opaque premultiplied
+/// RGBA of the pixmap's size; any other size (never built) is skipped.
+fn blit_image(px: &mut Pixmap, frames: &GifFrames, frame: u16) {
+    let i = frame as usize;
+    if i < frames.len() && frames.frame(i).len() == px.data().len() {
+        px.data_mut().copy_from_slice(frames.frame(i));
     }
 }
 
@@ -379,6 +390,42 @@ mod tests {
             blit_world_by_pixel(&mut b, &world, x0);
             assert!(a.data() == b.data(), "x0 {x0}");
         }
+    }
+
+    #[test]
+    fn image_copies_the_gif_frame_bytes() {
+        use rackscreen_core::gif::{GifFrames, GifRef, FRAME_BYTES, GIF_SIDE};
+        use std::sync::Arc;
+        let pattern = |seed: u8| -> Vec<u8> {
+            (0..FRAME_BYTES)
+                .map(|i| {
+                    if i % 4 == 3 {
+                        255
+                    } else {
+                        (i / 4 % 251) as u8 ^ seed
+                    }
+                })
+                .collect()
+        };
+        let g = GifRef(Arc::new(
+            GifFrames::new(vec![(pattern(0), 100), (pattern(0x5a), 100)]).unwrap(),
+        ));
+        let px = render_one(Drawable::Image {
+            frames: g.clone(),
+            frame: 1,
+        });
+        // the whole frame is copied; the round panel hides the corners
+        let r = GIF_SIDE as f32 / 2.0;
+        for y in 0..GIF_SIDE {
+            for x in 0..GIF_SIDE {
+                let (dx, dy) = (x as f32 + 0.5 - r, y as f32 + 0.5 - r);
+                if dx * dx + dy * dy <= r * r {
+                    let i = ((y * GIF_SIDE + x) * 4) as usize;
+                    assert_eq!(&px.data()[i..i + 4], &g.0.frame(1)[i..i + 4], "({x},{y})");
+                }
+            }
+        }
+        assert_eq!(px.data(), g.0.frame(1));
     }
 
     #[test]

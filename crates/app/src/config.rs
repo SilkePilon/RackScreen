@@ -40,8 +40,20 @@ pub struct Config {
     pub jellyfin: JellyfinCfg,
     #[serde(default)]
     pub shows: ShowsCfg,
+    /// GIPHY/Tenor/`.gif` links a screen can show as `gif:<name>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gifs: Vec<GifCfg>,
     #[serde(default)]
     pub screens: Vec<ScreenCfg>,
+}
+
+/// One pasted GIF link, shown by a screen role `gif:<name>`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct GifCfg {
+    /// Lowercase letters, digits and `-`; unique.
+    pub name: String,
+    /// A GIPHY or Tenor page or media link, or any https link ending in `.gif`.
+    pub url: String,
 }
 
 /// Four-screen pixel shows.
@@ -292,13 +304,29 @@ fn default_cycle() -> u64 {
     15
 }
 
+/// The prefix of a GIF role in a roles list: `gif:<name>`.
+pub const GIF_ROLE_PREFIX: &str = "gif:";
+
 impl ScreenCfg {
-    /// Every configured role, in cycling order. At least one.
+    /// Every configured role, in cycling order. At least one. A `gif:` entry
+    /// needs the `gifs:` list and is an error here; use `Config::screen_roles`.
     pub fn roles(&self) -> Result<Vec<Role>> {
+        self.roles_in(&[])
+    }
+    /// Every configured role, `gif:<name>` resolved against `gifs`.
+    pub fn roles_in(&self, gifs: &[GifCfg]) -> Result<Vec<Role>> {
         anyhow::ensure!(!self.roles.is_empty(), "screen has no roles");
         self.roles
             .iter()
-            .map(|r| Role::parse(r).with_context(|| format!("unknown screen role '{r}'")))
+            .map(|r| match r.strip_prefix(GIF_ROLE_PREFIX) {
+                Some(name) => gifs
+                    .iter()
+                    .position(|g| g.name == name)
+                    .and_then(|i| u16::try_from(i).ok())
+                    .map(Role::Gif)
+                    .with_context(|| format!("unknown GIF '{r}': add '{name}' under gifs:")),
+                None => Role::parse(r).with_context(|| format!("unknown screen role '{r}'")),
+            })
             .collect()
     }
     /// The role shown first, used where a single role identifies the screen.
@@ -481,6 +509,26 @@ pub(crate) fn sudo_user() -> Option<nix::unistd::User> {
     nix::unistd::User::from_name(&name).ok().flatten()
 }
 
+/// Where downloaded GIFs are cached: `$XDG_CACHE_HOME/rackscreen/gifs`, by
+/// default `~/.cache/rackscreen/gifs` of the user `~` stands for.
+pub fn gif_cache_dir() -> Option<PathBuf> {
+    let xdg = if sudo_user().is_some() {
+        None
+    } else {
+        std::env::var("XDG_CACHE_HOME").ok()
+    };
+    resolved_home().map(|home| gif_cache_dir_with(xdg.as_deref(), &home))
+}
+
+/// `gif_cache_dir` for a given `XDG_CACHE_HOME` (used only when absolute) and home.
+pub fn gif_cache_dir_with(xdg_cache_home: Option<&str>, home: &Path) -> PathBuf {
+    let base = match xdg_cache_home {
+        Some(x) if Path::new(x).is_absolute() => PathBuf::from(x),
+        _ => home.join(".cache"),
+    };
+    base.join("rackscreen").join("gifs")
+}
+
 /// The home directory `~` stands for: under sudo the invoking user's, else ours.
 fn resolved_home() -> Option<PathBuf> {
     sudo_user().map(|u| u.dir).or_else(dirs::home_dir)
@@ -619,6 +667,49 @@ impl Config {
             .with_context(|| format!("rename {} to {}", tmp.display(), path.display()))
     }
 
+    /// A screen's roles, `gif:<name>` resolved against `gifs:`.
+    pub fn screen_roles(&self, screen: &ScreenCfg) -> Result<Vec<Role>> {
+        screen.roles_in(&self.gifs)
+    }
+
+    /// The name a role has in this config: `gif:<name>` for a GIF.
+    pub fn role_name(&self, role: Role) -> String {
+        match role {
+            Role::Gif(i) => format!(
+                "{GIF_ROLE_PREFIX}{}",
+                self.gifs.get(i as usize).map_or("?", |g| g.name.as_str())
+            ),
+            r => r.name().to_string(),
+        }
+    }
+
+    /// Every role a screen can show here: the built-in ones, then each GIF.
+    pub fn pickable_roles(&self) -> Vec<Role> {
+        let gifs = (0..self.gifs.len().min(u16::MAX as usize)).map(|i| Role::Gif(i as u16));
+        Role::ALL.iter().copied().chain(gifs).collect()
+    }
+
+    /// `(index, name, url)` of each GIF some screen shows, in `gifs:` order;
+    /// only these are downloaded and decoded.
+    pub fn used_gifs(&self) -> Vec<(u16, String, String)> {
+        let used: std::collections::HashSet<u16> = self
+            .screens
+            .iter()
+            .filter_map(|s| self.screen_roles(s).ok())
+            .flatten()
+            .filter_map(|r| match r {
+                Role::Gif(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        self.gifs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| used.contains(&(*i as u16)))
+            .map(|(i, g)| (i as u16, g.name.clone(), g.url.trim().to_string()))
+            .collect()
+    }
+
     /// `(lat, lon)` when both are set.
     pub fn location(&self) -> Option<(f64, f64)> {
         match (self.location.lat, self.location.lon) {
@@ -632,9 +723,24 @@ impl Config {
             !self.screens.is_empty(),
             "config needs at least one [[screens]] entry"
         );
+        for (i, g) in self.gifs.iter().enumerate() {
+            anyhow::ensure!(
+                rackscreen_core::gif::valid_gif_name(&g.name),
+                "gifs: '{}' is not a valid name (lowercase letters, digits and -)",
+                g.name
+            );
+            anyhow::ensure!(
+                !self.gifs[..i].iter().any(|o| o.name == g.name),
+                "gifs: '{}' is listed twice",
+                g.name
+            );
+            if let Err(e) = rackscreen_core::gif::classify_link(&g.url) {
+                anyhow::bail!("gifs: '{}': {e} (got {})", g.name, g.url.trim());
+            }
+        }
         for s in &self.screens {
-            let roles = s.roles()?;
-            let name = roles[0].name();
+            let roles = self.screen_roles(s)?;
+            let name = self.role_name(roles[0]);
             anyhow::ensure!(
                 matches!(s.rotate, 0 | 90 | 180 | 270),
                 "screen '{}': rotate must be 0, 90, 180 or 270 (got {})",
@@ -1208,5 +1314,92 @@ mod tests {
         assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
         // the default list is not written out, so new shows reach old configs
         assert!(!Config::default().to_yaml().unwrap().contains("list:"));
+    }
+
+    const GIF_YAML: &str = "gifs:\n  - { name: party, url: \"https://giphy.com/gifs/some-slug-AbCdEf123\" }\n  - { name: nod, url: \"https://tenor.com/view/some-slug-12345678\" }\nscreens:\n  - { roles: [cpu, \"gif:party\", mem], cycle_secs: 10, spi: 0, cs: 0, dc: 6, rst: 5 }\n  - { roles: [\"gif:nod\"], spi: 0, cs: 1, dc: 13, rst: 26 }\n  - { roles: [\"gif:party\"], spi: 1, cs: 0, dc: 23, rst: 22 }\n";
+
+    #[test]
+    fn gif_roles_resolve_against_the_gifs_list() {
+        let c = Config::from_yaml(GIF_YAML).unwrap();
+        c.validate().unwrap();
+        assert_eq!(c.gifs.len(), 2);
+        assert_eq!(c.gifs[1].name, "nod");
+        assert_eq!(
+            c.screen_roles(&c.screens[0]).unwrap(),
+            vec![Role::Cpu, Role::Gif(0), Role::Mem]
+        );
+        assert_eq!(c.screen_roles(&c.screens[1]).unwrap(), vec![Role::Gif(1)]);
+        assert_eq!(c.role_name(Role::Gif(1)), "gif:nod");
+        assert_eq!(c.role_name(Role::Cpu), "cpu");
+        assert_eq!(c.role_name(Role::Gif(9)), "gif:?");
+        assert!(
+            c.screens[0].roles().is_err(),
+            "without the gifs list a gif entry is unknown"
+        );
+        let mut pick = Role::ALL.to_vec();
+        pick.extend([Role::Gif(0), Role::Gif(1)]);
+        assert_eq!(c.pickable_roles(), pick);
+        // each used GIF once, in list order
+        assert_eq!(
+            c.used_gifs(),
+            vec![
+                (
+                    0,
+                    "party".to_string(),
+                    "https://giphy.com/gifs/some-slug-AbCdEf123".to_string()
+                ),
+                (
+                    1,
+                    "nod".to_string(),
+                    "https://tenor.com/view/some-slug-12345678".to_string()
+                ),
+            ]
+        );
+        assert_eq!(Config::from_yaml(&c.to_yaml().unwrap()).unwrap(), c);
+        assert!(
+            !Config::default().to_yaml().unwrap().contains("gifs"),
+            "no gifs: block until one is added"
+        );
+    }
+
+    #[test]
+    fn gif_config_errors_name_the_entry() {
+        let err = |c: &Config| format!("{:#}", c.validate().unwrap_err());
+        let mut c = Config::from_yaml(GIF_YAML).unwrap();
+        c.screens[1].roles = vec!["gif:dance".into()];
+        let e = err(&c);
+        assert!(e.contains("gif:dance"), "{e}");
+        let mut c = Config::from_yaml(GIF_YAML).unwrap();
+        c.gifs[1].name = "Nod Nod".into();
+        c.screens[1].roles = vec!["cpu".into()];
+        assert!(err(&c).contains("Nod Nod"), "{}", err(&c));
+        let mut c = Config::from_yaml(GIF_YAML).unwrap();
+        c.gifs[1].name = "party".into();
+        assert!(err(&c).contains("twice"), "{}", err(&c));
+        let mut c = Config::from_yaml(GIF_YAML).unwrap();
+        c.gifs[0].url = "https://example.com/a.png".into();
+        let e = err(&c);
+        assert!(e.contains("party") && e.contains("example.com"), "{e}");
+        // an unused GIF is still checked, and fine when valid
+        let mut c = Config::from_yaml(GIF_YAML).unwrap();
+        c.screens[1].roles = vec!["cpu".into()];
+        c.validate().unwrap();
+        assert_eq!(c.used_gifs().len(), 1);
+    }
+
+    #[test]
+    fn gif_cache_dir_follows_xdg_cache_home() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            gif_cache_dir_with(Some("/var/cache/x"), home),
+            PathBuf::from("/var/cache/x/rackscreen/gifs")
+        );
+        for unset in [None, Some(""), Some("relative/path")] {
+            assert_eq!(
+                gif_cache_dir_with(unset, home),
+                PathBuf::from("/home/u/.cache/rackscreen/gifs"),
+                "{unset:?}"
+            );
+        }
     }
 }

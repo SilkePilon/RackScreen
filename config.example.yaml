@@ -81,6 +81,13 @@ shows:
   # list: [freight]        # show ids to pick from (default: every show)
   # order: [0, 1, 2, 3]    # config index of each screen from the left (default: config order)
 
+# GIFs a screen can show as the role gif:<name>: paste a GIPHY or Tenor link, or
+# any https link ending in .gif. Each GIF a screen uses takes up to ~35 MB of RAM;
+# downloads are cached in ~/.cache/rackscreen/gifs ($XDG_CACHE_HOME/rackscreen/gifs).
+# gifs:
+#   - { name: party, url: "https://giphy.com/gifs/some-slug-AbCdEf123" }
+#   - { name: nod,   url: "https://tenor.com/view/some-slug-12345678" }
+
 display:
   brightness: 1.0
   fps: 60
@@ -90,7 +97,8 @@ display:
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
-#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin
+#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin,
+#        gif:<name> (a GIF from the gifs: list)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:

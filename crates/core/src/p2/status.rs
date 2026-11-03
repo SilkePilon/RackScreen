@@ -25,6 +25,10 @@ pub enum NoData {
     Exporter,
     /// A URL or similar the role cannot work without is empty in the config.
     Config,
+    /// A GIF is downloading or decoding.
+    Loading,
+    /// A GIF could not be fetched or decoded.
+    GifFailed,
 }
 
 pub fn no_data_screen(role: Role, why: NoData) -> P2Screen {
@@ -38,6 +42,8 @@ pub fn no_data_screen(role: Role, why: NoData) -> P2Screen {
         NoData::Location => ("Location needed".into(), WARN),
         NoData::Exporter => ("No exporter".into(), WARN),
         NoData::Config => ("Check config".into(), WARN),
+        NoData::Loading => ("Loading".into(), TEXT2),
+        NoData::GifFailed => ("GIF failed".into(), WARN),
     });
     s
 }
@@ -114,6 +120,20 @@ mod tests {
     use crate::scene::Drawable;
     use crate::theme::p2::{TEXT2, TEXT3, WARN};
     use crate::theme::Role;
+
+    #[test]
+    fn gif_status_pills_fit_the_slot() {
+        for (why, text, color) in [
+            (NoData::Loading, "Loading", TEXT2),
+            (NoData::GifFailed, "GIF failed", WARN),
+        ] {
+            let s = no_data_screen(Role::Gif(0), why);
+            assert_eq!(s.icon, "ms-gif_box");
+            assert_eq!(s.pill, Some((text.to_string(), color)));
+            let w = crate::p2::font::measure(FontId::SemiBold, PILL_PX, text, 0.0);
+            assert!(w <= PILL_MAX_TEXT_W, "{text}: {w} px");
+        }
+    }
 
     #[test]
     fn night_scene_is_black_with_a_dim_centred_moon() {

@@ -1,5 +1,6 @@
 pub mod calibrate;
 pub mod configure;
+pub mod gifs;
 pub mod install;
 pub mod menu;
 pub mod run;

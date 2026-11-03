@@ -58,6 +58,7 @@ icons!(
     "ms-movie",
     "ms-sync",
     "ms-bedtime",
+    "ms-gif_box",
 );
 
 #[cfg(test)]
