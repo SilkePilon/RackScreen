@@ -49,13 +49,14 @@ pub struct AppState {
 impl AppState {
     pub fn new(hub: Arc<Hub>, password: String, port: u16) -> AppState {
         let screens = hub.frames.screens();
+        let update = UpdateState::load(crate::update::job_path(), hub.version);
         AppState {
             hub,
             sessions: Mutex::new(HashMap::new()),
             login_failures: Mutex::new(VecDeque::new()),
             password: RwLock::new(password),
             spotify: Mutex::new(None),
-            update: Mutex::new(UpdateState::default()),
+            update: Mutex::new(update),
             png_cache: Mutex::new(vec![None; screens]),
             config_lock: tokio::sync::Mutex::new(()),
             port,

@@ -175,6 +175,10 @@ in-memory, 30 days).
 * `GET /api/update` → `{ "current": "0.13.0", "latest": "v0.13.1" | null, "newer": bool, "can_self_update": bool, "job": { "state": "idle"|"running"|"done"|"failed", "log": ["..."] } }`
   (latest checked at most hourly; `can_self_update` = `sudo -n -l /usr/local/bin/rackscreen update` succeeds).
 * `POST /api/update` → starts `sudo -n /usr/local/bin/rackscreen update` in the background; the service restarts at the end and the UI reconnects.
+  The job (state, start version, target, log) is kept in
+  `$XDG_STATE_HOME/rackscreen/update.json` (default `~/.local/state`) of the
+  service user, so after the restart `GET /api/update` reports `done` when the
+  new process runs a newer version than the job started from, else `failed`.
 
 ## Frontend
 
