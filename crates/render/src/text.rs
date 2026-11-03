@@ -11,7 +11,7 @@ use tiny_skia::{BlendMode, FilterQuality, IntSize, Pixmap, PixmapPaint, Transfor
 
 pub struct TextRenderer {
     /// Outfit Medium, SemiBold, Bold in `FontId` order.
-    inter: [Font; 3],
+    fonts: [Font; 3],
     /// Glyphs keyed by face, character and size in half pixels.
     run_cache: HashMap<(FontId, char, u32), (Metrics, Vec<u8>)>,
     /// Tinted glyph pixmaps for rotated drawing, keyed by face, char, half px, rgb.
@@ -23,15 +23,15 @@ impl TextRenderer {
     pub fn new() -> Result<Self> {
         let load = |id: FontId| {
             Font::from_bytes(bytes(id), FontSettings::default())
-                .map_err(|e| anyhow::anyhow!("inter {id:?}: {e}"))
+                .map_err(|e| anyhow::anyhow!("font {id:?}: {e}"))
         };
-        let inter = [
+        let fonts = [
             load(FontId::Medium)?,
             load(FontId::SemiBold)?,
             load(FontId::Bold)?,
         ];
         Ok(Self {
-            inter,
+            fonts,
             run_cache: HashMap::new(),
             curved_cache: HashMap::new(),
         })
@@ -42,12 +42,12 @@ impl TextRenderer {
         (px * 2.0).round().max(1.0) as u32
     }
 
-    fn inter_glyph(&mut self, id: FontId, ch: char, px: f32) -> (Metrics, Vec<u8>) {
+    fn font_glyph(&mut self, id: FontId, ch: char, px: f32) -> (Metrics, Vec<u8>) {
         let key = (id, ch, Self::half_px(px));
         if let Some(g) = self.run_cache.get(&key) {
             return g.clone();
         }
-        let g = self.inter[id.index()].rasterize(ch, key.2 as f32 / 2.0);
+        let g = self.fonts[id.index()].rasterize(ch, key.2 as f32 / 2.0);
         self.run_cache.insert(key, g.clone());
         g
     }
@@ -65,7 +65,7 @@ impl TextRenderer {
         if let Some(g) = self.curved_cache.get(&key) {
             return g.clone();
         }
-        let (m, cov) = self.inter_glyph(id, ch, px);
+        let (m, cov) = self.font_glyph(id, ch, px);
         let built = IntSize::from_wh(m.width as u32, m.height as u32).and_then(|size| {
             let mut data = Vec::with_capacity(cov.len() * 4);
             for c in &cov {
@@ -163,7 +163,7 @@ impl TextRenderer {
         let base = baseline.round() as i32;
         let mut pen = x;
         for ch in text.chars() {
-            let (m, bitmap) = self.inter_glyph(font, ch, px);
+            let (m, bitmap) = self.font_glyph(font, ch, px);
             let gx = pen.round() as i32 + m.xmin;
             let gtop = base - (m.height as i32 + m.ymin);
             let data = pix.data_mut();

@@ -102,7 +102,7 @@ mod tests {
         assert!(advance(FontId::Bold, 20.0, 'M') > advance(FontId::Medium, 20.0, 'M'));
         assert_eq!(measure(FontId::Medium, 10.0, "", 1.0), 0.0);
         for id in FontId::ALL {
-            for ch in ['€', '°', '↓', '↑', '·', '—', '%', '/'] {
+            for ch in ['€', '°', '↓', '↑', '→', '·', '—', '–', '×', '±', '%', '/'] {
                 assert!(font(id).has_glyph(ch), "{id:?} lacks {ch}");
             }
             assert!(!bytes(id).is_empty());

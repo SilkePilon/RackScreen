@@ -8,11 +8,10 @@ for i in $ICONS; do
   grep -q "<svg" "assets/icons/$i.svg" || { echo "bad svg: $i"; exit 1; }
 done
 curl -sSL "https://raw.githubusercontent.com/lucide-icons/lucide/main/LICENSE" -o assets/icons/LICENSE
-TMP=$(mktemp -d)
-curl -sSL "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -o "$TMP/inter.zip"
-echo "ff970a5d4561a04f102a7cb781adbd6ac4e9b6c460914c7a101f15acb7f7d1a4  $TMP/inter.zip" | sha256sum -c -
-unzip -q -o "$TMP/inter.zip" extras/ttf/Inter-Medium.ttf extras/ttf/Inter-SemiBold.ttf extras/ttf/Inter-Bold.ttf LICENSE.txt -d "$TMP"
-cp "$TMP"/extras/ttf/Inter-Medium.ttf "$TMP"/extras/ttf/Inter-SemiBold.ttf "$TMP"/extras/ttf/Inter-Bold.ttf assets/fonts/
-cp "$TMP/LICENSE.txt" assets/fonts/Inter-LICENSE.txt
-rm -rf "$TMP"
+OUTFIT="https://raw.githubusercontent.com/Outfitio/Outfit-Fonts/main"
+for f in Outfit-Medium Outfit-SemiBold Outfit-Bold; do
+  curl -fsSL "$OUTFIT/fonts/ttf/$f.ttf" -o "assets/fonts/$f.ttf"
+  head -c 4 "assets/fonts/$f.ttf" | od -An -tx1 | grep -q "00 01 00 00" || { echo "bad ttf: $f"; exit 1; }
+done
+curl -fsSL "$OUTFIT/OFL.txt" -o assets/fonts/Outfit-LICENSE.txt
 echo "assets ok"
