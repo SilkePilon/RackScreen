@@ -6,11 +6,10 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rppal::gpio::{Gpio, OutputPin};
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
-use tiny_skia::Pixmap;
 
-use rackscreen_render::frame::{pack_rgb565, Rect};
+use rackscreen_render::frame::Rect;
 
-use crate::Display;
+use crate::{Display, PackedFrame};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Pins {
@@ -140,11 +139,10 @@ pub struct Gc9a01 {
     dc: OutputPin,
     rst: OutputPin,
     chunk: usize,
-    brightness: f32,
 }
 
 impl Gc9a01 {
-    pub fn open(pins: Pins, chunk: usize, brightness: f32) -> Result<Self> {
+    pub fn open(pins: Pins, chunk: usize) -> Result<Self> {
         let sysfs = std::fs::read_to_string(SPIDEV_BUFSIZ_PATH).ok();
         let effective = effective_chunk(chunk, sysfs.as_deref());
         if effective < chunk {
@@ -174,7 +172,6 @@ impl Gc9a01 {
             dc,
             rst,
             chunk: chunk.max(64),
-            brightness,
         };
         d.reset();
         d.init()?;
@@ -238,13 +235,15 @@ impl Gc9a01 {
 }
 
 impl Display for Gc9a01 {
-    fn push(&mut self, frame: &Pixmap, dirty: Rect) -> Result<()> {
-        if dirty.is_empty() {
-            return Ok(());
+    fn push(&mut self, frame: &PackedFrame) -> Result<()> {
+        for (r, bytes) in frame.slices() {
+            if r.is_empty() {
+                continue;
+            }
+            self.set_window(r)?;
+            self.data(bytes)?;
         }
-        let bytes = pack_rgb565(frame, dirty, self.brightness);
-        self.set_window(dirty)?;
-        self.data(&bytes)
+        Ok(())
     }
 
     fn sleep(&mut self) -> Result<()> {

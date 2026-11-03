@@ -111,7 +111,15 @@ impl Monitor {
             .handles
             .iter()
             .enumerate()
-            .map(|(i, h)| ScreenSlot::new(i, h.first_role(), h.orient.clone(), h.mailbox.clone()))
+            .map(|(i, h)| {
+                ScreenSlot::new(
+                    i,
+                    h.first_role(),
+                    h.orient.clone(),
+                    h.mailbox.clone(),
+                    cfg.display.brightness,
+                )
+            })
             .collect();
         // Each screen cycles through its configured role list.
         let screens_roles: Vec<Vec<Role>> =

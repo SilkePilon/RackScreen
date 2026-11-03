@@ -184,12 +184,8 @@ pub fn open_panels(
                     rst: scr.rst,
                     hz: scr.hz,
                 };
-                let dev = rackscreen_display::gc9a01::Gc9a01::open(
-                    pins,
-                    cfg.display.spi_chunk,
-                    cfg.display.brightness,
-                )
-                .with_context(|| format!("open display {name}"))?;
+                let dev = rackscreen_display::gc9a01::Gc9a01::open(pins, cfg.display.spi_chunk)
+                    .with_context(|| format!("open display {name}"))?;
                 let d: Box<dyn Display> = Box::new(dev);
                 let mb = Mailbox::new();
                 let p = building.get();

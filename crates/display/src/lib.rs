@@ -4,7 +4,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use anyhow::Result;
-use tiny_skia::Pixmap;
+use rackscreen_render::frame::merge_rects;
 
 pub use rackscreen_render::frame::Rect;
 
@@ -13,28 +13,49 @@ pub mod gc9a01;
 #[cfg(feature = "sim")]
 pub mod sim;
 
+/// Big-endian RGB565 for one or more panel rectangles; the bytes of each
+/// rect follow the previous one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackedFrame {
+    pub rects: Vec<Rect>,
+    pub bytes: Vec<u8>,
+}
+
+impl PackedFrame {
+    pub fn slices(&self) -> impl Iterator<Item = (Rect, &[u8])> {
+        let mut off = 0;
+        self.rects.iter().map(move |r| {
+            let n = r.area() as usize * 2;
+            let s = &self.bytes[off..off + n];
+            off += n;
+            (*r, s)
+        })
+    }
+}
+
 pub trait Display: Send {
-    fn push(&mut self, frame: &Pixmap, dirty: Rect) -> Result<()>;
+    fn push(&mut self, frame: &PackedFrame) -> Result<()>;
     fn sleep(&mut self) -> Result<()>;
     fn wake(&mut self) -> Result<()>;
 }
 
 #[derive(Debug)]
 pub enum DisplayCmd {
-    Frame(Pixmap, Rect),
+    Frame(PackedFrame),
     Sleep,
     Wake,
     Quit,
 }
 
-/// What is waiting for the display thread. Frames accumulate (dirty rects are
-/// unioned, the newest full pixmap is kept) so a slow panel never misses a
-/// region that changed in a frame it did not get to push. A pending control
+/// What is waiting for the display thread. Frames accumulate (the rects of an
+/// untaken frame join the next one, which is packed from the newest pixels) so
+/// a slow panel never misses a region that changed in a frame it did not get
+/// to push. A pending control
 /// command is delivered before the pending frame and never causes a frame to
 /// be dropped.
 #[derive(Default)]
 struct Slot {
-    frame: Option<(Pixmap, Rect)>,
+    frame: Option<PackedFrame>,
     control: Option<DisplayCmd>,
 }
 
@@ -80,19 +101,33 @@ impl Mailbox {
         std::mem::take(&mut *self.stats.lock().unwrap())
     }
 
+    /// Queue a control command. A `Frame` given here replaces the pending
+    /// frame as is; use `put_frame` for rendered frames.
     pub fn put(&self, cmd: DisplayCmd) {
         let (lock, cv) = &*self.inner;
         let mut slot = lock.lock().unwrap();
         match cmd {
-            DisplayCmd::Frame(px, rect) => {
-                let rect = match slot.frame.take() {
-                    Some((_, old)) => old.union(rect),
-                    None => rect,
-                };
-                slot.frame = Some((px, rect));
-            }
+            DisplayCmd::Frame(f) => slot.frame = Some(f),
             control => slot.control = Some(control),
         }
+        cv.notify_one();
+    }
+
+    /// Queue a rendered frame. `rects` changed since the previous frame. When
+    /// the display thread has not taken the previous frame yet, its rects join
+    /// this one so no region is lost, and `pack` is called once for the merged
+    /// set: it must read the newest pixels. Runs under the mailbox lock.
+    pub fn put_frame(&self, rects: &[Rect], pack: impl FnOnce(&[Rect]) -> Vec<u8>) {
+        let (lock, cv) = &*self.inner;
+        let mut slot = lock.lock().unwrap();
+        let mut all = rects.to_vec();
+        if let Some(old) = slot.frame.take() {
+            all.extend(old.rects);
+        }
+        let full = Rect::full();
+        let rects = merge_rects(all, full.w, full.h);
+        let bytes = pack(&rects);
+        slot.frame = Some(PackedFrame { rects, bytes });
         cv.notify_one();
     }
 
@@ -115,7 +150,7 @@ impl Mailbox {
         if let Some(c) = slot.control.take() {
             return Some(c);
         }
-        slot.frame.take().map(|(px, r)| DisplayCmd::Frame(px, r))
+        slot.frame.take().map(DisplayCmd::Frame)
     }
 }
 
@@ -128,13 +163,13 @@ pub fn spawn_display_thread(
         .name(format!("display-{name}"))
         .spawn(move || loop {
             let result = match mailbox.take() {
-                DisplayCmd::Frame(px, rect) => {
+                DisplayCmd::Frame(f) => {
                     let t0 = std::time::Instant::now();
-                    let r = display.push(&px, rect);
-                    mailbox.record_push(
-                        t0.elapsed().as_secs_f64() * 1000.0,
-                        rect.w as u64 * rect.h as u64 * 2,
-                    );
+                    let r = display.push(&f);
+                    if r.is_ok() {
+                        mailbox
+                            .record_push(t0.elapsed().as_secs_f64() * 1000.0, f.bytes.len() as u64);
+                    }
                     r
                 }
                 DisplayCmd::Sleep => display.sleep(),
@@ -156,56 +191,24 @@ pub fn spawn_display_thread(
 mod tests {
     use super::*;
 
-    fn frame_at(tag: u8, x: u32, y: u32) -> DisplayCmd {
-        let mut p = Pixmap::new(2, 2).unwrap();
-        p.data_mut()[0] = tag;
-        DisplayCmd::Frame(p, Rect { x, y, w: 1, h: 1 })
-    }
-
-    fn frame(tag: u8) -> DisplayCmd {
-        let mut p = Pixmap::new(2, 2).unwrap();
-        p.data_mut()[0] = tag;
-        DisplayCmd::Frame(
-            p,
-            Rect {
-                x: 0,
-                y: 0,
-                w: 2,
-                h: 2,
-            },
-        )
+    fn bytes_for(rects: &[Rect], tag: u8) -> Vec<u8> {
+        vec![tag; rects.iter().map(|r| r.area() as usize * 2).sum()]
     }
 
     #[test]
-    fn newer_frame_replaces_older() {
+    fn put_frame_packs_the_given_rects() {
         let mb = Mailbox::new();
-        mb.put(frame(1));
-        mb.put(frame(2));
+        let r = Rect {
+            x: 1,
+            y: 2,
+            w: 3,
+            h: 4,
+        };
+        mb.put_frame(&[r], |rs| bytes_for(rs, 7));
         match mb.take() {
-            DisplayCmd::Frame(p, _) => assert_eq!(p.data()[0], 2),
-            _ => panic!(),
-        }
-        assert!(mb.try_take().is_none());
-    }
-
-    #[test]
-    fn unconsumed_frames_accumulate_dirty_rect() {
-        let mb = Mailbox::new();
-        mb.put(frame_at(1, 10, 10));
-        mb.put(frame_at(2, 100, 100));
-        match mb.take() {
-            DisplayCmd::Frame(p, r) => {
-                assert_eq!(p.data()[0], 2, "newest pixmap is kept");
-                assert_eq!(
-                    r,
-                    Rect {
-                        x: 10,
-                        y: 10,
-                        w: 91,
-                        h: 91
-                    },
-                    "dirty rect is the union of both frames"
-                );
+            DisplayCmd::Frame(f) => {
+                assert_eq!(f.rects, vec![r]);
+                assert_eq!(f.bytes.len(), 24);
             }
             _ => panic!(),
         }
@@ -213,23 +216,76 @@ mod tests {
     }
 
     #[test]
-    fn frame_is_delivered_after_pending_control() {
+    fn untaken_frame_rects_join_the_next_pack() {
         let mb = Mailbox::new();
-        mb.put(DisplayCmd::Sleep);
-        mb.put(frame(1));
-        assert!(matches!(mb.take(), DisplayCmd::Sleep));
-        assert!(matches!(mb.take(), DisplayCmd::Frame(p, _) if p.data()[0] == 1));
-        assert!(mb.try_take().is_none());
+        let a = Rect {
+            x: 0,
+            y: 0,
+            w: 2,
+            h: 2,
+        };
+        let b = Rect {
+            x: 100,
+            y: 100,
+            w: 2,
+            h: 2,
+        };
+        mb.put_frame(&[a], |rs| bytes_for(rs, 1));
+        let mut seen = Vec::new();
+        mb.put_frame(&[b], |rs| {
+            seen = rs.to_vec();
+            bytes_for(rs, 2)
+        });
+        assert_eq!(
+            seen,
+            vec![b, a],
+            "pending rects are repacked from the newest pixels"
+        );
+        match mb.take() {
+            DisplayCmd::Frame(f) => {
+                assert_eq!(f.rects, vec![b, a]);
+                assert!(f.bytes.iter().all(|&x| x == 2));
+            }
+            _ => panic!(),
+        }
     }
 
     #[test]
-    fn control_is_not_replaced_by_frame() {
+    fn slices_split_bytes_per_rect() {
+        let rects = vec![
+            Rect {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            },
+            Rect {
+                x: 5,
+                y: 5,
+                w: 2,
+                h: 1,
+            },
+        ];
+        let f = PackedFrame {
+            rects: rects.clone(),
+            bytes: vec![1, 1, 2, 2, 2, 2],
+        };
+        let s: Vec<(Rect, Vec<u8>)> = f.slices().map(|(r, b)| (r, b.to_vec())).collect();
+        assert_eq!(
+            s,
+            vec![(rects[0], vec![1, 1]), (rects[1], vec![2, 2, 2, 2])]
+        );
+    }
+
+    #[test]
+    fn frame_is_delivered_after_pending_control() {
         let mb = Mailbox::new();
         mb.put(DisplayCmd::Sleep);
-        mb.put(frame(1));
+        mb.put_frame(&[Rect::full()], |rs| bytes_for(rs, 1));
         assert!(matches!(mb.take(), DisplayCmd::Sleep));
         assert!(matches!(mb.take(), DisplayCmd::Frame(..)));
-        mb.put(frame(1));
+        assert!(mb.try_take().is_none());
+        mb.put_frame(&[Rect::full()], |rs| bytes_for(rs, 1));
         mb.put(DisplayCmd::Quit);
         assert!(matches!(mb.take(), DisplayCmd::Quit));
         assert!(matches!(mb.take(), DisplayCmd::Frame(..)));

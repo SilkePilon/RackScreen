@@ -2578,7 +2578,6 @@ dependencies = [
  "minifb",
  "rackscreen-render",
  "rppal",
- "tiny-skia",
  "tracing",
 ]
 

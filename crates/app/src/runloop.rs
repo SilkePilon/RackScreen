@@ -15,7 +15,9 @@ use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::{bedtime_near, is_night};
 use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox};
-use rackscreen_render::frame::{dirty_rect, new_pixmap, Orient, Rect};
+use rackscreen_render::frame::{
+    brightness_lut, dirty_rects, new_pixmap, pack_oriented, Orient, Rect,
+};
 use rackscreen_render::renderer::Renderer;
 use tiny_skia::Pixmap;
 
@@ -31,42 +33,54 @@ pub struct ScreenSlot {
     pub mailbox: Mailbox,
     /// Rolls, glides and marquees of whatever role this panel is showing.
     pub ui: ScreenUi,
+    /// Brightness applied while packing.
+    lut: [u8; 256],
+    /// The frame being rendered, unrotated.
     cur: Pixmap,
-    oriented: Pixmap,
+    /// The last pushed frame, unrotated.
     prev: Pixmap,
     first: bool,
 }
 
 impl ScreenSlot {
-    pub fn new(index: usize, role: Role, orient: Orient, mailbox: Mailbox) -> Self {
+    pub fn new(
+        index: usize,
+        role: Role,
+        orient: Orient,
+        mailbox: Mailbox,
+        brightness: f32,
+    ) -> Self {
         Self {
             index,
             role,
             orient,
             mailbox,
             ui: ScreenUi::new(),
+            lut: brightness_lut(brightness),
             cur: new_pixmap(),
-            oriented: new_pixmap(),
             prev: new_pixmap(),
             first: true,
         }
     }
 
-    /// Orient the freshly rendered frame, diff, push. Returns the dirty rect pushed.
-    fn flush(&mut self) -> Option<Rect> {
-        self.orient.apply(&self.cur, &mut self.oriented);
-        let rect = if self.first {
-            Some(Rect::full())
+    /// Diff the fresh frame against the last pushed one (both unrotated), pack
+    /// the changed panel rects, push. Returns the panel rects pushed.
+    fn flush(&mut self) -> Option<Vec<Rect>> {
+        let src = if self.first {
+            vec![Rect::full()]
         } else {
-            dirty_rect(&self.prev, &self.oriented)
+            dirty_rects(&self.prev, &self.cur)
         };
         self.first = false;
-        if let Some(r) = rect {
-            self.mailbox
-                .put(DisplayCmd::Frame(self.oriented.clone(), r));
+        if src.is_empty() {
+            return None;
         }
-        std::mem::swap(&mut self.prev, &mut self.oriented);
-        rect
+        let panel: Vec<Rect> = src.iter().map(|r| self.orient.map_rect(*r)).collect();
+        let (cur, orient, lut) = (&self.cur, &self.orient, &self.lut);
+        self.mailbox
+            .put_frame(&panel, |rs| pack_oriented(cur, orient, rs, lut));
+        std::mem::swap(&mut self.prev, &mut self.cur);
+        Some(panel)
     }
 }
 
@@ -322,21 +336,22 @@ mod tests {
     }
 
     #[test]
-    fn first_flush_is_full_then_dirty_only() {
+    fn first_flush_is_full_then_dirty_only_in_panel_space() {
         let mb = Mailbox::new();
-        let mut slot = ScreenSlot::new(0, Role::Cpu, Orient::identity(), mb.clone());
-        assert_eq!(slot.flush(), Some(Rect::full()));
-        assert!(matches!(mb.take(), DisplayCmd::Frame(_, r) if r == Rect::full()));
+        let mut slot = ScreenSlot::new(0, Role::Cpu, Orient::new(90, false), mb.clone(), 1.0);
+        assert_eq!(slot.flush(), Some(vec![Rect::full()]));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(f) if f.rects == vec![Rect::full()]));
         assert_eq!(slot.flush(), None, "identical frame pushes nothing");
-        slot.cur.data_mut()[(10 * 240 + 10) * 4] = 200;
+        // source pixel (10, 20) lands at panel (219, 10) for a 90° turn
+        slot.cur.data_mut()[(20 * 240 + 10) * 4] = 200;
         assert_eq!(
             slot.flush(),
-            Some(Rect {
-                x: 10,
+            Some(vec![Rect {
+                x: 219,
                 y: 10,
                 w: 1,
                 h: 1
-            })
+            }])
         );
     }
 }

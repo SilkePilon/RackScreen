@@ -4,8 +4,7 @@ use rackscreen_app::calibrate::test_pattern;
 use rackscreen_app::config::Config;
 use rackscreen_app::panels::{open_panels, Panels};
 use rackscreen_core::anim::Secs;
-use rackscreen_display::DisplayCmd;
-use rackscreen_render::frame::{new_pixmap, Orient, Rect};
+use rackscreen_render::frame::{brightness_lut, new_pixmap, pack_oriented, Orient, Rect};
 use rackscreen_render::renderer::Renderer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect as TRect};
@@ -195,9 +194,14 @@ impl Calibrate {
         // In the simulator the panel orientation is identity, so apply the candidate
         // orientation here; on real panels do the same (the handle's orient is only used by
         // the monitor, calibration always orients explicitly).
-        Orient::new(o.rotate, o.hflip).apply(&self.frames[i], &mut self.shown[i]);
-        h.mailbox
-            .put(DisplayCmd::Frame(self.shown[i].clone(), Rect::full()));
+        let orient = Orient::new(o.rotate, o.hflip);
+        let lut = brightness_lut(self.cfg.display.brightness);
+        let frame = &self.frames[i];
+        h.mailbox.put_frame(&[Rect::full()], |rs| {
+            pack_oriented(frame, &orient, rs, &lut)
+        });
+        // The terminal preview shows the oriented frame.
+        orient.apply(frame, &mut self.shown[i]);
     }
 
     fn select(&mut self, i: usize, now: Secs) {

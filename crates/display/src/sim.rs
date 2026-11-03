@@ -7,11 +7,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use tiny_skia::Pixmap;
 
 use rackscreen_render::frame::Rect;
 
-use crate::Display;
+use crate::{Display, PackedFrame};
 
 const PANEL: usize = 240;
 const PAD: usize = 20;
@@ -175,37 +174,42 @@ impl SimPanel {
         }
     }
 
-    fn blit(&self, frame: &Pixmap, dirty: Rect) {
+    fn blit(&self, frame: &PackedFrame) {
         let c = PANEL as f32 / 2.0 - 0.5;
-        let data = frame.data();
         let mut buf = self.buf.lock().unwrap();
-        for y in dirty.y..dirty.y + dirty.h {
-            for x in dirty.x..dirty.x + dirty.w {
+        for (r, bytes) in frame.slices() {
+            for (k, px) in bytes.chunks_exact(2).enumerate() {
+                let x = r.x + k as u32 % r.w;
+                let y = r.y + k as u32 / r.w;
                 let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
                 if d > 120.0 {
                     continue;
                 }
-                let i = ((y * PANEL as u32 + x) * 4) as usize;
-                let v = (data[i] as u32) << 16 | (data[i + 1] as u32) << 8 | data[i + 2] as u32;
-                buf[(self.oy + y as usize) * self.stride + self.ox + x as usize] = v;
+                let v = u16::from_be_bytes([px[0], px[1]]) as u32;
+                let (r5, g6, b5) = ((v >> 11) & 0x1F, (v >> 5) & 0x3F, v & 0x1F);
+                let rgb = ((r5 << 3) | (r5 >> 2)) << 16
+                    | ((g6 << 2) | (g6 >> 4)) << 8
+                    | ((b5 << 3) | (b5 >> 2));
+                buf[(self.oy + y as usize) * self.stride + self.ox + x as usize] = rgb;
             }
         }
     }
 }
 
 impl Display for SimPanel {
-    fn push(&mut self, frame: &Pixmap, dirty: Rect) -> anyhow::Result<()> {
+    fn push(&mut self, frame: &PackedFrame) -> anyhow::Result<()> {
         if self.asleep {
             return Ok(());
         }
-        self.blit(frame, dirty);
+        self.blit(frame);
         Ok(())
     }
 
     fn sleep(&mut self) -> anyhow::Result<()> {
-        let mut black = Pixmap::new(PANEL as u32, PANEL as u32).unwrap();
-        black.fill(tiny_skia::Color::BLACK);
-        self.blit(&black, Rect::full());
+        self.blit(&PackedFrame {
+            rects: vec![Rect::full()],
+            bytes: vec![0; PANEL * PANEL * 2],
+        });
         self.asleep = true;
         Ok(())
     }
@@ -263,9 +267,11 @@ mod tests {
             draw_bezel(&mut b, stride, 20, 20);
         }
         let mut panel = SimPanel::with_buffer(buf.clone(), stride, 20, 20);
-        let mut white = Pixmap::new(240, 240).unwrap();
-        white.fill(tiny_skia::Color::WHITE);
-        panel.push(&white, Rect::full()).unwrap();
+        let white = PackedFrame {
+            rects: vec![Rect::full()],
+            bytes: vec![0xFF; 240 * 240 * 2],
+        };
+        panel.push(&white).unwrap();
         {
             let b = buf.lock().unwrap();
             assert_eq!(
@@ -280,14 +286,14 @@ mod tests {
             );
         }
         panel.sleep().unwrap();
-        panel.push(&white, Rect::full()).unwrap();
+        panel.push(&white).unwrap();
         assert_eq!(
             buf.lock().unwrap()[(20 + 120) * stride + 20 + 120],
             0,
             "asleep panel ignores frames"
         );
         panel.wake().unwrap();
-        panel.push(&white, Rect::full()).unwrap();
+        panel.push(&white).unwrap();
         assert_eq!(
             buf.lock().unwrap()[(20 + 120) * stride + 20 + 120],
             0xffffff
