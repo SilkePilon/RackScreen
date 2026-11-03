@@ -90,18 +90,30 @@ pub fn user_ids(user: &str) -> Option<(u32, u32)> {
         .map(|u| (u.uid.as_raw(), u.gid.as_raw()))
 }
 
-/// Give `dir` and every file directly in it to `(uid, gid)`.
+/// Give `dir` and every regular file directly in it to `(uid, gid)`.
+/// Refuses when `dir` is a symlink (someone could point it at /etc), never
+/// follows links (lchown) and leaves nested directories and symlinks alone.
 pub fn chown_tree(dir: &std::path::Path, (uid, gid): (u32, u32)) -> Result<()> {
-    use nix::unistd::{chown, Gid, Uid};
+    use std::os::unix::fs::lchown;
     let own = |p: &std::path::Path| {
-        chown(p, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
-            .with_context(|| format!("chown {}", p.display()))
+        lchown(p, Some(uid), Some(gid)).with_context(|| format!("chown {}", p.display()))
     };
+    let meta = std::fs::symlink_metadata(dir).with_context(|| format!("stat {}", dir.display()))?;
+    if meta.file_type().is_symlink() {
+        anyhow::bail!("{} is a symlink; refusing to chown it", dir.display());
+    }
+    if !meta.is_dir() {
+        anyhow::bail!("{} is not a directory", dir.display());
+    }
     own(dir)?;
     for e in std::fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
         let e = e?;
-        if e.file_type()?.is_file() {
+        // file_type() does not follow symlinks
+        let ft = e.file_type()?;
+        if ft.is_file() {
             own(&e.path())?;
+        } else {
+            tracing::debug!("chown: skipping {}", e.path().display());
         }
     }
     Ok(())
@@ -448,6 +460,34 @@ mod tests {
             Outcome::Done(m) if m.contains(&me)
         ));
         assert!(dir.path().join("etc/rackscreen/config.yaml").exists());
+    }
+
+    #[test]
+    fn chown_tree_refuses_a_symlinked_dir_and_skips_links_and_subdirs() {
+        use std::os::unix::fs::{symlink, MetadataExt};
+        let dir = tempfile::tempdir().unwrap();
+        let me = (
+            nix::unistd::getuid().as_raw(),
+            nix::unistd::getgid().as_raw(),
+        );
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("config.yaml"), "x").unwrap();
+        std::fs::create_dir(real.join("nested")).unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "o").unwrap();
+        symlink(&outside, real.join("link")).unwrap();
+        chown_tree(&real, me).unwrap();
+        assert_eq!(
+            std::fs::metadata(real.join("config.yaml")).unwrap().uid(),
+            me.0
+        );
+        let link = dir.path().join("etc-link");
+        symlink(&real, &link).unwrap();
+        let e = chown_tree(&link, me).unwrap_err().to_string();
+        assert!(e.contains("symlink"), "{e}");
+        let e = chown_tree(&outside, me).unwrap_err().to_string();
+        assert!(e.contains("not a directory"), "{e}");
     }
 
     #[test]
