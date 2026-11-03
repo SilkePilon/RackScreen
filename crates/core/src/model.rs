@@ -1306,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn without_one_at_a_time_screens_iris_together() {
+    fn without_one_at_a_time_screens_transition_together() {
         let mut m = two_cycling_screens(false);
         let starts = run_transitions(&mut m, 4.0, false);
         assert_eq!(starts.len(), 2, "both screens, got {starts:?}");

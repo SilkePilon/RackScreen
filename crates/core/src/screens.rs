@@ -58,7 +58,8 @@ impl ScreenState {
         &self.roles
     }
 
-    /// The role being shown (during a transition: the outgoing one until t >= 0.5).
+    /// The current role; during a transition the outgoing one until the
+    /// transition ends (the panel already shows the incoming one from t = 0.5).
     pub fn current(&self) -> Role {
         self.roles[self.current]
     }

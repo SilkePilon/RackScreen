@@ -242,7 +242,9 @@ impl RenderLoop {
             }
             let fade = if night {
                 let f0 = *fade_started.get_or_insert(now);
-                Some((((now - f0) / NIGHT_FADE_SECS) as f32).min(1.0))
+                // quantised like the role crossfade, so equal frames are skipped
+                let f = (((now - f0) / NIGHT_FADE_SECS) as f32).min(1.0);
+                Some((f * 64.0).round() / 64.0)
             } else {
                 fade_started = None;
                 None
