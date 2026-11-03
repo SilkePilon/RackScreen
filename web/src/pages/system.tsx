@@ -63,21 +63,74 @@ export default function System() {
   )
 }
 
+// The update restarts the service, which may reset the job state. Remember
+// what we updated from, so the outcome can be told after reconnecting.
+const UPDATE_KEY = "rackscreen.update"
+interface PendingUpdate {
+  from: string
+  to: string | null
+  at: number
+}
+function loadPendingUpdate(): PendingUpdate | null {
+  try {
+    const raw = sessionStorage.getItem(UPDATE_KEY)
+    return raw ? (JSON.parse(raw) as PendingUpdate) : null
+  } catch {
+    return null
+  }
+}
+function setPendingUpdate(p: PendingUpdate | null) {
+  try {
+    if (p) sessionStorage.setItem(UPDATE_KEY, JSON.stringify(p))
+    else sessionStorage.removeItem(UPDATE_KEY)
+  } catch {
+    // Without storage the outcome is still told from the job state.
+  }
+}
+
 function UpdateSection() {
   const qc = useQueryClient()
   const update = useUpdate()
+  const info = useInfo()
   const u = update.data
   const start = useMutation({
     mutationFn: api.startUpdate,
+    onMutate: () => {
+      if (u) setPendingUpdate({ from: u.current, to: u.latest, at: Date.now() })
+    },
     onSuccess: () => void qc.invalidateQueries({ queryKey: keys.update }),
-    onError: (e) => toast.error("Update did not start", { description: errorMessage(e) }),
+    onError: (e) => {
+      setPendingUpdate(null)
+      toast.error("Update did not start", { description: errorMessage(e) })
+    },
   })
   const [prevState, setPrevState] = React.useState(u?.job.state)
   if (u && u.job.state !== prevState) {
     setPrevState(u.job.state)
-    if (prevState === "running" && u.job.state === "done") toast.success(`Updated to v${u.current}`)
-    if (prevState === "running" && u.job.state === "failed") toast.error("Update failed; see the log below")
+    // An update started elsewhere (no pending record here) that failed in view.
+    if (prevState === "running" && u.job.state === "failed" && !loadPendingUpdate())
+      toast.error("Update failed; see the log below")
   }
+
+  const version = info.data?.version
+  React.useEffect(() => {
+    const p = loadPendingUpdate()
+    if (!p || !u || u.job.state === "running" || update.isError) return
+    const now = version ?? u.current
+    const age = Date.now() - p.at
+    if (now !== p.from || u.current !== p.from) {
+      setPendingUpdate(null)
+      toast.success(`Updated to v${u.current !== p.from ? u.current : now}`)
+    } else if (u.job.state === "failed") {
+      setPendingUpdate(null)
+      toast.error("Update failed; see the log below")
+    } else if ((u.job.state === "idle" && age > 15_000) || age > 5 * 60_000) {
+      // Back up on the old version with no job: the update did not take.
+      setPendingUpdate(null)
+      toast.error("Update failed", { description: `RackScreen is still on v${p.from}.` })
+    }
+  }, [u, version, update.isError])
+
   const running = u?.job.state === "running"
   return (
     <Section title="Version">
