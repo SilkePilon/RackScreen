@@ -14,7 +14,6 @@ import {
 import { tags as t } from "@lezer/highlight"
 import { CircleCheckIcon, CircleXIcon, RotateCcwIcon } from "lucide-react"
 import { useBlocker } from "react-router"
-import { parse } from "yaml"
 import { toast } from "sonner"
 
 import {
@@ -145,14 +144,7 @@ export default function YamlEditor() {
   const validate = async (): Promise<boolean> => {
     setBusy("validate")
     try {
-      let parsed: unknown
-      try {
-        parsed = parse(text())
-      } catch (e) {
-        setCheck({ state: "error", message: errorMessage(e) })
-        return false
-      }
-      const r = await api.validateConfig(parsed)
+      const r = await api.validateYaml(text())
       setCheck(r.ok ? { state: "ok" } : { state: "error", message: r.error ?? "Invalid config" })
       return r.ok
     } catch (e) {
