@@ -107,6 +107,51 @@ pub fn chown_tree(dir: &std::path::Path, (uid, gid): (u32, u32)) -> Result<()> {
     Ok(())
 }
 
+/// `<file>.rackscreen.bak` next to `path`.
+pub fn backup_path(path: &std::path::Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".rackscreen.bak");
+    path.with_file_name(name)
+}
+
+/// Replace a boot file without ever leaving it half written: keep a backup
+/// of the original (only the first time, so it stays the pristine one),
+/// write a temp file in the same directory, fsync it and rename it over.
+/// /boot/firmware is vfat; Linux renames over an existing file there too.
+pub fn replace_boot_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    let backup = backup_path(path);
+    if path.exists() && !backup.exists() {
+        std::fs::copy(path, &backup)
+            .with_context(|| format!("back up {} to {}", path.display(), backup.display()))?;
+    }
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".rackscreen.tmp");
+    let tmp = path.with_file_name(name);
+    let write = || -> Result<()> {
+        let mut f =
+            std::fs::File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
+        f.write_all(contents.as_bytes())?;
+        f.sync_all()?;
+        Ok(())
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("rename over {}", path.display()));
+    }
+    if let Some(dir) = path.parent() {
+        // best effort: make the rename itself durable
+        if let Ok(d) = std::fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
+}
+
 fn sha256(path: &std::path::Path) -> Result<Vec<u8>> {
     let data = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
     Ok(Sha256::digest(&data).to_vec())
@@ -325,17 +370,21 @@ impl Installer {
                 else {
                     anyhow::bail!("boot files not found");
                 };
-                let mut c = std::fs::read_to_string(&cfg_path).unwrap_or_default();
+                let orig = std::fs::read_to_string(&cfg_path).unwrap_or_default();
+                let mut c = orig.clone();
                 for l in boot::CONFIG_LINES {
                     c = boot::ensure_line(&c, l).0;
                 }
-                std::fs::write(&cfg_path, c).context("write config.txt")?;
+                if c != orig {
+                    replace_boot_file(&cfg_path, &c).context("write config.txt")?;
+                }
                 let l = std::fs::read_to_string(&cmd_path).unwrap_or_default();
-                std::fs::write(
-                    &cmd_path,
-                    boot::ensure_cmdline_token(&l, boot::CMDLINE_TOKEN).0,
-                )
-                .context("write cmdline.txt")?;
+                let (line, changed) = boot::ensure_cmdline_token(&l, boot::CMDLINE_TOKEN);
+                if changed {
+                    // the kernel reads only the first line
+                    debug_assert_eq!(line.lines().count(), 1);
+                    replace_boot_file(&cmd_path, &line).context("write cmdline.txt")?;
+                }
                 self.ensure_spi_chunk()?;
                 Ok(Outcome::Done(
                     "SPI enabled, spi_chunk set to 65536; reboot required".into(),
@@ -476,6 +525,61 @@ mod tests {
                 .display
                 .spi_chunk,
             65536
+        );
+    }
+
+    #[test]
+    fn boot_step_backs_up_once_and_replaces_atomically() {
+        let (dir, inst, _sh) = setup(true);
+        let fw = dir.path().join("boot/firmware");
+        std::fs::write(
+            fw.join("cmdline.txt"),
+            "root=x rootwait\nstray second line\n",
+        )
+        .unwrap();
+        let out = inst.step(StepId::Boot, Some(true)).unwrap();
+        assert!(matches!(out, Outcome::Done(_)), "{out:?}");
+        assert_eq!(
+            std::fs::read_to_string(fw.join("config.txt.rackscreen.bak")).unwrap(),
+            "dtparam=audio=on\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fw.join("cmdline.txt.rackscreen.bak")).unwrap(),
+            "root=x rootwait\nstray second line\n"
+        );
+        let l = std::fs::read_to_string(fw.join("cmdline.txt")).unwrap();
+        assert_eq!(l, "root=x rootwait spidev.bufsiz=65536\n");
+        assert_eq!(l.lines().count(), 1, "cmdline.txt stays one line");
+        let c = std::fs::read_to_string(fw.join("config.txt")).unwrap();
+        assert!(c.starts_with("dtparam=audio=on\n") && c.contains("dtoverlay=spi1-2cs"));
+        // no temp files left behind
+        let names: Vec<String> = std::fs::read_dir(&fw)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(!names.iter().any(|n| n.ends_with(".tmp")), "{names:?}");
+        // a second write keeps the first (pristine) backup
+        replace_boot_file(&fw.join("config.txt"), "changed\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fw.join("config.txt.rackscreen.bak")).unwrap(),
+            "dtparam=audio=on\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fw.join("config.txt")).unwrap(),
+            "changed\n"
+        );
+    }
+
+    #[test]
+    fn replace_boot_file_without_an_original_writes_no_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("cmdline.txt");
+        replace_boot_file(&p, "a b\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "a b\n");
+        assert!(!backup_path(&p).exists());
+        assert_eq!(
+            backup_path(&p),
+            dir.path().join("cmdline.txt.rackscreen.bak")
         );
     }
 
