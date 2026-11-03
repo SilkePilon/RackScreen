@@ -17,9 +17,11 @@ chmod +x "$TMP/rackscreen"
 # The install asks y/N for the SPI boot lines on a terminal. Piped from curl
 # stdin is the script, so ask on /dev/tty; without any terminal (ssh -T,
 # automation) apply them, the change is idempotent and needed for the panels.
+# /dev/tty exists and looks readable even without a controlling terminal, so
+# probe by actually opening it.
 if [ -t 0 ]; then
   sudo "$TMP/rackscreen" install
-elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+elif (exec </dev/tty) 2>/dev/null; then
   sudo "$TMP/rackscreen" install < /dev/tty
 else
   sudo "$TMP/rackscreen" install --yes
