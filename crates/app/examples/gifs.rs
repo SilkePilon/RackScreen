@@ -1,7 +1,10 @@
 //! Renders the README media: one GIF per screen role, one of a screen cycling
-//! through every role, and one of the download monitor.
+//! through every role, one of the download monitor, and one wide GIF per show.
 //!
-//!     cargo run -p rackscreen-app --example gifs -- .github/media/screens
+//!     cargo run -p rackscreen-app --example gifs -- .github/media/screens .github/media/shows
+//!
+//! A show GIF is the four panels side by side, 240 px circles 32 px apart on the
+//! default layout (25 mm gaps), played once from start to end at 12 fps.
 //!
 //! Frames come from the model, the fake source and the renderer the simulator
 //! uses, so a GIF shows exactly what a panel shows. Everything outside the
@@ -27,6 +30,11 @@ use rackscreen_sources::fake::{FakeCmd, FakeState};
 use tiny_skia::Pixmap;
 
 const OUT_DIR: &str = ".github/media/screens";
+const SHOWS_DIR: &str = ".github/media/shows";
+/// Shows run at 12 fps.
+const SHOW_FPS: f64 = rackscreen_core::shows::FPS;
+/// Transparent space between two circles of a show strip.
+const BEZEL: u32 = 32;
 const FPS: Secs = 20.0;
 /// Frame delay in hundredths of a second: 5 is 20 fps.
 const DELAY: u16 = 5;
@@ -174,18 +182,77 @@ fn clips() -> Vec<Clip> {
 fn main() -> Result<()> {
     let dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| OUT_DIR.into()));
     fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let shows_dir = PathBuf::from(std::env::args().nth(2).unwrap_or_else(|| SHOWS_DIR.into()));
+    fs::create_dir_all(&shows_dir).with_context(|| format!("create {}", shows_dir.display()))?;
     let mut renderer = Renderer::new()?;
     for clip in clips() {
         let path = dir.join(format!("{}.gif", clip.name));
         let frames = record(&mut renderer, &clip, &path)?;
-        let kib = fs::metadata(&path)?.len() as f64 / 1024.0;
-        println!(
-            "{:<16} {frames:>4} frames  {:>4.1} s  {kib:>7.1} KiB",
-            path.display(),
-            frames as Secs / FPS
-        );
+        report(&path, frames, frames as Secs / FPS)?;
+    }
+    for def in rackscreen_core::shows::SHOWS {
+        let path = shows_dir.join(format!("{}.gif", def.id));
+        let frames = record_show(&mut renderer, def, &path)?;
+        report(&path, frames, frames as f64 / SHOW_FPS)?;
     }
     Ok(())
+}
+
+fn report(path: &Path, frames: u64, secs: f64) -> Result<()> {
+    let kib = fs::metadata(path)?.len() as f64 / 1024.0;
+    println!(
+        "{:<16} {frames:>4} frames  {secs:>4.1} s  {kib:>7.1} KiB",
+        path.display()
+    );
+    Ok(())
+}
+
+/// One show from start to end as the four-circle strip. Returns the number
+/// of frames written.
+fn record_show(
+    renderer: &mut Renderer,
+    def: &rackscreen_core::shows::ShowDef,
+    path: &Path,
+) -> Result<u64> {
+    use rackscreen_core::scene::{Drawable, Scene, WorldRef};
+    use rackscreen_core::shows::world::{gap_px, Layout};
+    let layout = Layout {
+        panels: 4,
+        gap: gap_px(25.0),
+    };
+    let width = layout.panels * SIZE + (layout.panels - 1) * BEZEL;
+    let frames = (def.secs * SHOW_FPS).round() as u64;
+    let mut out = GifOut::new(path, width, SIZE)?;
+    let mut panel = new_pixmap();
+    for f in 0..frames {
+        let t = f as f64 / SHOW_FPS;
+        let world = WorldRef(std::sync::Arc::new(rackscreen_core::shows::render(
+            def, layout, t,
+        )));
+        let mut strip = Pixmap::new(width, SIZE).context("strip pixmap")?;
+        for i in 0..layout.panels {
+            let mut scene = Scene::new();
+            scene.push(Drawable::World {
+                frame: world.clone(),
+                x0: layout.x0(i),
+            });
+            renderer.render(&scene, &mut panel);
+            round_mask(&mut panel);
+            let ox = i * (SIZE + BEZEL);
+            let row = (SIZE * 4) as usize;
+            for y in 0..SIZE as usize {
+                let dst = (y * width as usize + ox as usize) * 4;
+                strip.data_mut()[dst..dst + row]
+                    .copy_from_slice(&panel.data()[y * row..(y + 1) * row]);
+            }
+        }
+        // 100/12 cs is not whole: alternate 8 and 9 (8, 8, 9, ...) so every
+        // three frames take exactly a quarter second.
+        let cs = |n: u64| (n as f64 * 100.0 / SHOW_FPS).round() as u16;
+        out.push(&strip, cs(f + 1) - cs(f))?;
+    }
+    out.finish()?;
+    Ok(frames)
 }
 
 /// Play one clip and write it out. Returns the number of frames written.
@@ -225,7 +292,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
         .map(|(at, step)| (((clip.warmup + at) * FPS).round() as u64, step))
         .collect();
 
-    let mut out = GifOut::new(path)?;
+    let mut out = GifOut::new(path, SIZE, SIZE)?;
     let mut px = new_pixmap();
     let mut ui = ScreenUi::new();
     let mut seconds = 0u64;
@@ -271,7 +338,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
         }
         renderer.render(&model.scene(0, now, &mut ui), &mut px);
         round_mask(&mut px);
-        out.push(&px)?;
+        out.push(&px, DELAY)?;
     }
     anyhow::ensure!(!clip.whole_round, "{}: the round never closed", clip.name);
     out.finish()?;
@@ -298,26 +365,30 @@ fn round_mask(px: &mut Pixmap) {
 /// repaint, which is also what makes the corners stay clear.
 struct GifOut {
     encoder: Encoder<BufWriter<File>>,
+    width: u32,
+    height: u32,
     prev: Pixmap,
     first: bool,
     buf: Vec<u8>,
 }
 
 impl GifOut {
-    fn new(path: &Path) -> Result<GifOut> {
+    fn new(path: &Path, width: u32, height: u32) -> Result<GifOut> {
         let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
-        let size = SIZE as u16;
-        let mut encoder = Encoder::new(BufWriter::new(file), size, size, &[])?;
+        let mut encoder = Encoder::new(BufWriter::new(file), width as u16, height as u16, &[])?;
         encoder.set_repeat(Repeat::Infinite)?;
         Ok(GifOut {
             encoder,
-            prev: new_pixmap(),
+            width,
+            height,
+            prev: Pixmap::new(width, height).context("gif pixmap")?,
             first: true,
             buf: Vec::new(),
         })
     }
 
-    fn push(&mut self, px: &Pixmap) -> Result<()> {
+    /// Add `px` (the GIF's size), shown for `delay` hundredths of a second.
+    fn push(&mut self, px: &Pixmap, delay: u16) -> Result<()> {
         // A frame identical to the last one still has to take up its delay, so
         // it repaints one corner pixel, which is transparent either way.
         let one_pixel = Rect {
@@ -327,21 +398,26 @@ impl GifOut {
             h: 1,
         };
         let rect = if self.first {
-            Rect::full()
+            Rect {
+                x: 0,
+                y: 0,
+                w: self.width,
+                h: self.height,
+            }
         } else {
             dirty_rect(&self.prev, px).unwrap_or(one_pixel)
         };
         self.buf.clear();
         let data = px.data();
         for y in rect.y..rect.y + rect.h {
-            let start = ((y * SIZE + rect.x) * 4) as usize;
+            let start = ((y * self.width + rect.x) * 4) as usize;
             self.buf
                 .extend_from_slice(&data[start..start + (rect.w * 4) as usize]);
         }
         let mut frame = Frame::from_rgba_speed(rect.w as u16, rect.h as u16, &mut self.buf, 10);
         frame.left = rect.x as u16;
         frame.top = rect.y as u16;
-        frame.delay = DELAY;
+        frame.delay = delay;
         frame.dispose = DisposalMethod::Keep;
         self.encoder.write_frame(&frame)?;
         self.prev.data_mut().copy_from_slice(px.data());

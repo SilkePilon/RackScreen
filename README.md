@@ -15,6 +15,7 @@
 <p align="center">
   <a href="#install">Install</a> &nbsp;·&nbsp;
   <a href="#screens">Screens</a> &nbsp;·&nbsp;
+  <a href="#shows">Shows</a> &nbsp;·&nbsp;
   <a href="#setup-tui">Setup TUI</a> &nbsp;·&nbsp;
   <a href="#electricity-mode">Electricity mode</a> &nbsp;·&nbsp;
   <a href="#sky-roles">Sky roles</a> &nbsp;·&nbsp;
@@ -75,6 +76,102 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
   <b>One screen, every role.</b> A screen cycles through the roles you give it: the old role fades to black and the new one fades in, 0.4 s in all.
 </p>
 
+## Shows
+
+Every `every_mins` minutes the four panels stop being four tiles and become one wide window: a short pixel-art animation plays across all of them as a single scene, objects passing behind the bezels between panels. The roles fade out over 0.2 s, the show plays (8–12 s), fades out, and the roles fade back in; role cycling pauses meanwhile. Shows never play at night, while a screen is mid-transition, or with fewer than two screens. Each start picks at random from `list`, never the same show twice in a row. The shows are original pixel art, drawn for RackScreen at 12 frames per second.
+
+<p align="center">
+  <img src=".github/media/shows/freight.gif" alt="Dusk freight show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Dusk freight</b> (<code>freight</code>) — a long teal train with lit windows rolls through every screen at sunset, smoke trailing.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/deep-sea.gif" alt="Deep sea show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Deep sea</b> (<code>deep-sea</code>) — kelp sways, light rays drift, bubbles rise and a school of orange fish swims across.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/paper-plane.gif" alt="Paper plane show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Paper plane</b> (<code>paper-plane</code>) — a paper plane glides through drifting clouds and loops the loop on the third screen.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/storm.gif" alt="Thunderstorm show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Thunderstorm</b> (<code>storm</code>) — clouds roll and rain falls; the sky flashes and a bolt cracks on the third screen.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/day.gif" alt="Day in a minute show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Day in a minute</b> (<code>day</code>) — the sun rises on the left, arcs over every screen and sets on the right; then stars and a moon.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/space.gif" alt="Space cruise show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Space cruise</b> (<code>space</code>) — a small ship flies past a ringed planet over three layers of stars.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/birds.gif" alt="Birds at sunset show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Birds at sunset</b> (<code>birds</code>) — a V of birds flaps across a pixel sunset over the sea.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/fireworks.gif" alt="Fireworks show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Fireworks</b> (<code>fireworks</code>) — rockets launch one screen at a time over a city skyline, then a finale on every screen.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/alpine.gif" alt="Mountains: alpine dawn show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Mountains: alpine dawn</b> (<code>alpine</code>) — the sun rises behind three snowy ranges while an eagle glides across.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/caravan.gif" alt="Desert: caravan show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Desert: caravan</b> (<code>caravan</code>) — three camels walk in line over the dunes, leaving footprints.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/desert-night.gif" alt="Desert: night tumbleweed show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Desert: night tumbleweed</b> (<code>desert-night</code>) — a tumbleweed rolls past cactus silhouettes under a big moon; a shooting star streaks over.
+</p>
+
+```yaml
+shows:
+  enabled: true            # pixel-art shows across all screens as one wide scene
+  every_mins: 15           # minutes between shows, >= 2; never at night
+  gap_mm: 25               # bezel gap between two panels
+  # list: [freight]        # show ids to pick from (default: every show)
+  # order: [0, 1, 2, 3]    # config index of each screen from the left (default: config order)
+```
+
+`gap_mm` is the physical gap between two panels, so a train leaving one screen reappears on the next after the right pause. `order` is for a rack whose screens are not wired left to right. To play one now, outside the schedule (still not at night):
+
+    rackscreen play storm      # a show id, or: rackscreen play random
+
+It drops the request in the service user's `~/.local/state/rackscreen/play` (run it as that user, or with `sudo` from their login); the service picks it up within a second. **Configure › Shows** in the setup TUI has the same settings, a checklist of the shows and a **Play now** row.
+
 ## Install
 
 One line on the Pi, no clone:
@@ -98,7 +195,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 - **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
 - **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels in a true-colour terminal, assumed unless `TERM` is a plain `xterm`/`screen`/`linux`; set `RACKSCREEN_TRUECOLOR=0` or `1` to force it; otherwise a drawn circle), the other panels are a strip in the info column to the right. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
-- **Configure** — every setting in seven groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds) listed in the sidebar: `Tab`/`←→` step through them, `1`–`7` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
+- **Configure** — every setting in eight groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds, Shows) listed in the sidebar: `Tab`/`←→` step through them, `1`–`8` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. Shows has a checklist of the eleven shows (at least one stays on) and **Play now**, which takes a show id or `random` and starts it on the panels. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
 - **Status** — the full service detail, links, boot files and the log tail; `l` for the log view, `r` to restart.
 - **Run here** — run the daemon in the foreground with its logs, without touching the service.
 - **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
@@ -270,6 +367,13 @@ jellyfin:
   api_key: ""              # Jellyfin Dashboard → API Keys
   poll_secs: 5             # >= 2
 
+shows:
+  enabled: true            # pixel-art shows across all screens as one wide scene
+  every_mins: 15           # minutes between shows, >= 2; never at night
+  gap_mm: 25               # bezel gap between two panels
+  # list: [freight]        # show ids to pick from (default: every show)
+  # order: [0, 1, 2, 3]    # config index of each screen from the left (default: config order)
+
 display:
   brightness: 1.0
   fps: 60
@@ -302,6 +406,7 @@ screens:
 - **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
 - **`media`** — see [Media role](#media-role).
 - **`jellyfin`** — see [Jellyfin role](#jellyfin-role).
+- **`shows`** — see [Shows](#shows).
 - **`display`** — global brightness, frame rate, the SPI write chunk and whether screens change one at a time.
 - **`screens`** — one entry per panel, top to bottom: which roles it cycles through, how long each is shown, and its wiring and orientation.
 
@@ -343,7 +448,7 @@ The binary lands in `target/aarch64-unknown-linux-gnu/release/rackscreen`.
 Regenerate the media in this README:
 
     bash .github/media/generate-header.sh
-    cargo run -p rackscreen-app --example gifs -- .github/media/screens
+    cargo run --release -p rackscreen-app --example gifs -- .github/media/screens .github/media/shows
 
 The design notes are in [`docs/superpowers/specs/2026-09-05-rackscreen-design.md`](docs/superpowers/specs/2026-09-05-rackscreen-design.md).
 

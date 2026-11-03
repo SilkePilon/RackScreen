@@ -1,10 +1,13 @@
 //! Configure: a form over the YAML fields with inline editing and validation.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use rackscreen_app::config::Config;
+use rackscreen_app::play;
 use rackscreen_core::anim::Secs;
 use rackscreen_core::night::parse_hhmm;
+use rackscreen_core::shows::SHOWS;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
@@ -24,6 +27,8 @@ pub enum FieldKind {
     Secret,
     Number,
     Bool,
+    /// Not stored in the config: ⏎ opens an editor and applying runs it.
+    Run,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +88,12 @@ pub enum Field {
     JellyfinUrl,
     JellyfinKey,
     JellyfinPoll,
+    ShowsEnabled,
+    ShowsEvery,
+    ShowsGap,
+    /// One checklist row per show, by index into `SHOWS`.
+    Show(u8),
+    ShowsPlay,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,10 +105,11 @@ pub enum Group {
     Media,
     Display,
     Thresholds,
+    Shows,
 }
 
 impl Group {
-    pub const ALL: [Group; 7] = [
+    pub const ALL: [Group; 8] = [
         Group::Cluster,
         Group::Services,
         Group::Energy,
@@ -105,6 +117,7 @@ impl Group {
         Group::Media,
         Group::Display,
         Group::Thresholds,
+        Group::Shows,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -115,6 +128,7 @@ impl Group {
             Group::Media => "Media & Jellyfin",
             Group::Display => "Display",
             Group::Thresholds => "Thresholds",
+            Group::Shows => "Shows",
         }
     }
     pub fn index(self) -> usize {
@@ -155,10 +169,22 @@ const fn spec(
     }
 }
 
-use FieldKind::{Bool, Number, Secret, Text};
-use Group::{Cluster, Display, Energy, Media, Services, Sky, Thresholds};
+use FieldKind::{Bool, Number, Run, Secret, Text};
+use Group::{Cluster, Display, Energy, Media, Services, Shows, Sky, Thresholds};
 
-pub const FIELDS: [FieldSpec; 55] = [
+/// Checklist row for show `i`, labelled with its id.
+const fn show(i: u8) -> FieldSpec {
+    spec(
+        Field::Show(i),
+        Shows,
+        "Rotation",
+        SHOWS[i as usize].id,
+        Bool,
+        "In the random rotation; at least one stays on.",
+    )
+}
+
+pub const FIELDS: [FieldSpec; 70] = [
     spec(
         Field::Kubeconfig,
         Cluster,
@@ -599,6 +625,49 @@ pub const FIELDS: [FieldSpec; 55] = [
         Number,
         "Temperature that marks a node hot.",
     ),
+    spec(
+        Field::ShowsEnabled,
+        Shows,
+        "Shows",
+        "enabled",
+        Bool,
+        "Pixel-art shows across all screens, never at night.",
+    ),
+    spec(
+        Field::ShowsEvery,
+        Shows,
+        "Shows",
+        "every",
+        Number,
+        "Minutes between shows, 2 to 240.",
+    ),
+    spec(
+        Field::ShowsGap,
+        Shows,
+        "Shows",
+        "gap mm",
+        Number,
+        "Bezel gap between two panels in mm, 5 to 80.",
+    ),
+    show(0),
+    show(1),
+    show(2),
+    show(3),
+    show(4),
+    show(5),
+    show(6),
+    show(7),
+    show(8),
+    show(9),
+    show(10),
+    spec(
+        Field::ShowsPlay,
+        Shows,
+        "Play now",
+        "show",
+        Run,
+        "A show id or random; plays at once, not at night.",
+    ),
 ];
 
 /// Indices into `FIELDS` for one group, in display order.
@@ -685,6 +754,14 @@ pub fn get(cfg: &Config, f: Field) -> String {
         Field::JellyfinUrl => cfg.jellyfin.url.clone(),
         Field::JellyfinKey => cfg.jellyfin.api_key.clone(),
         Field::JellyfinPoll => cfg.jellyfin.poll_secs.to_string(),
+        Field::ShowsEnabled => cfg.shows.enabled.to_string(),
+        Field::ShowsEvery => cfg.shows.every_mins.to_string(),
+        Field::ShowsGap => format!("{}", cfg.shows.gap_mm),
+        Field::Show(i) => {
+            let id = SHOWS[i as usize].id;
+            cfg.shows.list.iter().any(|s| s == id).to_string()
+        }
+        Field::ShowsPlay => "random".into(),
     }
 }
 
@@ -794,6 +871,44 @@ pub fn set(cfg: &mut Config, f: Field, text: &str) -> Result<(), String> {
         }
         Field::JellyfinKey => cfg.jellyfin.api_key = text.into(),
         Field::JellyfinPoll => cfg.jellyfin.poll_secs = num::<u64>(t, "poll secs")?.max(2),
+        Field::ShowsEnabled => cfg.shows.enabled = t == "true",
+        Field::ShowsEvery => {
+            let m: u32 = num(t, "minutes")?;
+            if !(2..=240).contains(&m) {
+                return Err("minutes must be between 2 and 240".into());
+            }
+            cfg.shows.every_mins = m;
+        }
+        Field::ShowsGap => {
+            let g: f32 = num(t, "gap mm")?;
+            if !(5.0..=80.0).contains(&g) {
+                return Err("gap must be between 5 and 80 mm".into());
+            }
+            cfg.shows.gap_mm = g;
+        }
+        Field::Show(i) => {
+            let id = SHOWS[i as usize].id;
+            let on = t == "true";
+            let list = &cfg.shows.list;
+            if !on && list.iter().all(|s| s == id) {
+                return Err("at least one show must stay on".into());
+            }
+            // Rebuilt in registry order, so turning every show back on gives the
+            // default list again (which is left out of the saved file).
+            cfg.shows.list = SHOWS
+                .iter()
+                .filter(|s| {
+                    if s.id == id {
+                        on
+                    } else {
+                        list.iter().any(|l| l == s.id)
+                    }
+                })
+                .map(|s| s.id.to_string())
+                .collect();
+        }
+        // Runs from the editor (`Configure::play`); nothing to store.
+        Field::ShowsPlay => {}
     }
     Ok(())
 }
@@ -820,6 +935,9 @@ pub struct Configure {
     /// `s` must never overwrite the user's file with them.
     unreadable: bool,
     restart_rx: Option<Receiver<String>>,
+    /// Where "Play now" writes its request: `None` is the service user's state
+    /// dir (as `rackscreen play`); tests point it at a temp dir.
+    play_state: Option<PathBuf>,
 }
 
 impl Configure {
@@ -846,6 +964,7 @@ impl Configure {
             dirty: false,
             unreadable,
             restart_rx: None,
+            play_state: None,
         }
     }
 
@@ -908,6 +1027,18 @@ impl Configure {
         }
     }
 
+    /// Write a play-now request, as `rackscreen play <arg>` does.
+    fn play(&mut self, arg: &str) -> Result<(), String> {
+        let res = match &self.play_state {
+            Some(dir) => play::write_in(dir, arg),
+            None => play::write_for_service_user(arg),
+        };
+        res.map_err(|e| format!("{e:#}"))?;
+        self.error = None;
+        self.note = Some(format!("requested {}", arg.trim()));
+        Ok(())
+    }
+
     fn spawn_restart(&mut self) {
         let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
@@ -937,14 +1068,21 @@ impl Screen for Configure {
                 KeyCode::Down | KeyCode::Char('j') => self.move_row(1),
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.move_group(-1),
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.move_group(1),
-                KeyCode::Char(c @ '1'..='7') => {
+                KeyCode::Char(c @ '1'..='8') => {
                     self.jump_to(Group::ALL[(c as u8 - b'1') as usize]);
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     if kind == FieldKind::Bool {
                         let cur = get(&self.cfg, field) == "true";
-                        let _ = set(&mut self.cfg, field, if cur { "false" } else { "true" });
-                        self.dirty = true;
+                        match set(&mut self.cfg, field, if cur { "false" } else { "true" }) {
+                            Ok(()) => {
+                                self.dirty = true;
+                                if !self.unreadable {
+                                    self.error = None;
+                                }
+                            }
+                            Err(e) => self.error = Some(e),
+                        }
                     } else {
                         self.mode = Mode::Edit(get(&self.cfg, field));
                     }
@@ -959,6 +1097,12 @@ impl Screen for Configure {
                 }
                 _ => {}
             },
+            Mode::Edit(buf) if kind == FieldKind::Run && key.code == KeyCode::Enter => {
+                if let Err(e) = self.play(&buf) {
+                    self.error = Some(e);
+                    self.mode = Mode::Edit(buf);
+                }
+            }
             Mode::Edit(mut buf) => match key.code {
                 KeyCode::Enter => match set(&mut self.cfg, field, &buf) {
                     Ok(()) => {
@@ -1110,6 +1254,8 @@ impl Screen for Configure {
                         (_, _, FieldKind::Number) if s.label == "poll" => {
                             raw.parse::<u64>().map(humanise_poll).unwrap_or(raw)
                         }
+                        (_, _, _) if s.field == Field::ShowsEvery => format!("every {raw} min"),
+                        (_, _, FieldKind::Run) => format!("⏎ {raw} or a show id"),
                         _ => raw,
                     };
                     let editing = matches!(self.mode, Mode::Edit(_)) && selected;
@@ -1169,7 +1315,15 @@ impl Screen for Configure {
                 Paragraph::new(Line::from(Span::styled(format!("  {n}"), th.good()))),
                 help,
             ),
-            (_, None, None) => help_line(f, help, th, FIELDS[self.row].help),
+            (_, None, None) => match FIELDS[self.row].field {
+                Field::Show(i) => help_line(
+                    f,
+                    help,
+                    th,
+                    &format!("{}: {}", SHOWS[i as usize].name, FIELDS[self.row].help),
+                ),
+                _ => help_line(f, help, th, FIELDS[self.row].help),
+            },
         }
 
         if matches!(self.mode, Mode::AskRestart) {
@@ -1198,7 +1352,7 @@ impl Screen for Configure {
 
     fn keys(&self) -> String {
         match self.mode {
-            Mode::Browse => "↑↓ field  Tab/←→ group  1-7 jump  ⏎ edit  s save  Esc back".into(),
+            Mode::Browse => "↑↓ field  Tab/←→ group  1-8 jump  ⏎ edit  s save  Esc back".into(),
             Mode::Edit(_) => "type  ⏎ apply  Esc cancel".into(),
             Mode::AskRestart => "y restart  Esc later".into(),
             Mode::AskDiscard => "y discard  Esc keep".into(),
@@ -1219,7 +1373,7 @@ impl Screen for Configure {
     fn sidebar(&self) -> Option<SidebarView> {
         Some(SidebarView {
             title: "Configure".into(),
-            // Numbered, so the `1-7` jump keys explain themselves.
+            // Numbered, so the `1-8` jump keys explain themselves.
             items: Group::ALL
                 .iter()
                 .enumerate()
@@ -1236,6 +1390,7 @@ mod tests {
     use crate::theme::Theme;
     use crate::Ctx;
     use rackscreen_app::logs::LogSink;
+    use rackscreen_core::shows::SHOWS;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::path::Path;
@@ -1381,7 +1536,7 @@ mod tests {
         assert_eq!(get(&cfg, Field::GithubToken), "ghp_x");
         set(&mut cfg, Field::ArgoNamespace, "argo").unwrap();
         assert_eq!(cfg.argocd.namespace, "argo");
-        assert_eq!(FIELDS.len(), 55);
+        assert_eq!(FIELDS.len(), 70);
         assert!(FIELDS
             .iter()
             .any(|s| s.field == Field::GithubToken && s.kind == FieldKind::Secret));
@@ -1389,7 +1544,7 @@ mod tests {
 
     #[test]
     fn every_field_is_in_exactly_one_group_in_order() {
-        assert_eq!(FIELDS.len(), 55);
+        assert_eq!(FIELDS.len(), 70);
         let mut seen: Vec<Field> = Vec::new();
         for s in FIELDS.iter() {
             assert!(!seen.contains(&s.field), "{:?} listed twice", s.field);
@@ -1441,10 +1596,10 @@ mod tests {
         screen.handle(KeyEvent::from(KeyCode::Up), &mut sh, 0.0);
         assert_eq!(
             screen.group(),
-            Group::Thresholds,
+            Group::Shows,
             "up from the first field wraps to the end"
         );
-        assert_eq!(FIELDS[screen.row].field, Field::HotTemp);
+        assert_eq!(FIELDS[screen.row].field, Field::ShowsPlay);
         screen.handle(KeyEvent::from(KeyCode::Down), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Cluster);
         for _ in 0..5 {
@@ -1467,13 +1622,10 @@ mod tests {
         );
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
         screen.handle(KeyEvent::from(KeyCode::Left), &mut sh, 0.0);
-        assert_eq!(screen.group(), Group::Thresholds, "groups wrap");
+        assert_eq!(screen.group(), Group::Shows, "groups wrap");
         assert!(screen.consumes_left());
-        assert_eq!(
-            screen.sidebar().unwrap().selected,
-            Group::Thresholds.index()
-        );
-        assert_eq!(screen.sidebar().unwrap().items.len(), 7);
+        assert_eq!(screen.sidebar().unwrap().selected, Group::Shows.index());
+        assert_eq!(screen.sidebar().unwrap().items.len(), 8);
     }
 
     #[test]
@@ -1497,8 +1649,10 @@ mod tests {
         assert_eq!(screen.group(), Group::Cluster);
         screen.handle(KeyEvent::from(KeyCode::Char('7')), &mut sh, 0.0);
         assert_eq!(screen.group(), Group::Thresholds);
+        screen.handle(KeyEvent::from(KeyCode::Char('8')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Shows);
         assert!(!screen.dirty, "navigation never dirties the form");
-        assert!(screen.keys().contains("1-7 jump"));
+        assert!(screen.keys().contains("1-8 jump"));
     }
 
     #[test]
@@ -1600,5 +1754,134 @@ mod tests {
         assert_eq!(Group::ALL[4], Group::Media);
         assert_eq!(group_indices(Group::Media).len(), 15);
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn shows_fields_round_trip_and_validation() {
+        let mut c = Config::default();
+        assert_eq!(get(&c, Field::ShowsEnabled), "true");
+        assert_eq!(get(&c, Field::ShowsEvery), "15");
+        assert_eq!(get(&c, Field::ShowsGap), "25");
+        set(&mut c, Field::ShowsEnabled, "false").unwrap();
+        assert!(!c.shows.enabled);
+        set(&mut c, Field::ShowsEvery, " 30 ").unwrap();
+        assert_eq!(c.shows.every_mins, 30);
+        assert!(set(&mut c, Field::ShowsEvery, "1")
+            .unwrap_err()
+            .contains("2"));
+        assert!(set(&mut c, Field::ShowsEvery, "241").is_err());
+        set(&mut c, Field::ShowsEvery, "240").unwrap();
+        assert!(set(&mut c, Field::ShowsEvery, "soon").is_err());
+        set(&mut c, Field::ShowsGap, "12.5").unwrap();
+        assert_eq!(c.shows.gap_mm, 12.5);
+        assert!(set(&mut c, Field::ShowsGap, "4").unwrap_err().contains("5"));
+        assert!(set(&mut c, Field::ShowsGap, "81").is_err());
+        assert_eq!(group_indices(Group::Shows).len(), 4 + SHOWS.len());
+        assert_eq!(Group::ALL[7], Group::Shows);
+        // the checklist labels are the ids, in registry order
+        let labels: Vec<&str> = group_indices(Group::Shows)
+            .into_iter()
+            .filter(|&i| matches!(FIELDS[i].field, Field::Show(_)))
+            .map(|i| FIELDS[i].label)
+            .collect();
+        let ids: Vec<&str> = SHOWS.iter().map(|s| s.id).collect();
+        assert_eq!(labels, ids);
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn show_checklist_keeps_at_least_one_on() {
+        let mut c = Config::default();
+        let all = c.shows.list.clone();
+        for i in 0..SHOWS.len() {
+            assert_eq!(get(&c, Field::Show(i as u8)), "true");
+        }
+        set(&mut c, Field::Show(1), "false").unwrap();
+        assert!(!c.shows.list.contains(&"deep-sea".to_string()));
+        assert_eq!(get(&c, Field::Show(1)), "false");
+        set(&mut c, Field::Show(1), "true").unwrap();
+        assert_eq!(c.shows.list, all, "back in registry order");
+        for i in 1..SHOWS.len() {
+            set(&mut c, Field::Show(i as u8), "false").unwrap();
+        }
+        assert_eq!(c.shows.list, vec!["freight".to_string()]);
+        let e = set(&mut c, Field::Show(0), "false").unwrap_err();
+        assert!(e.contains("at least one"), "{e}");
+        assert_eq!(c.shows.list, vec!["freight".to_string()]);
+        set(&mut c, Field::Show(0), "true").unwrap();
+        assert_eq!(c.shows.list, vec!["freight".to_string()], "no duplicates");
+    }
+
+    fn row_of(f: Field) -> usize {
+        FIELDS.iter().position(|s| s.field == f).unwrap()
+    }
+
+    #[test]
+    fn toggling_the_last_show_off_is_refused_with_a_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut cfg = Config::default();
+        cfg.shows.list = vec!["storm".into()];
+        let mut screen = Configure::from_load(Ok(cfg));
+        screen.handle(KeyEvent::from(KeyCode::Char('8')), &mut sh, 0.0);
+        assert_eq!(screen.group(), Group::Shows);
+        assert_eq!(FIELDS[screen.row].field, Field::ShowsEnabled);
+        screen.row = row_of(Field::Show(3));
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert_eq!(screen.cfg.shows.list, vec!["storm".to_string()]);
+        assert!(screen.error.as_deref().unwrap().contains("at least one"));
+        assert!(!screen.dirty, "a refused toggle changes nothing");
+        screen.row = row_of(Field::Show(0));
+        screen.handle(KeyEvent::from(KeyCode::Char(' ')), &mut sh, 0.0);
+        assert_eq!(
+            screen.cfg.shows.list,
+            vec!["freight".to_string(), "storm".to_string()]
+        );
+        assert!(screen.dirty);
+        assert!(screen.error.is_none(), "a good toggle clears the message");
+        let mut term = Terminal::new(TestBackend::new(70, 24)).unwrap();
+        term.draw(|f| screen.draw(f, f.area(), &sh, 0.0)).unwrap();
+        let t = term.backend().to_string();
+        assert!(t.contains("every 15 min"), "{t}");
+        assert!(t.contains("desert-night"), "{t}");
+        assert!(t.contains("ⓘ Dusk freight"), "help names the show: {t}");
+    }
+
+    #[test]
+    fn play_now_writes_the_request_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sh = shared_at(&dir.path().join("config.yaml"));
+        let mut screen = Configure::from_load(Ok(Config::default()));
+        screen.play_state = Some(dir.path().join("state"));
+        screen.row = row_of(Field::ShowsPlay);
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(matches!(&screen.mode, Mode::Edit(b) if b == "random"));
+        for _ in 0..6 {
+            screen.handle(KeyEvent::from(KeyCode::Backspace), &mut sh, 0.0);
+        }
+        for c in "bogus".chars() {
+            screen.handle(KeyEvent::from(KeyCode::Char(c)), &mut sh, 0.0);
+        }
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(screen.error.as_deref().unwrap().contains("unknown show"));
+        assert!(matches!(screen.mode, Mode::Edit(_)), "stays in the editor");
+        let req = rackscreen_app::play::request_path(&dir.path().join("state"));
+        assert!(!req.exists());
+        for _ in 0..5 {
+            screen.handle(KeyEvent::from(KeyCode::Backspace), &mut sh, 0.0);
+        }
+        for c in "storm".chars() {
+            screen.handle(KeyEvent::from(KeyCode::Char(c)), &mut sh, 0.0);
+        }
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert!(matches!(screen.mode, Mode::Browse));
+        assert!(screen.error.is_none());
+        assert_eq!(screen.note.as_deref(), Some("requested storm"));
+        assert_eq!(std::fs::read_to_string(&req).unwrap(), "storm\n");
+        assert!(!screen.dirty, "playing is not a config change");
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        screen.handle(KeyEvent::from(KeyCode::Enter), &mut sh, 0.0);
+        assert_eq!(screen.note.as_deref(), Some("requested random"));
+        assert_eq!(std::fs::read_to_string(&req).unwrap(), "random\n");
     }
 }
