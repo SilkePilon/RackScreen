@@ -248,22 +248,10 @@ fn default_cycle() -> u64 {
 
 impl ScreenCfg {
     /// Every configured role, in cycling order. At least one.
-    /// The removed `face` role is dropped from old configs with a warning.
     pub fn roles(&self) -> Result<Vec<Role>> {
         anyhow::ensure!(!self.roles.is_empty(), "screen has no roles");
-        let kept: Vec<&String> = self
-            .roles
+        self.roles
             .iter()
-            .filter(|r| !r.eq_ignore_ascii_case("face"))
-            .collect();
-        if kept.len() < self.roles.len() {
-            tracing::warn!("face role was removed; ignoring");
-        }
-        anyhow::ensure!(
-            !kept.is_empty(),
-            "screen has no roles left after dropping the removed face role"
-        );
-        kept.into_iter()
             .map(|r| Role::parse(r).with_context(|| format!("unknown screen role '{r}'")))
             .collect()
     }
@@ -482,17 +470,29 @@ impl Config {
             tracing::warn!("config: the `face:` block is no longer used and is ignored");
         }
         let mut cfg: Config = serde_yaml_ng::from_str(text).context("parse yaml")?;
-        cfg.normalize();
+        cfg.normalize()?;
         Ok(cfg)
     }
 
-    /// Upgrade legacy fields in place and fill the per-app arr ports.
-    pub fn normalize(&mut self) {
-        for s in &mut self.screens {
+    /// Upgrade legacy fields in place and fill the per-app arr ports. The
+    /// removed `face` role is dropped from old configs, with one warning per
+    /// screen; a screen left with no roles is an error.
+    pub fn normalize(&mut self) -> Result<()> {
+        for (i, s) in self.screens.iter_mut().enumerate() {
             if let Some(r) = s.role.take() {
                 if s.roles.is_empty() {
                     s.roles = vec![r];
                 }
+            }
+            let n = s.roles.len();
+            s.roles.retain(|r| !r.eq_ignore_ascii_case("face"));
+            if s.roles.len() < n {
+                tracing::warn!("screen {}: the face role was removed; ignoring", i + 1);
+                anyhow::ensure!(
+                    !s.roles.is_empty(),
+                    "screen {} has no roles left after dropping the removed face role",
+                    i + 1
+                );
             }
         }
         let defaults = MediaCfg::default();
@@ -508,6 +508,7 @@ impl Config {
                 app.service = d.service.clone();
             }
         }
+        Ok(())
     }
 
     pub fn to_yaml(&self) -> Result<String> {
@@ -814,16 +815,41 @@ mod tests {
             "screens:\n  - { roles: [cpu, face, mem], spi: 0, cs: 0, dc: 6, rst: 5 }\n",
         )
         .unwrap();
+        assert_eq!(c.screens[0].roles, vec!["cpu".to_string(), "mem".into()]);
         assert_eq!(c.screens[0].roles().unwrap(), vec![Role::Cpu, Role::Mem]);
+        // any case, on any screen
+        let c = Config::from_yaml(
+            "screens:\n  - { roles: [cpu], spi: 0, cs: 0, dc: 6, rst: 5 }\n  - { roles: [mem, Face], spi: 0, cs: 1, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
+        assert_eq!(c.screens[1].roles, vec!["mem".to_string()]);
+        // a legacy single `role: face` too
+        let e = Config::from_yaml("screens:\n  - { role: face, spi: 0, cs: 0, dc: 6, rst: 5 }\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.starts_with("screen 1 has no roles left"), "{e}");
     }
 
     #[test]
     fn a_roles_list_with_only_face_is_an_error() {
-        let c =
+        let e =
             Config::from_yaml("screens:\n  - { roles: [face], spi: 0, cs: 0, dc: 6, rst: 5 }\n")
-                .unwrap();
-        let e = c.screens[0].roles().unwrap_err().to_string();
+                .unwrap_err()
+                .to_string();
         assert!(e.contains("face"), "{e}");
+    }
+
+    #[test]
+    fn an_only_face_screen_errors_with_its_index() {
+        let e = Config::from_yaml(
+            "screens:\n  - { roles: [cpu], spi: 0, cs: 0, dc: 6, rst: 5 }\n  - { roles: [face], spi: 0, cs: 1, dc: 6, rst: 5 }\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            e,
+            "screen 2 has no roles left after dropping the removed face role"
+        );
     }
 
     #[test]
