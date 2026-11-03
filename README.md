@@ -24,7 +24,7 @@
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, two from [Electricity Maps](https://app.electricitymaps.com), seven from the sky over your house, two from GitHub and one from a Jellyfin server, so the same rack can show pods on one panel and the grid's power mix on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, two from [Electricity Maps](https://app.electricitymaps.com), seven from the sky over your house, two from GitHub, one from a Jellyfin server and one, the music screen, from Spotify and Jellyfin, so the same rack can show pods on one panel and the grid's power mix on the next.
 
 ## Screens
 
@@ -60,6 +60,8 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`mains`** — UPS input voltage on six bands over 200–260 V, the last 24 h as a sparkline | **`load`** — the highest 1-minute load, a segment per node by load per core, cluster means in the card |
 | <img src=".github/media/screens/ci.gif" alt="CI role" width="200"> | <img src=".github/media/screens/jellyfin.gif" alt="NOW PLAYING role" width="200"> |
 | **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill | **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card |
+| <img src=".github/media/screens/music.gif" alt="MUSIC role" width="200"> |  |
+| **`music`** — the album cover, the track's progress on the ring (green Spotify, violet Jellyfin), time left in the pill, song, artist and device in the card |  |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -98,7 +100,7 @@ Config is YAML at `/etc/rackscreen/config.yaml`, with the defaults in [`config.e
 - **Install** — set up service + config: binary, `/etc/rackscreen/config.yaml`, the `rackscreen@<user>` unit, optional SPI in the boot files.
 - **Calibrate** — fix rotation / mirroring. The selected panel is drawn large in the terminal from the very frame the glass shows (half-block pixels in a true-colour terminal, assumed unless `TERM` is a plain `xterm`/`screen`/`linux`; set `RACKSCREEN_TRUECOLOR=0` or `1` to force it; otherwise a drawn circle), the other panels are a strip in the info column to the right. Press `r`/`R`/`f` until the arrow points up and the dot is top-right, `a` copies to all, `s` writes `rotate` and `hflip`.
 - **Screens** — what each screen shows and how fast it cycles; see [Screens and roles](#screens-and-roles).
-- **Configure** — every setting in seven groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds) listed in the sidebar: `Tab`/`←→` step through them, `1`–`7` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
+- **Configure** — every setting in eight groups (Cluster, Services, Energy, Sky, Media & Jellyfin, Display, Thresholds, Spotify) listed in the sidebar: `Tab`/`←→` step through them, `1`–`8` jump straight to one, and `↑↓` flow from the last field of a group into the next; each module has an on/off badge and the focused field shows a one-line explanation. `s` saves everything and offers a restart; `Esc` with unsaved changes asks first.
 - **Status** — the full service detail, links, boot files and the log tail; `l` for the log view, `r` to restart.
 - **Run here** — run the daemon in the foreground with its logs, without touching the service.
 - **Update** — download the latest release, verify its SHA-256, swap the binary and restart the service.
@@ -138,6 +140,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-eight r
 | `load` | Prometheus (node-exporter) | highest 1-minute load, a segment per node by load per core, card the cluster means |
 | `ci` | GitHub Actions | passes over the last twelve runs, a segment per run, pill the newest run, card average run time and failures |
 | `jellyfin` | Jellyfin | time left, ring the position (amber movie, cyan episode, dim when paused), pill direct play / transcoding / paused, card title, episode or year and viewer |
+| `music` | Spotify + Jellyfin | album cover, ring the track's progress (green Spotify, violet Jellyfin, dim when paused), pill time left / paused / played N ago, card song, artist and device |
 
 **Screens** in the setup TUI edits them: `↑↓` pick a screen, `⏎` opens the role picker (`space` toggles a role, `K`/`J` reorder, `⏎` closes), `+`/`-` change the cycle interval in 5 s steps, `s` saves. Four presets fill the screens at once: `c` cluster (`cpu`, `mem`, `pods`, `health`), `e` electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), `m` mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and `w` sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
@@ -186,7 +189,19 @@ Create a fine-grained personal access token at github.com with read access to co
 
 ## Jellyfin role
 
-`jellyfin` shows what is playing on your Jellyfin server: the time left as the number, the position on the ring (amber for a movie, cyan for an episode, dimmed while paused), "Direct play", "Transcoding" or "Paused" in the pill, and the title, episode or year and the viewer in the card. With several sessions it picks the one that started most recently. Turn on `jellyfin enabled`, set `jellyfin url` to the server (`http://192.168.0.x:8096`; it lives outside the cluster, so the Pi must reach it directly) and paste a key from Dashboard → API Keys into `jellyfin api key`; `jellyfin poll` is 5 s by default. While the URL is empty the tile says "Check config"; an unreachable server says "Jellyfin offline" and a rejected key "Check API key". With nothing playing it shows the last thing watched this run.
+`jellyfin` shows what is playing on your Jellyfin server: the time left as the number, the position on the ring (amber for a movie, cyan for an episode, dimmed while paused), "Direct play", "Transcoding" or "Paused" in the pill, and the title, episode or year and the viewer in the card. With several sessions it picks the one that started most recently. Turn on `jellyfin enabled`, set `jellyfin url` to the server (`http://192.168.0.x:8096`; it lives outside the cluster, so the Pi must reach it directly) and paste a key from Dashboard → API Keys into `jellyfin api key`; `jellyfin poll` is 5 s by default. While the URL is empty the tile says "Check config"; an unreachable server says "Jellyfin offline" and a rejected key "Check API key". With nothing playing it shows the last thing watched this run. Music is not shown here: audio sessions go to the `music` role.
+
+## Music role
+
+`music` shows what you are listening to on Spotify or Jellyfin: the album cover, the track's progress on the ring (green for Spotify, violet for Jellyfin, dimmed while paused), the time left in the pill and the song, artist and device in the card. When both play, the one started last wins; a playing source beats a paused one. With nothing playing it shows the last track heard, dimmed, and "played 12 min ago"; before anything played this run it says "nothing playing". Without a Spotify login and without a Jellyfin URL the tile says "Check config".
+
+Jellyfin needs nothing extra: the `jellyfin` settings above also feed the music screen. Spotify needs a free app of your own:
+
+1. Create an app at [developer.spotify.com](https://developer.spotify.com/dashboard) (Web API), and add `http://127.0.0.1:8888/callback` as its redirect URI.
+2. In `rackscreen setup` → **Configure** → **Spotify**, turn on `enabled`, paste the app's client ID into `client id` and save.
+3. Open `log in`: open the address it shows (or scan the QR code with your phone) and log in. The browser then fails to load `127.0.0.1`, which is expected; copy the whole address from its address bar and paste it into the dialog.
+
+The login (Authorization Code with PKCE, no client secret) is written to `~/.local/state/rackscreen/spotify.json` of the service user, mode 0600; the config only holds the client ID. The access token is refreshed on its own. If Spotify ever refuses the login, `log in` says "token expired, log in again". Spotify is polled every 3 s while playing and every 15 s otherwise.
 
 ## Configuration
 
@@ -270,6 +285,10 @@ jellyfin:
   api_key: ""              # Jellyfin Dashboard → API Keys
   poll_secs: 5             # >= 2
 
+spotify:
+  enabled: false           # now playing from Spotify on the music role
+  client_id: ""            # your own app at developer.spotify.com; log in with rackscreen setup
+
 display:
   brightness: 1.0
   fps: 60
@@ -279,7 +298,7 @@ display:
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
-#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin
+#        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:
@@ -329,7 +348,7 @@ The simulator draws the same scenes in a window, so none of this needs a Pi:
     cargo run -- setup --sim --config /tmp/rs.yaml   # the TUI against a scratch config
     cargo run -- calibrate --sim --config /tmp/rs.yaml
 
-Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `m` the download finishes, `k` a restart burst, `b` a mains brownout and back, `j` Jellyfin playing → paused → idle, `c` a passing CI run, `Esc` quit. `--sim-grid` shows all four panels at once.
+Simulator keys: `1` pod started, `2` pod crashed, `3` node down, `4` node up, `5` alert toggle, `6` torrent done, `7` link down, `8` link up, `9` degrade volume, `0` heal volume, `h` hot node, `u` mains loss and back, `d` an application out of sync and back, `g` a GitHub push, `r` a new star, `f` a failed CI run, `l` thunder, `w` rain in five minutes, `i` an ISS pass now, `t` torrent mode, `n` night cycle, `m` the download finishes, `k` a restart burst, `b` a mains brownout and back, `j` Jellyfin playing → paused → idle, `s` music: Spotify playing → paused → Jellyfin → idle, `c` a passing CI run, `Esc` quit. `--sim-grid` shows all four panels at once.
 
 Tests: `cargo test --workspace --features sim,pi`. Golden images live in `crates/render/tests/goldens`; regenerate with `UPDATE_GOLDENS=1 cargo test -p rackscreen-render --test golden` and review the PNGs.
 
