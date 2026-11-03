@@ -13,9 +13,20 @@ import {
 } from "@codemirror/view"
 import { tags as t } from "@lezer/highlight"
 import { CircleCheckIcon, CircleXIcon, RotateCcwIcon } from "lucide-react"
+import { useBlocker } from "react-router"
 import { parse } from "yaml"
 import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -117,6 +128,20 @@ export default function YamlEditor() {
 
   const text = () => view.current?.state.doc.toString() ?? ""
 
+  // Unsaved YAML: ask before leaving the page or closing the tab.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname,
+  )
+  React.useEffect(() => {
+    if (!dirty) return
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", onUnload)
+    return () => window.removeEventListener("beforeunload", onUnload)
+  }, [dirty])
+
   const validate = async (): Promise<boolean> => {
     setBusy("validate")
     try {
@@ -206,6 +231,20 @@ export default function YamlEditor() {
           </Button>
         </div>
       </div>
+      <AlertDialog open={blocker.state === "blocked"} onOpenChange={(o) => !o && blocker.reset?.()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave the YAML editor?</AlertDialogTitle>
+            <AlertDialogDescription>The text you changed there is not saved and will be lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => blocker.proceed?.()}>
+              Leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
