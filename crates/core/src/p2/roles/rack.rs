@@ -167,7 +167,8 @@ pub fn fans(model: &Model, _now: Secs) -> P2Screen {
         max: 100.0,
         labels: f.fans.iter().map(|(n, _)| short_node(n)).collect(),
         colors: f.fans.iter().map(|(_, pct)| color(*pct)).collect(),
-        highlight: idx,
+        // a tie has no busiest node to point at
+        highlight: if all_same { None } else { idx },
     });
     s
 }
@@ -532,6 +533,16 @@ mod tests {
         let s = fans(&m, 0.0);
         assert_eq!(s.hero, "49");
         assert_eq!(pill(&s), ("All at 49 %".into(), TEXT2));
+        assert!(
+            matches!(
+                &s.card,
+                Some(Card::NodeBars {
+                    highlight: None,
+                    ..
+                })
+            ),
+            "no bar stands out on a tie"
+        );
     }
 
     #[test]
