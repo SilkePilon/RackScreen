@@ -51,7 +51,17 @@ pub fn weather(model: &Model, _now: Secs) -> P2Screen {
         Some(i) => (format!("Rain from {:02}:00", (hour + i) % 24), CYAN),
         None => ("Dry next 12 h".to_string(), TEXT2),
     };
-    s.pill = Some((format!("{} · {hint}", condition_name(w.code)), color));
+    let name = condition_name(w.code);
+    let wet = ["rain", "drizzle", "shower", "storm", "snow"]
+        .iter()
+        .any(|k| name.to_lowercase().contains(k));
+    // "Rain · Raining now" says it twice: a wet condition already says it is raining
+    let text = if hint == "Raining now" && wet {
+        name
+    } else {
+        format!("{name} · {hint}")
+    };
+    s.pill = Some((text, color));
     s.card = Some(Card::Spark {
         series: w
             .hourly_temp_c
@@ -189,7 +199,11 @@ mod tests {
         assert_eq!(dry.title, "CLEAR");
         assert_eq!(dry.pill, Some(("Clear · Dry next 12 h".into(), TEXT2)));
         let wet = weather(&weather_model(61, 9.0, vec![2.0; 12]), 0.0);
-        assert_eq!(wet.pill, Some(("Rain · Raining now".into(), CYAN)));
+        assert_eq!(
+            wet.pill,
+            Some(("Rain".into(), CYAN)),
+            "a wet condition says it once"
+        );
         assert_eq!(condition_name(85), "Snow showers");
         assert_eq!(condition_name(1), "Mainly clear");
         assert_eq!(condition(95), "THUNDER");
