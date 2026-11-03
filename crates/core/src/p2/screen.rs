@@ -85,6 +85,9 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
     let mut scene = Scene::new();
     let ring = glided_ring(&s.ring, ui, now);
     scene.items.extend(ring.track());
+    if !s.icon.is_empty() {
+        scene.push(top_icon(s.icon));
+    }
     let pill_cy = if s.unit_below {
         PILL_CY_UNIT_BELOW
     } else {
@@ -103,15 +106,12 @@ pub fn compose(s: &P2Screen, ui: &mut ScreenUi, now: Secs) -> Scene {
     }
     // The base is a prefix of the original paint order (fill, icon, ends,
     // hero, unit, pill, card background): a drawable joins it only when
-    // nothing drawn before it overlaps it. The card background sits inside
-    // the ring and below the pill, clear of the fill, icon, ends, hero and
-    // unit, so moving it up is pixel-neutral. The icon is drawn after the
-    // fill, so it stays out of the base, after the fill.
+    // nothing drawn before it overlaps it. The icon sits in the ring gap,
+    // clear of the fill and its caps (`icon_sits_in_the_ring_gap_clear_of_the_caps`);
+    // the card background sits inside the ring and below the pill, clear of
+    // the fill, icon, ends, hero and unit. Moving both up is pixel-neutral.
     scene.base_len = scene.items.len();
     scene.items.extend(ring.overlay());
-    if !s.icon.is_empty() {
-        scene.push(top_icon(s.icon));
-    }
     if let Some((a, b)) = &s.ends {
         scene.items.extend(ring_ends(a, b));
     }
@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_orders_ring_icon_hero_unit_pill_card() {
+    fn compose_orders_track_icon_card_then_fill_hero_unit_pill() {
         let mut ui = ScreenUi::new();
         let scene = compose(&sample(), &mut ui, 0.0);
         let items = &scene.items;
@@ -214,18 +214,18 @@ mod tests {
             "track first"
         );
         assert!(
-            matches!(items[2], Drawable::RoundRect { color, .. } if color == CARD),
+            matches!(&items[2], Drawable::Icon { name, cx, cy, size, color, alpha, .. }
+                if *name == "ms-memory" && *cx == CX && *cy == ICON_CY && *size == ICON_PX && *color == TEXT && *alpha == 0.70),
+            "icon in the base, right after the track"
+        );
+        assert!(
+            matches!(items[3], Drawable::RoundRect { color, .. } if color == CARD),
             "card background in the base"
         );
-        assert_eq!(scene.base_len, 3);
+        assert_eq!(scene.base_len, 4);
         assert!(
-            matches!(items[3], Drawable::Arc { sweep_deg, .. } if (sweep_deg - RING_SWEEP_DEG * 0.42).abs() < 1e-3),
+            matches!(items[4], Drawable::Arc { sweep_deg, .. } if (sweep_deg - RING_SWEEP_DEG * 0.42).abs() < 1e-3),
             "fill right after the base"
-        );
-        assert!(
-            matches!(&items[4], Drawable::Icon { name, cx, cy, size, color, alpha, .. }
-                if *name == "ms-memory" && *cx == CX && *cy == ICON_CY && *size == ICON_PX && *color == TEXT && *alpha == 0.70),
-            "icon after the fill, outside the base"
         );
         let runs: Vec<&String> = items
             .iter()

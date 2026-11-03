@@ -86,7 +86,7 @@ pub enum Drawable {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub items: Vec<Drawable>,
-    /// `items[..base_len]` rarely change (clear, ring track, card
+    /// `items[..base_len]` rarely change (clear, ring track, top icon, card
     /// background); the renderer may reuse a cached raster of them.
     pub base_len: usize,
     /// Brightness of the whole frame, 1.0 = normal; below 1 during a screen
