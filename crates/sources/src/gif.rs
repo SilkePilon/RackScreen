@@ -13,6 +13,7 @@ use rackscreen_core::gif::{
     MAX_FRAMES,
 };
 
+use crate::owned_fs::{create_dir_all_owned, write_new_owned, Owner};
 use crate::SourceCtx;
 
 /// Downloads stop here.
@@ -91,6 +92,14 @@ pub struct GifSpec {
     pub index: u16,
     pub name: String,
     pub url: String,
+}
+
+/// Where downloads are cached, and who owns the files: under `sudo` the
+/// invoking user, so their own later runs can use and replace them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GifCache {
+    pub dir: PathBuf,
+    pub owner: Option<Owner>,
 }
 
 /// The `.gif` URL in a Tenor page: the `og:image` meta tag, else the first
@@ -358,8 +367,8 @@ async fn resolve(link: GifLink) -> Result<String> {
 
 /// The GIF bytes for a pasted link: the cached file when there is one, else
 /// resolve, download, check it is a GIF and cache it.
-pub async fn load(url: &str, cache_dir: &Path) -> Result<Vec<u8>> {
-    let path = cache_path(cache_dir, url);
+pub async fn load(url: &str, cache: &GifCache) -> Result<Vec<u8>> {
+    let path = cache_path(&cache.dir, url);
     let cached = path.clone();
     if let Ok(bytes) = blocking(move || std::fs::read(&cached)).await? {
         return Ok(bytes);
@@ -372,9 +381,9 @@ pub async fn load(url: &str, cache_dir: &Path) -> Result<Vec<u8>> {
     if !bytes.starts_with(b"GIF8") {
         bail!("{gif_url} is not a GIF");
     }
-    let at = path.clone();
+    let (at, cache) = (path.clone(), cache.clone());
     let (bytes, written) = blocking(move || {
-        let written = write_cache(&at, &bytes);
+        let written = write_cache(&cache, &at, &bytes);
         (bytes, written)
     })
     .await?;
@@ -384,13 +393,17 @@ pub async fn load(url: &str, cache_dir: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn write_cache(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    }
-    let tmp = path.with_extension("gif.tmp");
-    std::fs::write(&tmp, bytes).with_context(|| format!("write {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("rename {}", tmp.display()))
+/// Write a download into the cache (created as needed), owned by the
+/// cache's owner, via a fresh temp file that never follows a link.
+fn write_cache(cache: &GifCache, path: &Path, bytes: &[u8]) -> Result<()> {
+    create_dir_all_owned(&cache.dir, cache.owner)?;
+    write_new_owned(
+        path,
+        &path.with_extension("gif.tmp"),
+        bytes,
+        0o644,
+        cache.owner,
+    )
 }
 
 /// Why a try failed. `Fetch` (the network, a server) is tried again after
@@ -407,15 +420,15 @@ enum Failure {
 /// `retry_delay`; one that does not decode is reported once and left.
 /// One GIF at a time is loaded and decoded, so the memory peak is one
 /// GIF's raw bytes and decode buffers.
-pub async fn run_gifs(gifs: Vec<GifSpec>, cache_dir: PathBuf, ctx: SourceCtx) {
+pub async fn run_gifs(gifs: Vec<GifSpec>, cache: GifCache, ctx: SourceCtx) {
     let decode_lock = Arc::new(tokio::sync::Semaphore::new(1));
     let tasks: Vec<_> = gifs
         .into_iter()
         .map(|spec| {
             let ctx = ctx.clone();
-            let dir = cache_dir.clone();
+            let cache = cache.clone();
             let lock = decode_lock.clone();
-            tokio::spawn(async move { run_one(spec, dir, lock, ctx).await })
+            tokio::spawn(async move { run_one(spec, cache, lock, ctx).await })
         })
         .collect();
     for t in tasks {
@@ -425,13 +438,13 @@ pub async fn run_gifs(gifs: Vec<GifSpec>, cache_dir: PathBuf, ctx: SourceCtx) {
 
 async fn run_one(
     spec: GifSpec,
-    cache_dir: PathBuf,
+    cache: GifCache,
     lock: Arc<tokio::sync::Semaphore>,
     ctx: SourceCtx,
 ) {
     let mut failures = 0u32;
     loop {
-        let e = match load_and_decode(&spec, &cache_dir, &lock).await {
+        let e = match load_and_decode(&spec, &cache, &lock).await {
             Ok(frames) => {
                 tracing::info!(
                     "gif:{}: {} frames, {:.1} s loop",
@@ -475,7 +488,7 @@ async fn run_one(
 
 async fn load_and_decode(
     spec: &GifSpec,
-    cache_dir: &Path,
+    cache: &GifCache,
     lock: &tokio::sync::Semaphore,
 ) -> std::result::Result<GifFrames, Failure> {
     classify_link(&spec.url).map_err(|e| Failure::Final(anyhow!(e)))?;
@@ -485,8 +498,8 @@ async fn load_and_decode(
         .acquire()
         .await
         .map_err(|e| Failure::Final(anyhow!("decode lock: {e}")))?;
-    let bytes = load(&spec.url, cache_dir).await.map_err(Failure::Fetch)?;
-    let cached = cache_path(cache_dir, &spec.url);
+    let bytes = load(&spec.url, cache).await.map_err(Failure::Fetch)?;
+    let cached = cache_path(&cache.dir, &spec.url);
     let decoded = blocking(move || {
         let result = decode(&bytes);
         if result.is_err() {
@@ -732,14 +745,16 @@ mod tests {
         let url = "https://unreachable.invalid/party.gif";
         let bytes = fixture("gif-fixture.gif");
         std::fs::write(cache_path(&dir, url), &bytes).unwrap();
-        assert_eq!(load(url, &dir).await.unwrap(), bytes);
+        assert_eq!(load(url, &unowned(&dir)).await.unwrap(), bytes);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn an_uncached_bad_link_fails_without_fetching() {
         let dir = tempfile_dir();
-        assert!(load("https://example.com/x.png", &dir).await.is_err());
+        assert!(load("https://example.com/x.png", &unowned(&dir))
+            .await
+            .is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -778,7 +793,7 @@ mod tests {
         let lock = Arc::new(tokio::sync::Semaphore::new(1));
         tokio::time::timeout(
             Duration::from_secs(10),
-            run_one(spec, dir.clone(), lock, ctx),
+            run_one(spec, unowned(&dir), lock, ctx),
         )
         .await
         .expect("gives up instead of waiting to retry");
@@ -803,11 +818,47 @@ mod tests {
         let lock = tokio::sync::Semaphore::new(1);
         let held = lock.acquire().await.unwrap();
         // were it loaded first, the download would fail at once
-        let r =
-            tokio::time::timeout(Duration::from_secs(2), load_and_decode(&spec, &dir, &lock)).await;
+        let r = tokio::time::timeout(
+            Duration::from_secs(2),
+            load_and_decode(&spec, &unowned(&dir), &lock),
+        )
+        .await;
         assert!(r.is_err(), "still waiting for the permit: {r:?}");
         drop(held);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_cache_is_written_for_its_owner_and_never_through_a_link() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tempfile_dir();
+        let m = std::fs::metadata(&root).unwrap();
+        let cache = GifCache {
+            dir: root.join("cache").join("gifs"),
+            owner: Some((m.uid(), m.gid())),
+        };
+        let url = "https://i.giphy.com/AbC.gif";
+        let path = cache_path(&cache.dir, url);
+        write_cache(&cache, &path, b"GIF89a").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"GIF89a");
+        let fm = std::fs::metadata(&path).unwrap();
+        assert_eq!((fm.uid(), fm.gid()), (m.uid(), m.gid()));
+        assert_eq!(fm.mode() & 0o777, 0o644);
+        // a link planted at the temp path is not written through
+        std::fs::remove_file(&path).unwrap();
+        let victim = root.join("victim");
+        std::fs::write(&victim, "keep me").unwrap();
+        std::os::unix::fs::symlink(&victim, path.with_extension("gif.tmp")).unwrap();
+        assert!(write_cache(&cache, &path, b"GIF89a").is_err());
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn unowned(dir: &Path) -> GifCache {
+        GifCache {
+            dir: dir.to_path_buf(),
+            owner: None,
+        }
     }
 
     fn tempfile_dir() -> PathBuf {

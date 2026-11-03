@@ -91,51 +91,20 @@ fn no_sudo_warning(root: bool, sudo_user_set: bool) -> Option<&'static str> {
 /// one is removed first, anything else is an error), chowned through its
 /// handle, and a link at the final path is refused.
 fn write_owned(state: &Path, arg: &str, owner: Option<(u32, u32)>) -> Result<PathBuf> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use rackscreen_sources::owned_fs::{create_dir_all_owned, write_new_owned};
 
     parse(arg)?;
     let path = request_path(state);
     let dir = path.parent().expect("request path has a parent");
-    let mut missing = Vec::new();
-    let mut d = Some(dir);
-    while let Some(p) = d.filter(|p| !p.exists()) {
-        missing.push(p.to_path_buf());
-        d = p.parent();
-    }
-    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    if let Some((uid, gid)) = owner {
-        for p in &missing {
-            std::os::unix::fs::chown(p, Some(uid), Some(gid))
-                .with_context(|| format!("chown {}", p.display()))?;
-        }
-    }
-    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
-        anyhow::bail!("{} is a symlink; not writing through it", path.display());
-    }
-    let tmp = path.with_extension("tmp");
-    match std::fs::symlink_metadata(&tmp) {
-        Ok(m) if m.file_type().is_file() => {
-            std::fs::remove_file(&tmp).with_context(|| format!("remove stale {}", tmp.display()))?
-        }
-        Ok(_) => anyhow::bail!("{} exists and is not a regular file", tmp.display()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e).with_context(|| format!("stat {}", tmp.display())),
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o644)
-        .open(&tmp)
-        .with_context(|| format!("create {}", tmp.display()))?;
-    file.write_all(format!("{}\n", arg.trim()).as_bytes())
-        .with_context(|| format!("write {}", tmp.display()))?;
-    if let Some((uid, gid)) = owner {
-        std::os::unix::fs::fchown(&file, Some(uid), Some(gid))
-            .with_context(|| format!("chown {}", tmp.display()))?;
-    }
-    drop(file);
-    std::fs::rename(&tmp, &path).with_context(|| format!("rename to {}", path.display()))?;
+    create_dir_all_owned(dir, owner)?;
+    let line = format!("{}\n", arg.trim());
+    write_new_owned(
+        &path,
+        &path.with_extension("tmp"),
+        line.as_bytes(),
+        0o644,
+        owner,
+    )?;
     Ok(path)
 }
 

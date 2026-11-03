@@ -240,7 +240,10 @@ fn spawn_gif_source(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &Sourc
         d
     });
     tracing::info!("{} GIFs, cache {}", gifs.len(), dir.display());
-    runtime.spawn(rackscreen_sources::gif::run_gifs(gifs, dir, ctx.clone()));
+    // under sudo the cache is the invoking user's, so the files are theirs
+    let owner = crate::config::sudo_user().map(|u| (u.uid.as_raw(), u.gid.as_raw()));
+    let cache = rackscreen_sources::gif::GifCache { dir, owner };
+    runtime.spawn(rackscreen_sources::gif::run_gifs(gifs, cache, ctx.clone()));
 }
 
 /// Electricity Maps. It is independent of the cluster, so it runs whenever
