@@ -155,7 +155,13 @@ impl Monitor {
             arr_configured: matches!(source, SourceKind::Fake) || cfg.media.keyed(),
             jellyfin_configured: matches!(source, SourceKind::Fake)
                 || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
-            music_configured: matches!(source, SourceKind::Fake) || music_configured(cfg),
+            music_configured: matches!(source, SourceKind::Fake)
+                || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
+            spotify_token: (!matches!(source, SourceKind::Fake)
+                && cfg.spotify.enabled
+                && !cfg.spotify.client_id.trim().is_empty())
+            .then(crate::spotify::token_path)
+            .flatten(),
             one_at_a_time: cfg.display.one_at_a_time,
             shows: ShowScheduler::new(cfg.shows.enabled, cfg.shows.every_mins, cfg.shows.defs()),
             show_layout: Layout {
@@ -257,15 +263,6 @@ fn spotify_token_path(cfg: &Config) -> Option<std::path::PathBuf> {
         tracing::warn!("spotify: no home directory for the token file");
     }
     path
-}
-
-/// The music role has a source: a Spotify login, or a Jellyfin URL.
-pub fn music_configured(cfg: &Config) -> bool {
-    let jellyfin = cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty();
-    let spotify = cfg.spotify.enabled
-        && !cfg.spotify.client_id.trim().is_empty()
-        && crate::spotify::token_path().is_some_and(|p| crate::spotify::logged_in(&p));
-    jellyfin || spotify
 }
 
 /// Sky and GitHub sources: public APIs and local maths, independent of the cluster.
