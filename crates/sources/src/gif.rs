@@ -253,10 +253,11 @@ fn cover(canvas: &[u8], w: u32, h: u32) -> Vec<u8> {
     out
 }
 
-/// Fetch `url`, refusing anything larger than `max` bytes.
-async fn fetch_capped(url: &str, max: usize) -> Result<Vec<u8>> {
+/// Fetch `url` asking for `accept`, refusing anything larger than `max` bytes.
+async fn fetch_capped(url: &str, accept: &str, max: usize) -> Result<Vec<u8>> {
     let mut resp = client()
         .get(url)
+        .header(reqwest::header::ACCEPT, accept)
         .timeout(DOWNLOAD_TIMEOUT)
         .send()
         .await
@@ -281,7 +282,7 @@ async fn resolve(link: GifLink) -> Result<String> {
     match link {
         GifLink::Direct(u) => Ok(u),
         GifLink::TenorPage(page) => {
-            let html = fetch_capped(&page, MAX_PAGE_BYTES).await?;
+            let html = fetch_capped(&page, "text/html", MAX_PAGE_BYTES).await?;
             tenor_gif_url(&String::from_utf8_lossy(&html))
                 .ok_or_else(|| anyhow!("no .gif in the Tenor page {page}"))
         }
@@ -297,7 +298,7 @@ pub async fn load(url: &str, cache_dir: &Path) -> Result<Vec<u8>> {
     }
     let link = classify_link(url).map_err(|e| anyhow!(e))?;
     let gif_url = resolve(link).await?;
-    let bytes = fetch_capped(&gif_url, MAX_DOWNLOAD_BYTES).await?;
+    let bytes = fetch_capped(&gif_url, "image/gif", MAX_DOWNLOAD_BYTES).await?;
     if !bytes.starts_with(b"GIF8") {
         bail!("{gif_url} is not a GIF");
     }
