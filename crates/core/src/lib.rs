@@ -11,5 +11,6 @@ pub mod scene;
 pub mod scene_model;
 pub mod scene_rain;
 pub mod screens;
+pub mod shows;
 pub mod sky;
 pub mod theme;

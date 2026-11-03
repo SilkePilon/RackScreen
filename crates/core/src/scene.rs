@@ -5,6 +5,7 @@ use crate::model::Model;
 pub use crate::p2::font::FontId;
 use crate::p2::screen::compose;
 use crate::p2::ui::ScreenUi;
+use crate::shows::world::WorldFrame;
 use crate::theme::{Color, Role, BLACK};
 
 /// An axis-aligned clip in screen pixels for text runs.
@@ -81,6 +82,33 @@ pub enum Drawable {
         alpha: f32,
         clip: Option<ClipRect>,
     },
+    /// A pixel-show world: columns `x0..x0 + 60` of `frame`, scaled ×4.
+    World {
+        frame: WorldRef,
+        x0: u32,
+    },
+}
+
+/// A shared world frame, compared by identity: all screens of one tick hold
+/// the same `Arc`, and a new frame is a new `Arc`.
+#[derive(Clone)]
+pub struct WorldRef(pub std::sync::Arc<WorldFrame>);
+
+impl PartialEq for WorldRef {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for WorldRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "WorldRef({}x60 @ {:p})",
+            self.0.width,
+            std::sync::Arc::as_ptr(&self.0)
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

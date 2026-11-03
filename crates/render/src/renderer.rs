@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use rackscreen_core::scene::{Drawable, Scene};
+use rackscreen_core::shows::world::{WorldFrame, SCALE, WORLD_H};
 use tiny_skia::Pixmap;
 
 use crate::icons::IconCache;
@@ -70,6 +71,7 @@ impl Painter {
     fn draw_item(&mut self, px: &mut Pixmap, d: &Drawable) {
         match d {
             Drawable::Clear(c) => px.fill(skia_color(*c, 1.0)),
+            Drawable::World { frame, x0 } => blit_world(px, &frame.0, *x0),
             Drawable::Icon {
                 name,
                 cx,
@@ -165,6 +167,29 @@ impl Painter {
                     *clip,
                 );
             }
+        }
+    }
+}
+
+/// Copy world columns `x0..` into `px`, each world pixel a `SCALE`² block.
+/// World pixels are opaque (or fully clear), so premultiplied bytes equal
+/// the straight RGBA bytes.
+fn blit_world(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
+    let (w, h) = (px.width(), px.height());
+    let data = px.data_mut();
+    for py in 0..h {
+        let wy = py / SCALE;
+        if wy >= WORLD_H {
+            break;
+        }
+        for pxx in 0..w {
+            let wx = x0 + pxx / SCALE;
+            if wx >= world.width {
+                break;
+            }
+            let src = ((wy * world.width + wx) * 4) as usize;
+            let dst = ((py * w + pxx) * 4) as usize;
+            data[dst..dst + 4].copy_from_slice(&world.rgba[src..src + 4]);
         }
     }
 }
@@ -279,6 +304,45 @@ mod tests {
 
     fn lit(p: &Pixmap, x: u32, y: u32) -> bool {
         pixel(p, x, y).0 > 60
+    }
+
+    #[test]
+    fn world_blits_its_panel_slice_scaled_by_four() {
+        use rackscreen_core::scene::WorldRef;
+        use rackscreen_core::shows::world::{Layout, World, WorldFrame};
+        use std::sync::Arc;
+        let layout = Layout { panels: 2, gap: 6 };
+        let mut f = WorldFrame::new(layout.width());
+        let mut w = World {
+            frame: &mut f,
+            layout,
+        };
+        w.clear(0x0000ff);
+        w.p(0xff0000, 66.0, 0.0, 60, 60);
+        w.p(0x00ff00, 61.0, 0.0, 1, 60); // in the gap: never shown
+        let frame = WorldRef(Arc::new(f));
+        let red = render_one(Drawable::World {
+            frame: frame.clone(),
+            x0: 66,
+        });
+        let blue = render_one(Drawable::World { frame, x0: 0 });
+        for (x, y) in [(0, 0), (239, 239), (120, 3), (3, 120), (239, 0)] {
+            assert_eq!(pixel(&red, x, y), (255, 0, 0), "({x},{y})");
+            assert_eq!(pixel(&blue, x, y), (0, 0, 255), "({x},{y})");
+        }
+        assert!(red.data().chunks(4).all(|p| p == [255, 0, 0, 255]));
+        assert!(blue.data().chunks(4).all(|p| p == [0, 0, 255, 255]));
+    }
+
+    #[test]
+    fn world_ref_compares_by_identity() {
+        use rackscreen_core::scene::WorldRef;
+        use rackscreen_core::shows::world::WorldFrame;
+        use std::sync::Arc;
+        let a = WorldRef(Arc::new(WorldFrame::new(60)));
+        let b = WorldRef(Arc::new(WorldFrame::new(60)));
+        assert_eq!(a, a.clone());
+        assert_ne!(a, b, "equal pixels, different frames");
     }
 
     #[test]

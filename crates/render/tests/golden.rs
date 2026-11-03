@@ -1038,7 +1038,7 @@ fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
     let mut bad = Vec::new();
     for d in &s.items {
         let (what, color, alpha, min) = match d {
-            D::Clear(_) => continue,
+            D::Clear(_) | D::World { .. } => continue,
             D::Arc { color, alpha, .. } => ("arc", *color, *alpha, 0x2A),
             D::RoundRect { color, alpha, .. } => ("rect", *color, *alpha, 0x2A),
             D::Polygon { color, alpha, .. } => ("polygon", *color, *alpha, 0x2A),
@@ -1094,4 +1094,53 @@ fn contrast_floor_on_every_role() {
         "too dark for the panel:\n{}",
         problems.join("\n")
     );
+}
+
+/// Every panel of a show at local time `t` on the default layout (4 panels,
+/// 25 mm gaps), side by side like the mockup strip: 240 px circles with
+/// 32 px of black between them.
+fn show_strip(def: &rackscreen_core::shows::ShowDef, t: f64) -> Pixmap {
+    use rackscreen_core::scene::{Drawable, Scene, WorldRef};
+    use rackscreen_core::shows::world::{gap_px, Layout};
+    const PANEL: u32 = 240;
+    const BEZEL: u32 = 32;
+    let layout = Layout {
+        panels: 4,
+        gap: gap_px(25.0),
+    };
+    let world = WorldRef(std::sync::Arc::new(rackscreen_core::shows::render(
+        def, layout, t,
+    )));
+    let mut strip = Pixmap::new(4 * PANEL + 3 * BEZEL, PANEL).unwrap();
+    strip.fill(tiny_skia::Color::BLACK);
+    let mut r = Renderer::new().unwrap();
+    for i in 0..layout.panels {
+        let mut panel = new_pixmap();
+        let mut s = Scene::new();
+        s.push(Drawable::World {
+            frame: world.clone(),
+            x0: layout.x0(i),
+        });
+        r.render(&s, &mut panel);
+        let ox = i * (PANEL + BEZEL);
+        let sw = strip.width();
+        for y in 0..PANEL {
+            for x in 0..PANEL {
+                let (dx, dy) = (x as f32 + 0.5 - 120.0, y as f32 + 0.5 - 120.0);
+                if dx * dx + dy * dy > 120.0 * 120.0 {
+                    continue;
+                }
+                let src = ((y * PANEL + x) * 4) as usize;
+                let dst = ((y * sw + ox + x) * 4) as usize;
+                strip.data_mut()[dst..dst + 4].copy_from_slice(&panel.data()[src..src + 4]);
+            }
+        }
+    }
+    strip
+}
+
+#[test]
+fn show_freight() {
+    let def = rackscreen_core::shows::by_id("freight").unwrap();
+    check("show_freight", &show_strip(def, 4.5));
 }
