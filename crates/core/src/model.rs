@@ -374,6 +374,8 @@ pub struct Model {
     show_request: Option<Request>,
     /// The night machine is in `Day`: shows may start.
     night_day: bool,
+    /// The night just ended: the next tick restarts the show schedule.
+    show_wake: bool,
     /// The current world frame, keyed by (show id, 12 fps frame index): one
     /// `Arc` per frame for every screen and tick, so equal scenes stay equal.
     show_frame: Option<(&'static str, u32, Arc<WorldFrame>)>,
@@ -452,6 +454,7 @@ impl Model {
             show_order: Vec::new(),
             show_request: None,
             night_day: true,
+            show_wake: false,
             show_frame: None,
         }
     }
@@ -687,7 +690,12 @@ impl Model {
     }
 
     /// Fed by the run loop: true only while the night machine is in `Day`.
+    /// On waking the schedule restarts, so the first show comes `every_mins`
+    /// after the night rather than at once.
     pub fn set_night_day(&mut self, day: bool) {
+        if day && !self.night_day {
+            self.show_wake = true;
+        }
         self.night_day = day;
         if !day {
             self.show_request = None;
@@ -748,6 +756,9 @@ impl Model {
         } else {
             None
         };
+        if std::mem::take(&mut self.show_wake) {
+            self.shows.restart(now);
+        }
         let mut rng = self.rng;
         let started = self
             .shows
@@ -1845,6 +1856,69 @@ mod tests {
     }
 
     #[test]
+    fn the_first_show_after_the_night_waits_every_mins() {
+        // every_mins is 2: one is long overdue when the night ends at 1000 s
+        let mut m = cycling_show_model();
+        m.set_night_day(false);
+        for i in 0..10_000 {
+            m.tick(i as Secs / 10.0);
+        }
+        assert!(m.show_run().is_none());
+        m.set_night_day(true);
+        let mut first = None;
+        for i in 10_000..(10_000 + 200 * 10) {
+            let now = i as Secs / 10.0;
+            m.set_night_day(true);
+            m.tick(now);
+            if first.is_none() {
+                first = m.show_run().map(|r| r.started);
+            }
+        }
+        let first = first.expect("a show once every_mins has passed");
+        assert!(
+            (1120.0..1125.0).contains(&first),
+            "every_mins after waking, got {first}"
+        );
+    }
+
+    #[test]
+    fn night_falling_mid_show_lets_the_run_finish() {
+        use crate::shows::schedule::{Request, ShowPhase};
+        let freight = || Request::Id(crate::shows::by_id("freight").unwrap());
+        let mut m = cycling_show_model();
+        m.tick(0.0);
+        assert!(m.request_show(freight()));
+        let mut now = 0.0;
+        while !matches!(
+            m.show_run().and_then(|r| r.phase(now)),
+            Some((ShowPhase::Playing, _))
+        ) {
+            now += 0.05;
+            m.tick(now);
+            assert!(now < 5.0, "never reached Playing");
+        }
+        let run = *m.show_run().unwrap();
+        m.set_night_day(false);
+        assert!(!m.request_show(freight()), "a night request is dropped");
+        let end = run.started + run.total();
+        // the run plays out unchanged
+        while now < end - 0.05 {
+            now += 0.05;
+            m.tick(now);
+            assert_eq!(m.show_run().map(|r| r.started), Some(run.started));
+        }
+        // and nothing new while it is not day, though one is due (2 min)
+        while now < end + 600.0 {
+            now += 0.5;
+            m.tick(now);
+            if now > end + 0.1 {
+                assert!(m.show_run().is_none(), "no run at night ({now})");
+            }
+        }
+        assert!(!m.request_show(freight()), "still dropped at night");
+    }
+
+    #[test]
     fn a_request_during_a_running_show_is_refused() {
         use crate::shows::schedule::Request;
         let freight = || Request::Id(crate::shows::by_id("freight").unwrap());
@@ -1877,8 +1951,8 @@ mod tests {
         m.set_night_day(true);
         m.tick(300.1);
         assert!(
-            m.show_run().is_some(),
-            "due, so it starts once it is day again"
+            m.show_run().is_none(),
+            "not straight after the night, though one is overdue"
         );
         // one screen: never
         let mut one = cycling_show_model();

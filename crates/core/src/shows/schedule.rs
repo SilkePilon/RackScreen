@@ -138,6 +138,11 @@ impl ShowScheduler {
         from[(rng() % from.len() as u64) as usize]
     }
 
+    /// Count the next scheduled show from `now`, as if one just ended.
+    pub fn restart(&mut self, now: Secs) {
+        self.last_end = now;
+    }
+
     pub fn current(&self) -> Option<&ShowRun> {
         self.current.as_ref()
     }
@@ -307,6 +312,19 @@ mod tests {
         let mut off = ShowScheduler::new(false, 15, vec![]);
         assert!(off.tick(1.0, true, Some(Request::Random), &mut r));
         assert!(super::super::by_id(off.current().unwrap().def.id).is_some());
+    }
+
+    #[test]
+    fn restart_counts_every_mins_from_now() {
+        let mut s = ShowScheduler::new(true, 2, vec![&A]);
+        let mut r = rng(4);
+        s.restart(1000.0);
+        assert!(
+            !s.tick(1000.0, true, None, &mut r),
+            "overdue, but restarted"
+        );
+        assert!(!s.tick(1119.9, true, None, &mut r));
+        assert!(s.tick(1120.0, true, None, &mut r));
     }
 
     #[test]
