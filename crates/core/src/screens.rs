@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn offset_screens_do_not_iris_in_lockstep() {
+    fn offset_screens_do_not_transition_in_lockstep() {
         let roles = vec![Role::Cpu, Role::Mem];
         let mut a = ScreenState::new_with_offset(roles.clone(), 5.0, 0.0);
         let mut b = ScreenState::new_with_offset(roles.clone(), 5.0, 2.5);

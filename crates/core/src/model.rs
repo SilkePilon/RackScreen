@@ -16,7 +16,7 @@ use crate::theme::Role;
 pub const DEFAULT_CYCLE_SECS: Secs = 15.0;
 /// Seed the transition picker starts from; `set_rng_seed` replaces it per boot.
 const RNG_SEED: u64 = 0x2545_F491_4F6C_DD1D;
-/// Extra first dwell per screen index, so equal dwells do not iris together.
+/// Extra first dwell per screen index, so equal dwells do not transition together.
 /// Shrunk when the dwell is too short to spread every screen over one cycle.
 pub const SCREEN_STAGGER_SECS: Secs = 2.5;
 
@@ -376,7 +376,7 @@ pub struct Model {
     night_override: Option<bool>,
     /// One entry per physical screen, top to bottom.
     screens: Vec<ScreenState>,
-    /// Only one screen may iris at a time, in random order: simultaneous
+    /// Only one screen may transition at a time, in random order: simultaneous
     /// transitions on the Pi make four displays fight over one SPI bus.
     one_at_a_time: bool,
     /// While serialising: the instant the next transition may start, i.e. the
@@ -718,7 +718,7 @@ impl Model {
                     .unwrap_or(DEFAULT_CYCLE_SECS)
                     .max(crate::screens::MIN_CYCLE_SECS);
                 // Spread the first transitions over at most one dwell, so screens
-                // that share a dwell never iris on the same frame again.
+                // that share a dwell never transition on the same frame again.
                 let step = SCREEN_STAGGER_SECS.min(cycle / count as Secs);
                 ScreenState::new_with_offset(r, cycle, i as Secs * step)
             })
@@ -741,7 +741,7 @@ impl Model {
         self.screens.get(screen)
     }
 
-    /// Serialise iris transitions: at most one screen at a time, the next one
+    /// Serialise transitions: at most one screen at a time, the next one
     /// picked at random from those whose dwell has elapsed.
     pub fn set_one_at_a_time(&mut self, on: bool) {
         self.one_at_a_time = on;
@@ -771,7 +771,7 @@ impl Model {
         let mut waiting: Vec<usize> = Vec::new();
         for (i, s) in self.screens.iter_mut().enumerate() {
             if self.one_at_a_time {
-                // Finish a running iris; starting one is the slot holder's call.
+                // Finish a running transition; starting one is the slot holder's call.
                 s.advance(now);
                 if s.ready_to_transition(now) {
                     waiting.push(i);
@@ -1251,7 +1251,7 @@ mod tests {
     }
 
     /// Two cycling screens with the same 3 s dwell and no stagger, so both want
-    /// to iris on the very same tick: the case serialisation exists for.
+    /// to transition on the very same tick: the case serialisation exists for.
     fn two_cycling_screens(one_at_a_time: bool) -> Model {
         let mut m = Model::new(Thresholds::default());
         let roles = vec![Role::Cpu, Role::Mem];
@@ -1263,8 +1263,8 @@ mod tests {
         m
     }
 
-    /// Tick at 30 Hz for `secs` and return `(screen, time)` for every iris that
-    /// started. With `exclusive`, assert no two screens are ever irising together.
+    /// Tick at 30 Hz for `secs` and return `(screen, time)` for every transition that
+    /// started. With `exclusive`, assert no two screens are ever transitioning together.
     fn run_transitions(m: &mut Model, secs: Secs, exclusive: bool) -> Vec<(usize, Secs)> {
         let mut was_on = vec![false; m.screen_count()];
         let mut starts = Vec::new();
@@ -1280,7 +1280,10 @@ mod tests {
                 }
                 *was = on;
             }
-            assert!(!exclusive || live <= 1, "{live} screens irising at {now}");
+            assert!(
+                !exclusive || live <= 1,
+                "{live} screens transitioning at {now}"
+            );
         }
         starts
     }

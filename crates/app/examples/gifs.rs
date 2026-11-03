@@ -43,15 +43,17 @@ const WARMUP: Secs = 100.5;
 const CYCLE: Secs = 3.0;
 /// Local quarter-hour the price gauge reads as "now": 14:00.
 const SLOT: u32 = 56;
-/// Every role, each dwelling `CYCLE` and then irising for half a second: one
-/// whole round of the cycling screen, so its GIF loops seamlessly.
+/// Every role, each dwelling `CYCLE` and then crossfading for `TRANSITION_SECS`
+/// (0.4 s): roughly one whole round of the cycling screen. Only a guide: at 20 fps
+/// a dwell or a fade can take one frame more than its nominal length, so the clip
+/// itself is cut at the transitions the model reports (see `Clip::whole_round`).
 const ALL_SECS: Secs = Role::ALL.len() as Secs * (CYCLE + TRANSITION_SECS);
 /// Fixed clock: 2026-09-07 12:00 UTC in Amsterdam, so the sun dial, rain ring
 /// and ISS countdown render the same every time.
 const UNIX_START: i64 = 1_788_782_400;
 const UTC_OFFSET: i32 = 7200;
-/// Three whole rounds, so the cycling screen starts its recording on CPU with a
-/// fresh dwell and warmed-up data.
+/// About three rounds of warm-up data before the cycling screen's recording
+/// starts, on the next fresh dwell of its first role.
 const ALL_WARMUP: Secs = 3.0 * ALL_SECS;
 
 /// One scripted moment: a simulator command, or an event built by hand.
@@ -65,9 +67,14 @@ struct Clip {
     name: &'static str,
     roles: Vec<Role>,
     cycle_secs: Secs,
-    /// Seconds recorded, after the warm-up.
+    /// Seconds recorded, after the warm-up. With `whole_round` only a guide.
     secs: Secs,
     warmup: Secs,
+    /// Record exactly one round of the cycling screen instead of `secs`: start
+    /// on the first frame after a transition lands on the first role, and stop
+    /// just before the next time it does, so the GIF loops without a jump and
+    /// every transition in it is whole.
+    whole_round: bool,
     /// Seconds into the clip, and what happens then.
     script: Vec<(Secs, Step)>,
 }
@@ -80,6 +87,7 @@ impl Clip {
             cycle_secs: CYCLE,
             secs: 8.0,
             warmup: WARMUP,
+            whole_round: false,
             script,
         }
     }
@@ -163,6 +171,7 @@ fn clips() -> Vec<Clip> {
         cycle_secs: CYCLE,
         secs: ALL_SECS,
         warmup: ALL_WARMUP,
+        whole_round: true,
         script: Vec::new(),
     });
     out
@@ -179,7 +188,7 @@ fn main() -> Result<()> {
         println!(
             "{:<16} {frames:>4} frames  {:>4.1} s  {kib:>7.1} KiB",
             path.display(),
-            clip.secs
+            frames as Secs / FPS
         );
     }
     Ok(())
@@ -189,7 +198,7 @@ fn main() -> Result<()> {
 fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     let mut model = Model::new(Thresholds::default());
     model.set_screens(vec![clip.roles.clone()], vec![clip.cycle_secs]);
-    // One screen: nothing to serialise, and no gap between two irises.
+    // One screen: nothing to serialise, and no gap between two transitions.
     model.set_one_at_a_time(false);
     // An Electricity Maps token is configured, so the grid roles show data.
     model.set_token_present(true);
@@ -209,7 +218,14 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     }
 
     let warmup_frames = (clip.warmup * FPS).round() as u64;
-    let total = warmup_frames + (clip.secs * FPS).round() as u64;
+    let clip_frames = (clip.secs * FPS).round() as u64;
+    // A whole round may run a little past `secs`; twice that means it never lands.
+    let total = warmup_frames
+        + if clip.whole_round {
+            2 * clip_frames
+        } else {
+            clip_frames
+        };
     let steps: Vec<(u64, &Step)> = clip
         .script
         .iter()
@@ -220,6 +236,8 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     let mut px = new_pixmap();
     let mut ui = ScreenUi::new();
     let mut seconds = 0u64;
+    let mut was_transitioning = false;
+    let mut first: Option<u64> = None;
     for f in 0..total {
         let now = f as Secs / FPS;
         while (seconds as Secs) < now.floor() {
@@ -243,10 +261,26 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
         if f < warmup_frames {
             continue;
         }
+        if clip.whole_round {
+            let screen = model.screen(0).context("the clip has one screen")?;
+            let landed =
+                was_transitioning && !screen.transitioning() && screen.current() == clip.roles[0];
+            was_transitioning = screen.transitioning();
+            match first {
+                None if landed => first = Some(f),
+                None => continue,
+                Some(start) if landed => {
+                    out.finish()?;
+                    return Ok(f - start);
+                }
+                Some(_) => {}
+            }
+        }
         renderer.render(&model.scene(0, now, &mut ui), &mut px);
         round_mask(&mut px);
         out.push(&px)?;
     }
+    anyhow::ensure!(!clip.whole_round, "{}: the round never closed", clip.name);
     out.finish()?;
     Ok(total - warmup_frames)
 }
