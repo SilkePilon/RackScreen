@@ -28,9 +28,9 @@ hex = "0.4"
 nix = { version = "0.31", features = ["user", "fs", "net", "hostname"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "form"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 tower = "0.5"
 http-body-util = "0.1"
 

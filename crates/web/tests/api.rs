@@ -1031,8 +1031,15 @@ async fn tailscale_login_validates_and_never_echoes_the_key() {
     assert_eq!(b["running"], true);
     let calls = r.calls();
     assert!(calls.contains(&"tailscale set --hostname=rack --ssh=true".to_string()));
-    assert!(calls.contains(&"tailscale up --auth-key=*** --hostname=rack --ssh=true".to_string()));
+    assert!(calls
+        .contains(&"tailscale up --auth-key=file:<tmp> --hostname=rack --ssh=true".to_string()));
     assert!(calls.iter().all(|c| !c.contains("secret")));
+    // the key went through a private file, gone once `up` returned
+    let seen = r.key_files.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].content, "tskey-auth-k123CNTRL-secret");
+    assert_eq!((seen[0].file_mode, seen[0].dir_mode), (0o600, 0o700));
+    assert!(!seen[0].path.exists() && !seen[0].path.parent().unwrap().exists());
 
     // a rejected key reads well
     r.respond(
@@ -1050,6 +1057,42 @@ async fn tailscale_login_validates_and_never_echoes_the_key() {
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
     assert!(b["error"].as_str().unwrap().contains("auth key"), "{b}");
+    let seen = r.key_files.lock().unwrap().clone();
+    assert!(!seen[1].path.exists(), "removed after a failure too");
+
+    // an error that echoes the key never shows it
+    r.respond(
+        "tailscale up",
+        TsOut::fail("weird: tskey-auth-k123CNTRL-secret rejected"),
+    );
+    let (_, _, b) = send(
+        &f.app,
+        tpost(
+            &f,
+            "/api/tailscale/login",
+            json!({"auth_key": "tskey-auth-k123CNTRL-secret"}),
+        ),
+    )
+    .await;
+    let e = b["error"].as_str().unwrap();
+    assert!(!e.contains("secret") && e.contains("tskey-***"), "{b}");
+
+    // a Tailscale too old for `file:` gets it on the command line
+    r.respond("tailscale version", TsOut::ok("1.20.4\n"));
+    r.respond("tailscale up", TsOut::ok(""));
+    send(
+        &f.app,
+        tpost(
+            &f,
+            "/api/tailscale/login",
+            json!({"auth_key": "tskey-auth-x"}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        r.calls().last().unwrap(),
+        "tailscale up --auth-key=*** --hostname=rackscreen --ssh=true"
+    );
 }
 
 #[tokio::test]

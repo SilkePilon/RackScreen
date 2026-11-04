@@ -7,8 +7,10 @@
 //! `login`, `logout`, `set` and `serve` from the operator without root.
 //!
 //! Commands never go through a shell: fixed argument lists, with the few
-//! user-provided values (device name, auth key) validated and passed as
-//! their own arguments. The auth key is never logged.
+//! user-provided values (device name) validated and passed as their own
+//! arguments. The auth key never goes on a command line (where `ps` would
+//! show it): it is handed over in a private file, `--auth-key=file:<path>`.
+//! Anything that looks like a key is scrubbed from every message and log.
 
 use std::collections::HashMap;
 use std::io;
@@ -35,6 +37,10 @@ pub const AUTH_URL_WAIT: Duration = Duration::from_secs(10);
 /// Why every Tailscale action is refused while `web.password` is empty.
 pub const NEEDS_PASSWORD: &str =
     "Set a web password first (System → Web access): Tailscale can give remote access to this Pi.";
+
+/// The first release whose `--auth-key` reads `file:<path>`. Older ones
+/// (long out of support) get the key on the command line, with a warning.
+pub const AUTH_KEY_FILE_SINCE: (u32, u32) = (1, 32);
 
 pub const NEEDS_SETUP: &str =
     "RackScreen may not manage Tailscale yet: finish the setup first (it makes the service user Tailscale's operator)";
@@ -564,8 +570,78 @@ pub fn find_url(text: &str, pick: impl Fn(&str) -> bool) -> Option<String> {
         .map(str::to_string)
 }
 
-/// A short readable message for a failed `tailscale` command.
+/// `text` with every `tskey-[A-Za-z0-9_-]+` replaced by `tskey-***`: an
+/// auth key must never reach a log line or the browser.
+pub fn scrub_keys(text: &str) -> String {
+    const PREFIX: &str = "tskey-";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(PREFIX) {
+        out.push_str(&rest[..i + PREFIX.len()]);
+        let after = &rest[i + PREFIX.len()..];
+        let n = after
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
+            .count();
+        if n > 0 {
+            out.push_str("***");
+        }
+        rest = &after[n..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `major.minor` of a `tailscale version` first line ("1.90.6").
+pub fn parse_version(v: &str) -> Option<(u32, u32)> {
+    let mut parts = v.trim().split(['.', '-']);
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+/// Whether this `tailscale` reads `--auth-key=file:<path>`. An unknown
+/// version is a current one (the official installer installs the latest).
+pub fn auth_key_file_supported(version: Option<&str>) -> bool {
+    version
+        .and_then(parse_version)
+        .is_none_or(|v| v >= AUTH_KEY_FILE_SINCE)
+}
+
+/// The auth key in a file only this user can read, in a directory only
+/// this user can enter; both go when this is dropped (also on errors).
+pub struct KeyFile {
+    dir: tempfile::TempDir,
+}
+
+impl KeyFile {
+    pub fn new(key: &str) -> io::Result<KeyFile> {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let dir = tempfile::Builder::new()
+            .prefix("rackscreen-tailscale-")
+            .tempdir()?;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(dir.path().join("auth-key"))?;
+        f.write_all(key.as_bytes())?;
+        f.sync_all()?;
+        Ok(KeyFile { dir })
+    }
+    pub fn path(&self) -> std::path::PathBuf {
+        self.dir.path().join("auth-key")
+    }
+}
+
+/// A short readable message for a failed `tailscale` command, without keys.
 pub fn friendly(out: &Output) -> String {
+    scrub_keys(&friendly_raw(out))
+}
+
+fn friendly_raw(out: &Output) -> String {
     if out.timed_out {
         return "Tailscale did not answer in time".into();
     }
@@ -631,7 +707,7 @@ fn spawn_error(e: io::Error) -> ApiError {
     if e.kind() == io::ErrorKind::NotFound {
         ApiError::bad_request("Tailscale is not installed on the Pi")
     } else {
-        ApiError::internal(format!("cannot run tailscale: {e}"))
+        ApiError::internal(scrub_keys(&format!("cannot run tailscale: {e}")))
     }
 }
 
@@ -697,8 +773,9 @@ pub async fn view(state: &AppState) -> TailscaleView {
             Err(e) => v.error = Some(format!("unexpected tailscale status: {e}")),
         },
         Ok(o) => v.error = Some(friendly(&o)),
-        Err(e) => v.error = Some(e.to_string()),
+        Err(e) => v.error = Some(scrub_keys(&e.to_string())),
     }
+    v.status.health = v.status.health.iter().map(|h| scrub_keys(h)).collect();
     let prefs = prefs
         .ok()
         .filter(Output::success)
@@ -728,7 +805,7 @@ const MAX_LOG: usize = 400;
 
 fn push_log(job: &Mutex<SetupJob>, line: String) {
     let mut j = job.lock().unwrap();
-    j.log.push(line);
+    j.log.push(scrub_keys(&line));
     if j.log.len() > MAX_LOG {
         let extra = j.log.len() - MAX_LOG;
         j.log.drain(..extra);
@@ -754,7 +831,7 @@ pub async fn post_setup(State(state): State<Arc<AppState>>) -> ApiResult<Value> 
     let runner = ts.runner.clone();
     let sink_job = job.clone();
     let sink: LineSink = Arc::new(move |l: String| {
-        tracing::info!("tailscale-setup: {l}");
+        tracing::info!("tailscale-setup: {}", scrub_keys(&l));
         push_log(&sink_job, l);
     });
     // the sudo answer may change with this run (it does not, but the
@@ -850,7 +927,27 @@ pub async fn login(
             .ok()
             .and_then(|o| parse_prefs(&o.stdout))
             .unwrap_or_default();
-        let mut args = vec!["up".to_string(), format!("--auth-key={key}")];
+        let version = ts.ts(&["version"], TIMEOUT).await.ok().and_then(|o| {
+            o.stdout
+                .lines()
+                .next()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+        });
+        // kept until `up` is done, then removed (on every path out)
+        let key_file;
+        let mut args = vec!["up".to_string()];
+        if auth_key_file_supported(version.as_deref()) {
+            key_file = KeyFile::new(&key)
+                .map_err(|e| ApiError::internal(format!("cannot hand over the auth key: {e}")))?;
+            args.push(format!("--auth-key=file:{}", key_file.path().display()));
+        } else {
+            tracing::warn!(
+                "tailscale {} cannot read the auth key from a file; it goes on the command line (update Tailscale)",
+                version.as_deref().unwrap_or("?")
+            );
+            args.push(format!("--auth-key={key}"));
+        }
         if let Some(h) = hostname.or((!prefs.hostname.is_empty()).then_some(prefs.hostname)) {
             args.push(format!("--hostname={h}"));
         }
@@ -862,7 +959,9 @@ pub async fn login(
             .await
             .map_err(spawn_error)?;
         if !out.success() {
-            return Err(ApiError::bad_request(friendly(&out)));
+            let msg = friendly(&out);
+            tracing::warn!("tailscale: auth key login failed: {msg}");
+            return Err(ApiError::bad_request(msg));
         }
         return Ok(Json(json!({ "auth_url": null, "running": true })));
     }
@@ -1016,6 +1115,17 @@ pub struct FakeRunner {
     /// What a spawned background command printed.
     pub spawn_output: Mutex<String>,
     pub missing: Mutex<bool>,
+    /// Every `--auth-key=file:` seen: its path, what it held and the modes
+    /// of the file and its directory, read while the command "ran".
+    pub key_files: Mutex<Vec<KeyFileSeen>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyFileSeen {
+    pub path: std::path::PathBuf,
+    pub content: String,
+    pub file_mode: u32,
+    pub dir_mode: u32,
 }
 
 impl FakeRunner {
@@ -1033,17 +1143,27 @@ impl FakeRunner {
             .chain(args.iter().cloned())
             .collect::<Vec<_>>()
             .join(" ");
-        let shown = line
-            .split(' ')
-            .map(|w| {
-                if w.starts_with("--auth-key=") {
-                    "--auth-key=***"
-                } else {
-                    w
+        let shown = args
+            .iter()
+            .map(|w| match w.strip_prefix("--auth-key=") {
+                Some(file) if file.starts_with("file:") => {
+                    use std::os::unix::fs::PermissionsExt;
+                    let path = std::path::PathBuf::from(&file[5..]);
+                    let mode = |p: &std::path::Path| {
+                        std::fs::metadata(p).map_or(0, |m| m.permissions().mode() & 0o777)
+                    };
+                    self.key_files.lock().unwrap().push(KeyFileSeen {
+                        content: std::fs::read_to_string(&path).unwrap_or_default(),
+                        file_mode: mode(&path),
+                        dir_mode: path.parent().map_or(0, mode),
+                        path,
+                    });
+                    "--auth-key=file:<tmp>"
                 }
+                Some(_) => "--auth-key=***",
+                None => w.as_str(),
             })
-            .collect::<Vec<_>>()
-            .join(" ");
+            .fold(prog.to_string(), |acc, w| format!("{acc} {w}"));
         self.calls.lock().unwrap().push(shown);
         if prog == "tailscale" && *self.missing.lock().unwrap() {
             return Err(io::Error::new(io::ErrorKind::NotFound, "no tailscale"));
@@ -1177,6 +1297,52 @@ mod tests {
         assert!(valid_auth_key("tskey-auth-kAbC123CNTRL-xyz_9"));
         assert!(!valid_auth_key("tskey-") && !valid_auth_key("key-abc"));
         assert!(!valid_auth_key("tskey-abc def") && !valid_auth_key("tskey-abc\n--ssh"));
+    }
+
+    #[test]
+    fn auth_keys_are_scrubbed_everywhere() {
+        assert_eq!(
+            scrub_keys("bad key tskey-auth-k123CNTRL-s3cr_et, try again"),
+            "bad key tskey-***, try again"
+        );
+        assert_eq!(
+            scrub_keys("tskey-a tskey- x tskey-b\n"),
+            "tskey-*** tskey- x tskey-***\n"
+        );
+        assert_eq!(scrub_keys("nothing here"), "nothing here");
+        assert_eq!(scrub_keys("ümlaut tskey-ä"), "ümlaut tskey-ä");
+        let out = Output::fail("Error: invalid --auth-key=tskey-auth-kXyZ-123 given");
+        assert!(!friendly(&out).contains("kXyZ"), "{}", friendly(&out));
+        let job = Mutex::new(SetupJob::default());
+        push_log(&job, "+ tailscale up --authkey=tskey-auth-zzz".into());
+        assert_eq!(
+            job.lock().unwrap().log[0],
+            "+ tailscale up --authkey=tskey-***"
+        );
+    }
+
+    #[test]
+    fn the_key_file_is_private_and_goes_away() {
+        use std::os::unix::fs::PermissionsExt;
+        let kf = KeyFile::new("tskey-auth-abc").unwrap();
+        let path = kf.path();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tskey-auth-abc");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
+        drop(kf);
+        assert!(!path.exists() && !path.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn old_tailscale_gets_the_key_on_the_command_line() {
+        assert_eq!(parse_version("1.90.6"), Some((1, 90)));
+        assert_eq!(parse_version("1.32.0-dev2022"), Some((1, 32)));
+        assert_eq!(parse_version("garbage"), None);
+        assert!(auth_key_file_supported(Some("1.90.6")));
+        assert!(auth_key_file_supported(Some("1.32.0")));
+        assert!(!auth_key_file_supported(Some("1.30.2")));
+        assert!(auth_key_file_supported(None) && auth_key_file_supported(Some("?")));
     }
 
     #[test]
