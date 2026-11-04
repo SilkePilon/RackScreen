@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn freight_is_registered() {
         let d = by_id("freight").expect("freight");
-        assert_eq!((d.name, d.secs), ("Dusk freight", 9.0));
+        assert_eq!((d.name, d.secs), ("Dusk freight", 12.0));
         assert!(by_id("nope").is_none());
     }
 

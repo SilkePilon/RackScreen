@@ -86,7 +86,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/freight.gif" alt="Dusk freight show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Dusk freight</b> (<code>freight</code>) — a long teal train with lit windows rolls through every screen at sunset, smoke trailing.
+  <b>Dusk freight</b> (<code>freight</code>) — a steam train with a blazing headlamp rolls through the sunset countryside; at the crossing a waiting cow gets the guard's cap tossed from the caboose and moos proudly after the train.
 </p>
 
 <p align="center">

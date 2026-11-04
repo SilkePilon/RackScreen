@@ -1498,8 +1498,10 @@ fn show_strip(def: &rackscreen_core::shows::ShowDef, t: f64) -> Pixmap {
 
 #[test]
 fn show_freight() {
-    let def = rackscreen_core::shows::by_id("freight").unwrap();
-    check("show_freight", &show_strip(def, 4.5));
+    for (t, name) in [(5.5, "show_freight_crossing"), (10.8, "show_freight_moo")] {
+        let def = rackscreen_core::shows::by_id("freight").unwrap();
+        check(name, &show_strip(def, t));
+    }
 }
 
 #[test]
