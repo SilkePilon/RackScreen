@@ -167,6 +167,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Dragon over the castle</b> (<code>dragon</code>) — at sunset a dragon flaps in over a village (windmill turning, villagers running) and breathes fire at the knight on the castle wall; behind his shield he was only toasting a marshmallow.
 </p>
 
+<p align="center">
+  <b>Broadside</b> (<code>pirates</code>) — two sailing ships trade cannon fire on rolling waves off a palm island; a ball brings down the dark ship's mainmast and the captain's parrot flies off wearing his hat.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
