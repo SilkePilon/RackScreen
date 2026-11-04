@@ -159,6 +159,26 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Desert: night tumbleweed</b> (<code>desert-night</code>) — a tumbleweed rolls past cactus silhouettes under a big moon; a shooting star streaks over.
 </p>
 
+<p align="center">
+  <b>Temple run</b> (<code>boulder</code>) — an explorer lifts a golden idol in a torch-lit temple, a giant boulder chases them across every screen, they dive out into the jungle and their hat sails back onto their head.
+</p>
+
+<p align="center">
+  <b>Time machine</b> (<code>time-car</code>) — a boxy silver car floors it down a night street in sparks and blue lightning, vanishes in a flash leaving two burning tyre tracks, then drops back out of the sky and loses a hubcap.
+</p>
+
+<p align="center">
+  <b>Monster in the harbour</b> (<code>kaiju</code>) — a giant lizard rises from a harbour at dusk, wades through and roars until the screens shake, then sneezes a buzzing jet out of the sky.
+</p>
+
+<p align="center">
+  <b>The heist</b> (<code>heist</code>) — a cat burglar drops through a laser grid and swaps a jewel for a rock, until the museum cat walks through the last beam and the alarms go off.
+</p>
+
+<p align="center">
+  <b>Beach day</b> (<code>shark</code>) — a fin cuts towards the swimmers, who flee up the sand, until it surfaces: a kid in a duck ring with a toy fin, which a gull then steals.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

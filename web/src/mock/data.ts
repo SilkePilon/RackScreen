@@ -12,6 +12,11 @@ export const SHOWS: ShowInfo[] = [
   { id: "alpine", title: "Mountains: alpine dawn" },
   { id: "caravan", title: "Desert: caravan" },
   { id: "desert-night", title: "Desert: night tumbleweed" },
+  { id: "boulder", title: "Temple run" },
+  { id: "time-car", title: "Time machine" },
+  { id: "kaiju", title: "Monster in the harbour" },
+  { id: "heist", title: "The heist" },
+  { id: "shark", title: "Beach day" },
 ]
 
 type R = [name: string, title: string, group: string, description: string]

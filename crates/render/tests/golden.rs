@@ -1314,3 +1314,22 @@ fn show_round_two() {
         check(name, &show_strip(def, t));
     }
 }
+
+#[test]
+fn show_batch_b() {
+    for (id, t, name) in [
+        ("boulder", 5.0, "show_boulder"),
+        ("boulder", 9.6, "show_boulder_hat"),
+        ("time-car", 4.4, "show_time_car"),
+        ("time-car", 5.2, "show_time_car_tracks"),
+        ("kaiju", 6.3, "show_kaiju"),
+        ("kaiju", 9.25, "show_kaiju_sneeze"),
+        ("heist", 3.9, "show_heist"),
+        ("heist", 7.5, "show_heist_alarm"),
+        ("shark", 3.4, "show_shark"),
+        ("shark", 7.8, "show_shark_reveal"),
+    ] {
+        let def = rackscreen_core::shows::by_id(id).unwrap();
+        check(name, &show_strip(def, t));
+    }
+}
