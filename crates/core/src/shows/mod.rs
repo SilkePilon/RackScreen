@@ -16,6 +16,7 @@ pub mod schedule;
 mod scifi;
 mod space;
 mod storm;
+mod ufo;
 pub mod world;
 
 use world::{Layout, World, WorldFrame};
@@ -106,6 +107,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: hyperspace::SECS,
         draw: hyperspace::draw,
     },
+    ShowDef {
+        id: "ufo",
+        name: "Close encounter",
+        secs: ufo::SECS,
+        draw: ufo::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -161,6 +168,7 @@ mod tests {
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
                 ("hyperspace", "Jump to hyperspace", 10.0),
+                ("ufo", "Close encounter", 12.0),
             ]
         );
     }

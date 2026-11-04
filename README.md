@@ -166,6 +166,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Jump to hyperspace</b> (<code>hyperspace</code>) — a small fighter cruises past a nebula and a night-side planet, spools up, the stars stretch into streaks and it shoots into the last screen with a white flash.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/ufo.gif" alt="Close encounter show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Close encounter</b> (<code>ufo</code>) — a saucer drifts over a moonlit farm, beams up a wiggling cow and zips off; the cow floats back down under a parachute, wearing a new antenna.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

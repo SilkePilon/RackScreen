@@ -1320,6 +1320,8 @@ fn show_batch_a() {
     for (id, t, name) in [
         ("hyperspace", 4.5, "show_hyperspace_charge"),
         ("hyperspace", 5.7, "show_hyperspace_jump"),
+        ("ufo", 5.2, "show_ufo_beam"),
+        ("ufo", 10.0, "show_ufo_parachute"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));
