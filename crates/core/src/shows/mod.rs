@@ -5,6 +5,7 @@
 mod alpine;
 mod aurora;
 mod birds;
+mod black_hole;
 mod caravan;
 mod day;
 mod deep_sea;
@@ -13,12 +14,17 @@ mod dino_chase;
 mod dragon;
 mod fireworks;
 mod freight;
+mod hyperspace;
 mod launch;
+mod mech;
+mod moon_landing;
 mod paper_plane;
 mod pirates;
 pub mod schedule;
+mod scifi;
 mod space;
 mod storm;
+mod ufo;
 pub mod world;
 
 mod boulder;
@@ -170,6 +176,36 @@ pub const SHOWS: &[ShowDef] = &[
         secs: launch::SECS,
         draw: launch::draw,
     },
+    ShowDef {
+        id: "hyperspace",
+        name: "Jump to hyperspace",
+        secs: hyperspace::SECS,
+        draw: hyperspace::draw,
+    },
+    ShowDef {
+        id: "ufo",
+        name: "Close encounter",
+        secs: ufo::SECS,
+        draw: ufo::draw,
+    },
+    ShowDef {
+        id: "moon-landing",
+        name: "Lunar landing",
+        secs: moon_landing::SECS,
+        draw: moon_landing::draw,
+    },
+    ShowDef {
+        id: "mech",
+        name: "Giant robot at dusk",
+        secs: mech::SECS,
+        draw: mech::draw,
+    },
+    ShowDef {
+        id: "black-hole",
+        name: "Event horizon",
+        secs: black_hole::SECS,
+        draw: black_hole::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -234,6 +270,11 @@ mod tests {
                 ("pirates", "Broadside", 11.0),
                 ("aurora", "Northern lights", 10.0),
                 ("launch", "Lift-off", 12.0),
+                ("hyperspace", "Jump to hyperspace", 10.0),
+                ("ufo", "Close encounter", 12.0),
+                ("moon-landing", "Lunar landing", 12.0),
+                ("mech", "Giant robot at dusk", 11.0),
+                ("black-hole", "Event horizon", 10.0),
             ]
         );
     }

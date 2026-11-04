@@ -199,6 +199,41 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Lift-off</b> (<code>launch</code>) — countdown lamps light up on a floodlit coastal pad at dawn, the engines ignite in billowing smoke, and the rocket climbs across the screens into space, drops its first stage and releases a tiny satellite that unfolds its solar panels.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/hyperspace.gif" alt="Jump to hyperspace show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Jump to hyperspace</b> (<code>hyperspace</code>) — a small fighter cruises past a nebula and a night-side planet, spools up, the stars stretch into streaks and it shoots into the last screen with a white flash.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/ufo.gif" alt="Close encounter show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Close encounter</b> (<code>ufo</code>) — a saucer drifts over a moonlit farm, beams up a wiggling cow and zips off; the cow floats back down under a parachute, wearing a new antenna.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/moon-landing.gif" alt="Lunar landing show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Lunar landing</b> (<code>moon-landing</code>) — a lander descends over a cratered moonscape with the Earth rising, kicks up dust and touches down; a tiny astronaut bounces out, plants a flag and waves, and an old rover snaps a photo.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/mech.gif" alt="Giant robot at dusk show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Giant robot at dusk</b> (<code>mech</code>) — searchlights sweep a sunset over a city of lit windows; a huge mech strides across, every step shaking the ground and flushing pigeons, then turns its glowing eyes to you and waves.
+</p>
+
+<p align="center">
+  <img src=".github/media/shows/black-hole.gif" alt="Event horizon show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Event horizon</b> (<code>black-hole</code>) — a black hole's accretion disk swirls, lensed into a halo over its shadow and fed by a companion star; a tiny probe is caught, spirals in, stretches into a streak and vanishes in a flash that fires jets from the poles.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
