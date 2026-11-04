@@ -55,7 +55,7 @@ const SHOWING: Record<string, string> = {
   identify: "Identify",
 }
 
-function PanelCard({ s }: { s: ScreenStatus }) {
+function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
   const roles = useRoles()
   const jump = useControl(
     (role: string) => api.jumpRole(s.index, role),
@@ -65,8 +65,13 @@ function PanelCard({ s }: { s: ScreenStatus }) {
     <div className="group flex flex-col items-center gap-4">
       <PanelMirror
         screen={s.index}
-        progress={s.showing === "role" && s.roles.length > 1 ? s.cycle_progress : undefined}
-        cycleSecs={s.cycle_secs}
+        cycle={{
+          active: s.showing === "role" && s.roles.length > 1,
+          role: s.role,
+          progress: s.cycle_progress,
+          cycleSecs: s.cycle_secs,
+          at: sampledAt,
+        }}
         className="max-w-[220px] transition-transform duration-500 ease-out group-hover:scale-[1.015]"
       />
       <div className="flex w-full flex-col items-center gap-1">
@@ -131,7 +136,7 @@ function Panels() {
   return (
     <div className="grid grid-cols-2 gap-x-6 gap-y-10 rounded-2xl border bg-card px-6 py-8 sm:px-8 lg:grid-cols-4">
       {ordered
-        ? ordered.map((s) => <PanelCard key={s.index} s={s} />)
+        ? ordered.map((s) => <PanelCard key={s.index} s={s} sampledAt={(status.data?.received ?? 0) - (status.data?.age_ms ?? 0)} />)
         : Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="flex flex-col items-center gap-4">
               <Skeleton className="aspect-square w-full max-w-[220px] rounded-full" />

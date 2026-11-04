@@ -106,6 +106,7 @@ function status(): Status {
       error: null,
       since_unix: state.monitorSince,
     },
+    age_ms: 0,
     night: { mode: state.night, active: state.night === "on" },
     screens: state.config.screens.map((s, i) => {
       const n = screenNow(i, now)

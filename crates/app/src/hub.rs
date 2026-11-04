@@ -407,6 +407,8 @@ pub struct Hub {
     pub logs: LogSink,
     pub frames: Arc<FrameTap>,
     status: Mutex<StatusSnapshot>,
+    /// When the render loop last published `status`.
+    status_at: Mutex<Option<Instant>>,
     monitor: Mutex<MonitorState>,
     control: Mutex<Option<ControlHandle>>,
     /// The night override from the web UI (`None` = auto). It outlives the
@@ -431,6 +433,7 @@ impl Hub {
             logs,
             frames: Arc::new(FrameTap::new(screens)),
             status: Mutex::new(StatusSnapshot::default()),
+            status_at: Mutex::new(None),
             monitor: Mutex::new(MonitorState::default()),
             control: Mutex::new(None),
             night_override: Mutex::new(None),
@@ -464,6 +467,16 @@ impl Hub {
 
     pub fn publish_status(&self, s: StatusSnapshot) {
         *self.status.lock().unwrap() = s;
+        *self.status_at.lock().unwrap() = Some(Instant::now());
+    }
+
+    /// Milliseconds since the last published snapshot (0 before the first),
+    /// so a client can tell how old `cycle_progress` is.
+    pub fn status_age_ms(&self) -> u64 {
+        self.status_at
+            .lock()
+            .unwrap()
+            .map_or(0, |t| t.elapsed().as_millis() as u64)
     }
 
     pub fn monitor(&self) -> MonitorState {
