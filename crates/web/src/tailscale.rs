@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +34,9 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 pub const SLOW_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a browser login may take to offer its link.
 pub const AUTH_URL_WAIT: Duration = Duration::from_secs(10);
+/// How long a browser login's `tailscale up` may wait for the user before
+/// it is killed.
+pub const LOGIN_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// Why every Tailscale action is refused while `web.password` is empty.
 pub const NEEDS_PASSWORD: &str =
@@ -92,12 +96,17 @@ pub struct Background {
 }
 
 impl Background {
-    /// A finished-looking handle with fixed output (tests).
-    pub fn fixed(output: &str, exited: Option<Option<i32>>) -> Background {
+    /// A handle with fixed output (tests). Dropping it closes `kill`'s
+    /// receiver, so a test can tell whether it was let go.
+    pub fn fixed(
+        output: &str,
+        exited: Option<Option<i32>>,
+        kill: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Background {
         Background {
             output: Arc::new(Mutex::new(output.into())),
             exited: Arc::new(Mutex::new(exited)),
-            _kill: None,
+            _kill: kill,
         }
     }
 }
@@ -245,6 +254,7 @@ impl Runner for RealRunner {
                 // the handle was dropped (or a new login replaced it)
                 _ = rx => {
                     let _ = child.kill().await;
+                    *done.lock().unwrap() = Some(None);
                 }
             }
         });
@@ -273,8 +283,14 @@ pub struct TsState {
     pub bind: Mutex<String>,
     can_setup: Mutex<Option<(Instant, bool)>>,
     pub job: Arc<Mutex<SetupJob>>,
-    /// The `tailscale up` of a browser login that is waiting for the user.
-    login: Mutex<Option<Background>>,
+    /// The `tailscale up` of a browser login that is waiting for the user,
+    /// tagged with the generation that started it.
+    login: Mutex<Option<(u64, Background)>>,
+    login_gen: AtomicU64,
+    /// One login at a time, from the first check to the answer.
+    login_lock: tokio::sync::Mutex<()>,
+    /// How long a waiting browser login lives (`LOGIN_TTL`; tests shorten it).
+    pub login_ttl: Mutex<Duration>,
 }
 
 impl TsState {
@@ -286,7 +302,38 @@ impl TsState {
             can_setup: Mutex::new(None),
             job: Arc::default(),
             login: Mutex::new(None),
+            login_gen: AtomicU64::new(0),
+            login_lock: tokio::sync::Mutex::new(()),
+            login_ttl: Mutex::new(LOGIN_TTL),
         }
+    }
+
+    /// Keep `bg` as the waiting login (killing any older one); its generation.
+    pub fn store_login(&self, bg: Background) -> u64 {
+        let generation = self.login_gen.fetch_add(1, Ordering::Relaxed) + 1;
+        let old = self.login.lock().unwrap().replace((generation, bg));
+        drop(old);
+        generation
+    }
+
+    /// Kill the waiting login if it is still the one of `generation`;
+    /// whether it was.
+    pub fn drop_login(&self, generation: u64) -> bool {
+        let mut slot = self.login.lock().unwrap();
+        if slot.as_ref().is_some_and(|(g, _)| *g == generation) {
+            let bg = slot.take();
+            drop(slot);
+            drop(bg);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Kill whichever login is waiting.
+    pub fn drop_any_login(&self) {
+        let bg = self.login.lock().unwrap().take();
+        drop(bg);
     }
 
     pub fn real() -> TsState {
@@ -881,6 +928,8 @@ pub async fn login(
 ) -> ApiResult<Value> {
     require_password(&state)?;
     let ts = &state.tailscale;
+    // Two logins at once would fight over the stored `tailscale up`.
+    let _one_at_a_time = ts.login_lock.lock().await;
     let hostname = body
         .hostname
         .map(|h| h.trim().to_string())
@@ -917,7 +966,7 @@ pub async fn login(
         ts_ok(ts, &args, TIMEOUT).await?;
     }
     // A new login replaces one still waiting.
-    drop(ts.login.lock().unwrap().take());
+    ts.drop_any_login();
 
     if let Some(key) = auth_key {
         // `up` with any flag must mention the non-default ones it keeps.
@@ -972,7 +1021,16 @@ pub async fn login(
         .spawn("tailscale", &["up".to_string()])
         .map_err(spawn_error)?;
     let (output, exited) = (bg.output.clone(), bg.exited.clone());
-    *ts.login.lock().unwrap() = Some(bg);
+    let generation = ts.store_login(bg);
+    // Nobody finished it in time: stop waiting (unless a newer login took over).
+    let ttl = *ts.login_ttl.lock().unwrap();
+    let st = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(ttl).await;
+        if st.tailscale.drop_login(generation) {
+            tracing::info!("tailscale: the browser login expired");
+        }
+    });
     let deadline = Instant::now() + AUTH_URL_WAIT;
     loop {
         let printed = output.lock().unwrap().clone();
@@ -989,8 +1047,9 @@ pub async fn login(
                 }
             }
         }
-        if let Some(code) = *exited.lock().unwrap() {
-            drop(ts.login.lock().unwrap().take());
+        let code = *exited.lock().unwrap();
+        if let Some(code) = code {
+            ts.drop_login(generation);
             if code == Some(0) {
                 return Ok(Json(json!({ "auth_url": null, "running": true })));
             }
@@ -1002,7 +1061,7 @@ pub async fn login(
             return Err(ApiError::bad_request(friendly(&out)));
         }
         if Instant::now() >= deadline {
-            drop(ts.login.lock().unwrap().take());
+            ts.drop_login(generation);
             return Err(ApiError::unavailable(
                 "Tailscale did not offer a login link in time; try again",
             ));
@@ -1025,7 +1084,7 @@ pub async fn down(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
 
 pub async fn logout(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
     require_password(&state)?;
-    drop(state.tailscale.login.lock().unwrap().take());
+    state.tailscale.drop_any_login();
     ts_ok(&state.tailscale, &["logout"], SLOW_TIMEOUT).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -1118,6 +1177,8 @@ pub struct FakeRunner {
     /// Every `--auth-key=file:` seen: its path, what it held and the modes
     /// of the file and its directory, read while the command "ran".
     pub key_files: Mutex<Vec<KeyFileSeen>>,
+    /// One receiver per spawned command: closed once its handle is dropped.
+    spawned: Mutex<Vec<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1137,6 +1198,16 @@ impl FakeRunner {
     }
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+    /// For every spawned command, in order: whether it is still kept (not killed).
+    pub fn spawns_alive(&self) -> Vec<bool> {
+        use tokio::sync::oneshot::error::TryRecvError;
+        self.spawned
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .map(|rx| matches!(rx.try_recv(), Err(TryRecvError::Empty)))
+            .collect()
     }
     fn record(&self, prog: &str, args: &[String]) -> io::Result<String> {
         let line = std::iter::once(prog.to_string())
@@ -1207,7 +1278,13 @@ impl Runner for FakeRunner {
 
     fn spawn(&self, prog: &str, args: &[String]) -> io::Result<Background> {
         self.record(prog, args)?;
-        Ok(Background::fixed(&self.spawn_output.lock().unwrap(), None))
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.spawned.lock().unwrap().push(rx);
+        Ok(Background::fixed(
+            &self.spawn_output.lock().unwrap(),
+            None,
+            Some(tx),
+        ))
     }
 }
 
@@ -1428,6 +1505,31 @@ mod tests {
             .unwrap()
             .contains("https://login.example.com/a/1"));
         assert!(bg.exited.lock().unwrap().is_none());
+        // killing it marks it exited
+        let exited = bg.exited.clone();
         drop(bg);
+        for _ in 0..50 {
+            if exited.lock().unwrap().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(*exited.lock().unwrap(), Some(None));
+    }
+
+    #[tokio::test]
+    async fn only_the_login_of_a_generation_is_killed_by_it() {
+        let fake = Arc::new(FakeRunner::default());
+        let ts = TsState::new(fake.clone(), "silke".into());
+        let a = ts.store_login(fake.spawn("tailscale", &["up".into()]).unwrap());
+        assert_eq!(fake.spawns_alive(), [true]);
+        let b = ts.store_login(fake.spawn("tailscale", &["up".into()]).unwrap());
+        assert_ne!(a, b);
+        assert_eq!(fake.spawns_alive(), [false, true], "a newer login replaces");
+        assert!(!ts.drop_login(a), "a stale generation leaves the newer one");
+        assert_eq!(fake.spawns_alive(), [false, true]);
+        assert!(ts.drop_login(b));
+        assert_eq!(fake.spawns_alive(), [false, false]);
+        assert!(!ts.drop_login(b));
     }
 }

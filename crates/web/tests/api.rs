@@ -1308,3 +1308,41 @@ async fn tailscale_actions_need_a_web_password() {
     .await;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn a_waiting_browser_login_expires_but_never_kills_a_newer_one() {
+    let r = running_runner();
+    r.respond(
+        "tailscale status --json",
+        TsOut::ok(r#"{"BackendState":"NeedsLogin","AuthURL":""}"#),
+    );
+    *r.spawn_output.lock().unwrap() = "https://login.tailscale.com/a/abc123\n".into();
+    let f = ts_fixture(r.clone());
+    *f.state.tailscale.login_ttl.lock().unwrap() = std::time::Duration::from_millis(300);
+    let sleep = |ms| tokio::time::sleep(std::time::Duration::from_millis(ms));
+
+    let (st, _, _) = send(&f.app, tpost(&f, "/api/tailscale/login", json!({}))).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(r.spawns_alive(), [true]);
+    sleep(150).await;
+    send(&f.app, tpost(&f, "/api/tailscale/login", json!({}))).await;
+    assert_eq!(
+        r.spawns_alive(),
+        [false, true],
+        "the new login replaced the old"
+    );
+    // the first login's timer fires now: it must leave the second alone
+    sleep(250).await;
+    assert_eq!(r.spawns_alive(), [false, true]);
+    // and the second one's own timer ends it
+    sleep(200).await;
+    assert_eq!(r.spawns_alive(), [false, false]);
+
+    // two logins at once both answer (one after the other)
+    let (a, b) = tokio::join!(
+        send(&f.app, tpost(&f, "/api/tailscale/login", json!({}))),
+        send(&f.app, tpost(&f, "/api/tailscale/login", json!({}))),
+    );
+    assert_eq!((a.0, b.0), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(r.spawns_alive()[2..], [false, true]);
+}
