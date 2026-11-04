@@ -1,6 +1,7 @@
 import { PageBody, PageIntro } from "@/components/page"
 import { RestoreDefaults } from "@/components/restore-defaults"
 import { Segmented } from "@/components/segmented"
+import { TransitionsSection } from "@/components/transitions"
 import { NumberRow, Row, RowSkeleton, Section, SettingsCard, SwitchRow, useEnabled } from "@/components/settings"
 import { Input } from "@/components/ui/input"
 import {
@@ -22,7 +23,7 @@ export default function Display() {
   return (
     <PageBody>
       <RestoreDefaults page="/display" />
-      <PageIntro title="Display">How bright and how fast the panels run, when they sleep, and what counts as hot.</PageIntro>
+      <PageIntro title="Display">How bright and how fast the panels run, how roles change, when they sleep, and what counts as hot.</PageIntro>
       {ready ? (
         <Body />
       ) : (
@@ -136,6 +137,7 @@ function Body() {
           <SwitchRow id="display.one_at_a_time" />
         </SettingsCard>
       </Section>
+      <TransitionsSection />
       <Section title="Night" description="The panels fade to a dim moon; shows never play at night.">
         <SettingsCard>
           <SwitchRow id="night.enabled" />

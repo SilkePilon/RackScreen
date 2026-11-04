@@ -103,6 +103,21 @@ export interface ShowsCfg {
   /** Config index of each screen from the left; left out = config order. */
   order?: number[] | null
 }
+export interface ShowTransitionCfg {
+  style: string
+  direction: string
+  secs: number
+}
+export interface TransitionsCfg {
+  /** A style id from lib/transitions.ts. */
+  style: string
+  /** The style's direction; "" is the style's default. */
+  direction: string
+  secs: number
+  random: boolean
+  /** The shows' own transition; left out or null = the same as the screens'. */
+  shows?: ShowTransitionCfg | null
+}
 export interface GifCfg {
   name: string
   url: string
@@ -149,6 +164,7 @@ export interface Config {
   jellyfin: JellyfinCfg
   spotify: SpotifyCfg
   shows: ShowsCfg
+  transitions: TransitionsCfg
   /** Left out when empty. */
   gifs?: GifCfg[]
   gif_search: GifSearchCfg

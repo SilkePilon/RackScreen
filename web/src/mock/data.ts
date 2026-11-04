@@ -136,6 +136,7 @@ export function defaultConfig(): Config {
     jellyfin: { enabled: false, url: "", api_key: null, poll_secs: 5 },
     spotify: { enabled: true, client_id: "4f1c9a2b7e0d4c3f8a6b5d2e1f0a9c8b" },
     shows: { enabled: true, every_mins: 15, gap_mm: 25 },
+    transitions: { style: "fade-black", direction: "", secs: 0.4, random: false },
     gifs: [
       { name: "party", url: "https://giphy.com/gifs/party-parrot-l3q2zVr6cu95nF6O4" },
       { name: "nod", url: "https://tenor.com/view/nod-yes-gif-12345678" },

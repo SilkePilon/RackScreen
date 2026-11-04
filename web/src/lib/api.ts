@@ -110,6 +110,8 @@ export const api = {
   pattern: (on: boolean) => post<unknown>("/control/pattern", { on }),
   jumpRole: (screen: number, role: string) => post<unknown>("/control/role", { screen, role }),
   play: (show: string) => post<unknown>("/control/play", { show }),
+  transitionTest: (screen?: number) =>
+    post<unknown>("/control/transition-test", screen === undefined ? {} : { screen }),
   night: (mode: NightMode) => post<unknown>("/control/night", { mode }),
   restart: () => post<unknown>("/control/restart"),
 

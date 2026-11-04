@@ -11,6 +11,7 @@ import { setLiveFactory, setLogStreamFactory, type LiveSocket, type LogSource } 
 import { setAt, getAt } from "@/lib/path"
 import type { Config, GifHit, GifPage, GifProvider, LogLine, NightMode, SecretPath, Showing, Status, UpdateState } from "@/lib/types"
 import { SECRET_PATHS } from "@/lib/types"
+import { STYLES, type TransitionDirection } from "@/lib/transitions"
 import { defaultConfig, makeLog, rolesFor, ROLE_DEFS, SHOWS } from "@/mock/data"
 import { drawFrame } from "@/mock/frames"
 import "@/mock/show-cards"
@@ -186,6 +187,14 @@ function validate(c: Config): string | null {
   for (const [n, s] of [["weather", c.weather.poll_secs], ["rain", c.rain.poll_secs], ["github", c.github.poll_secs]] as const)
     if (s < 60) return `${n}.poll_secs must be at least 60 (got ${s})`
   if (c.shows.every_mins < 2) return `shows.every_mins must be at least 2 (got ${c.shows.every_mins})`
+  const tr = c.transitions ?? { style: "fade-black", direction: "", secs: 0.4, random: false }
+  for (const [what, t] of [["transitions", tr], ...(tr.shows ? [["transitions.shows", tr.shows] as const] : [])] as const) {
+    const info = STYLES.find((s) => s.id === t.style)
+    if (!info) return `${what}.style: unknown transition '${t.style}' (known: ${STYLES.map((s) => s.id).join(", ")})`
+    if (info.directions.length && t.direction && !info.directions.includes(t.direction as TransitionDirection))
+      return `${what}.direction: transition '${t.style}' takes direction ${info.directions.join(", ")} (got ${t.direction})`
+    if (!(t.secs >= 0.15 && t.secs <= 2)) return `${what}.secs must be between 0.15 and 2 (got ${t.secs})`
+  }
   if (c.shows.gap_mm < 0 || c.shows.gap_mm > 200) return `shows.gap_mm must be between 0 and 200 (got ${c.shows.gap_mm})`
   const url = c.jellyfin.url.trim()
   if (url && !/^https?:\/\//.test(url)) return `jellyfin.url must start with http:// or https:// (got ${url})`
@@ -475,6 +484,24 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       state.showUntil = now + 20_000
       pushLog("INFO", `shows: playing ${state.showId}`)
       return json(200, { ok: true })
+    case "POST /control/transition-test": {
+      const showing = screenNow(0, now).showing
+      if (showing === "show") return json(409, { error: "Wait for the show to finish first." })
+      if (showing === "night") return json(409, { error: "The panels are asleep: switch night mode off first." })
+      if (showing === "pattern" || showing === "identify") return json(409, { error: "The test pattern is on: turn it off first." })
+      const screens = b.screen === undefined ? state.config.screens.map((_, i) => i) : [Number(b.screen)]
+      for (const i of screens) {
+        const s = state.config.screens[i]
+        if (!s) return json(409, { error: `There is no screen ${i + 1}.` })
+        if (s.roles.length < 2 && screens.length === 1)
+          return json(409, { error: `Screen ${i + 1} shows one role, so it has nothing to change to.` })
+        const cur = screenNow(i, now).role
+        const next = s.roles[(s.roles.indexOf(cur) + 1) % s.roles.length]
+        state.jumps.set(i, { role: next, at: now + i * 700 })
+      }
+      pushLog("INFO", `transition test: ${b.screen === undefined ? "every screen" : `screen ${Number(b.screen) + 1}`} changes role now`)
+      return json(200, { ok: true })
+    }
     case "POST /control/night":
       state.night = b.mode as NightMode
       return json(200, { ok: true })

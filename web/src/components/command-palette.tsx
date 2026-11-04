@@ -8,6 +8,7 @@ import {
   RotateCwIcon,
   ScanEyeIcon,
   SlidersHorizontalIcon,
+  SparklesIcon,
   SunIcon,
 } from "lucide-react"
 
@@ -71,6 +72,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const { theme, setTheme } = useTheme()
   const identify = useControl(() => api.identify(5), () => "Each panel shows its number for 5 s")
   const play = useControl(() => api.play("random"), () => "Playing a random show")
+  const transition = useControl(() => api.transitionTest(), () => "Changing roles on the panels now")
   const restart = useControl(() => api.restart(), () => "Panels restarting")
   const night = useControl(
     (m: "on" | "off" | "auto") => api.night(m),
@@ -134,6 +136,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             <CommandItem value="play random show now" onSelect={() => run(() => play.mutate(undefined))}>
               <PlayIcon />
               Play a random show
+            </CommandItem>
+            <CommandItem
+              value="try transition test panels change role now animation"
+              onSelect={() => run(() => transition.mutate(undefined))}
+            >
+              <SparklesIcon />
+              Try the transition on the panels
             </CommandItem>
             <CommandItem value="night mode on dim" onSelect={() => run(() => night.mutate("on"))}>
               <MoonIcon />
