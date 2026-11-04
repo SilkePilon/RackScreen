@@ -171,6 +171,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Broadside</b> (<code>pirates</code>) — two sailing ships trade cannon fire on rolling waves off a palm island; a ball brings down the dark ship's mainmast and the captain's parrot flies off wearing his hat.
 </p>
 
+<p align="center">
+  <b>Northern lights</b> (<code>aurora</code>) — green and violet curtains ripple over snowy peaks and a log cabin, mirrored in a frozen lake; a fox trots across the ice, sits down to watch, and a shooting star goes by.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

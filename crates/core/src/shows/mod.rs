@@ -3,6 +3,7 @@
 //! frame index `f` and the quantised local time `t`.
 
 mod alpine;
+mod aurora;
 mod birds;
 mod caravan;
 mod day;
@@ -119,6 +120,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: pirates::SECS,
         draw: pirates::draw,
     },
+    ShowDef {
+        id: "aurora",
+        name: "Northern lights",
+        secs: aurora::SECS,
+        draw: aurora::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -176,6 +183,7 @@ mod tests {
                 ("dino-chase", "Dinosaur chase", 10.0),
                 ("dragon", "Dragon over the castle", 10.0),
                 ("pirates", "Broadside", 11.0),
+                ("aurora", "Northern lights", 10.0),
             ]
         );
     }

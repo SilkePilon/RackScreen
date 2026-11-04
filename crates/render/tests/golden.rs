@@ -1324,6 +1324,8 @@ fn show_batch_c() {
         ("dragon", 8.3, "show_dragon_marshmallow"),
         ("pirates", 5.9, "show_pirates_mast"),
         ("pirates", 9.6, "show_pirates_parrot"),
+        ("aurora", 4.5, "show_aurora_fox"),
+        ("aurora", 7.9, "show_aurora_star"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));
