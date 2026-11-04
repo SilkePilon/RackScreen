@@ -3,7 +3,7 @@ members = ["crates/core", "crates/render", "crates/display", "crates/sources", "
 resolver = "2"
 
 [workspace.package]
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/silkepilon/RackScreen"
@@ -34,6 +34,7 @@ path = "src/main.rs"
 rackscreen-app = { path = "crates/app" }
 rackscreen-ops = { path = "crates/ops", default-features = false }
 rackscreen-web = { path = "crates/web" }
+rackscreen-sources = { path = "crates/sources" }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

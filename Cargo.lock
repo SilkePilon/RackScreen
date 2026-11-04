@@ -1723,6 +1723,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "lz4_flex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2175,13 +2181,14 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rackscreen"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "clap",
  "nix 0.31.3",
  "rackscreen-app",
  "rackscreen-ops",
+ "rackscreen-sources",
  "rackscreen-web",
  "tracing",
  "tracing-subscriber",
@@ -2189,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-app"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2213,14 +2220,15 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-core"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "fontdue",
+ "lz4_flex",
 ]
 
 [[package]]
 name = "rackscreen-display"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "minifb",
@@ -2231,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-ops"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "nix 0.31.3",
@@ -2247,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-render"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "fontdue",
@@ -2259,7 +2267,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-sources"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2275,6 +2283,7 @@ dependencies = [
  "hyper-util",
  "k8s-openapi",
  "kube",
+ "libc",
  "png",
  "rackscreen-core",
  "reqwest",
@@ -2295,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "rackscreen-web"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "axum",

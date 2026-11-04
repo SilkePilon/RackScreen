@@ -166,8 +166,10 @@ pub fn serve(hub: Arc<Hub>, bind: &str, port: u16, password: String) -> Result<W
     let thread = std::thread::Builder::new()
         .name("web".into())
         .spawn(move || {
+            // One browser or two on a Pi: one worker is plenty.
             let runtime = match tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
+                .worker_threads(1)
+                .max_blocking_threads(2)
                 .enable_all()
                 .build()
             {

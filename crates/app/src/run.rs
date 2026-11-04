@@ -81,10 +81,21 @@ impl Monitor {
             tx: tx.clone(),
             shutdown: shutdown.clone(),
         };
+        // Sources only wait on the network; blocking work (DNS, GIF and
+        // cover decodes) is short and serialised, so few threads do.
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
+            .max_blocking_threads(4)
             .enable_all()
             .build()?;
+        // Freed response and decode buffers go back to the OS now and then.
+        runtime.spawn(async {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(120));
+            loop {
+                tick.tick().await;
+                rackscreen_sources::mem::trim();
+            }
+        });
 
         // sources
         let key_tx = match source {

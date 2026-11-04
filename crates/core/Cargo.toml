@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 fontdue = "0.9"
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-encode", "safe-decode"] }

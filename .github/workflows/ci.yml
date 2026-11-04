@@ -2,8 +2,42 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # No debug info in test builds: smaller caches, faster links.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
 jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci --no-audit --no-fund
+      - run: npm --prefix web run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
+  # The tests do not need the frontend: without web/dist the binary embeds a
+  # placeholder page (crates/web/build.rs).
   test:
     runs-on: ubuntu-latest
     steps:
@@ -12,16 +46,56 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        if: hashFiles('web/package.json') != ''
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm --prefix web ci && npm --prefix web run build
-        if: hashFiles('web/package.json') != ''
-      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev
-      - run: cargo test --workspace --features sim,pi
-      - run: cargo clippy --workspace --features sim,pi -- -D warnings
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev
+      - run: cargo clippy --workspace --all-targets --features sim,pi -- -D warnings
       - run: cargo clippy --no-default-features --features pi -- -D warnings
       - run: cargo clippy --no-default-features --features sim -- -D warnings
+      - run: cargo test --workspace --features sim,pi
+
+  # Native arm64 runner: no cross, no Docker. Runs on every push to main as
+  # well, so a tag finds a warm cache (tag runs only see main's caches).
+  build-aarch64:
+    if: github.event_name == 'push'
+    needs: web
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-aarch64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - run: cargo build --release --locked --no-default-features --features pi
+      - run: cp target/release/rackscreen rackscreen-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rackscreen-aarch64
+          path: rackscreen-aarch64
+          retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build-aarch64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: rackscreen-aarch64
+      - run: chmod +x rackscreen-aarch64
+      # `rackscreen update` verifies the download against this file.
+      - run: sha256sum rackscreen-aarch64 > rackscreen-aarch64.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rackscreen-aarch64
+            rackscreen-aarch64.sha256
+            install.sh

@@ -293,13 +293,11 @@ fn blit_world(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
     }
 }
 
-/// Copy a GIF frame over the whole pixmap. Frames are opaque premultiplied
-/// RGBA of the pixmap's size; any other size (never built) is skipped.
+/// Unpack a GIF frame over the whole pixmap. Frames are opaque premultiplied
+/// RGBA of the panel's size; a pixmap of any other size (never built) is
+/// left alone.
 fn blit_image(px: &mut Pixmap, frames: &GifFrames, frame: u16) {
-    let i = frame as usize;
-    if i < frames.len() && frames.frame(i).len() == px.data().len() {
-        px.data_mut().copy_from_slice(frames.frame(i));
-    }
+    frames.blit(frame as usize, px.data_mut());
 }
 
 #[cfg(test)]
@@ -545,17 +543,18 @@ mod tests {
             frame: 1,
         });
         // the whole frame is copied; the round panel hides the corners
+        let want = g.0.frame(1);
         let r = GIF_SIDE as f32 / 2.0;
         for y in 0..GIF_SIDE {
             for x in 0..GIF_SIDE {
                 let (dx, dy) = (x as f32 + 0.5 - r, y as f32 + 0.5 - r);
                 if dx * dx + dy * dy <= r * r {
                     let i = ((y * GIF_SIDE + x) * 4) as usize;
-                    assert_eq!(&px.data()[i..i + 4], &g.0.frame(1)[i..i + 4], "({x},{y})");
+                    assert_eq!(&px.data()[i..i + 4], &want[i..i + 4], "({x},{y})");
                 }
             }
         }
-        assert_eq!(px.data(), g.0.frame(1));
+        assert_eq!(px.data(), &want[..]);
     }
 
     fn cover(key: &str, rgb: (u8, u8, u8), size: u32) -> rackscreen_core::event::CoverRef {

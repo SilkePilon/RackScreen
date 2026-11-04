@@ -307,6 +307,7 @@ fn uninstall_cmd(yes: bool, purge: bool) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    rackscreen_sources::mem::tune();
     let cli = Cli::parse();
     match cli.cmd {
         Some(Cmd::Run(args)) => run(args),

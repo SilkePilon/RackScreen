@@ -607,7 +607,7 @@ Build for the Pi:
     cargo install cross --version 0.2.5
     cross build --release --target aarch64-unknown-linux-gnu --no-default-features --features pi
 
-The binary lands in `target/aarch64-unknown-linux-gnu/release/rackscreen`.
+The binary lands in `target/aarch64-unknown-linux-gnu/release/rackscreen`. CI builds the release binary natively on GitHub's arm64 runner instead (`cargo build --release --no-default-features --features pi`); pushing a `v*` tag publishes it once the tests pass.
 
 Regenerate the media in this README:
 

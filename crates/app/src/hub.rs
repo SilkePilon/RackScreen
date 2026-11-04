@@ -653,11 +653,16 @@ mod tests {
     fn gif_rows_tell_state_size_and_errors() {
         use rackscreen_core::gif::{GifFrames, GifRef, FRAME_BYTES};
         let frames = GifFrames::new(vec![(vec![0; FRAME_BYTES], 50); 3]).unwrap();
+        let packed = frames.bytes();
+        assert!(
+            packed > 0 && packed < FRAME_BYTES / 100,
+            "flat frames pack small"
+        );
         let ready = GifState::Ready(GifRef(Arc::new(frames)));
         let r = gif_status("cat", true, &ready);
         assert_eq!(
             (r.state, r.frames, r.bytes),
-            ("ready", Some(3), Some(3 * FRAME_BYTES))
+            ("ready", Some(3), Some(packed))
         );
         let l = gif_status("dog", true, &GifState::Loading);
         assert_eq!((l.state, l.frames, l.error), ("loading", None, None));

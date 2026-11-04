@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use rackscreen_core::event::Event;
 use rackscreen_core::gif::{
-    cap_frames, classify_link, delay_ms, keep_mask, GifFrames, GifLink, GifRef, GIF_SIDE,
-    MAX_FRAMES,
+    cap_frames, classify_link, delay_ms, keep_mask, pack_frame, GifFrames, GifLink, GifRef,
+    GIF_SIDE, MAX_FRAMES,
 };
 
 use crate::http::blocking;
@@ -192,7 +192,7 @@ pub fn decode(bytes: &[u8]) -> Result<GifFrames> {
     // what a `Previous` frame covered, to put back once it is shown
     let mut saved: Vec<u8> = Vec::new();
     let mut prev: Option<(Rect, gif::DisposalMethod)> = None;
-    let mut out: Vec<Vec<u8>> = Vec::with_capacity(kept_delays.len());
+    let mut out: Vec<Box<[u8]>> = Vec::with_capacity(kept_delays.len());
     for keep_this in keep.iter().copied() {
         let f = match dec.read_next_frame() {
             Ok(Some(f)) => f,
@@ -217,11 +217,11 @@ pub fn decode(bytes: &[u8]) -> Result<GifFrames> {
         draw(&mut canvas, w, h, rect, &f.buffer);
         prev = Some((rect, f.dispose));
         if keep_this {
-            out.push(cover(&canvas, w, h));
+            out.push(pack_frame(&cover(&canvas, w, h)));
         }
     }
     anyhow::ensure!(!out.is_empty(), "GIF has no frames");
-    GifFrames::new(out.into_iter().zip(kept_delays).collect()).map_err(|e| anyhow!(e))
+    GifFrames::from_packed(out.into_iter().zip(kept_delays).collect()).map_err(|e| anyhow!(e))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -515,6 +515,9 @@ async fn load_and_decode(
             // a restart fetches a broken file afresh
             let _ = std::fs::remove_file(&cached);
         }
+        drop(bytes);
+        // the canvas and the file are gone; give their pages back
+        crate::mem::trim();
         result
     })
     .await;

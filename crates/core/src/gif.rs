@@ -9,7 +9,13 @@ use crate::anim::Secs;
 pub const GIF_SIDE: u32 = 240;
 /// Bytes in one frame: premultiplied RGBA, `GIF_SIDE`².
 pub const FRAME_BYTES: usize = (GIF_SIDE * GIF_SIDE * 4) as usize;
-/// A longer GIF keeps every n-th frame; 150 frames are about 35 MB.
+/// Pixels in one frame.
+const FRAME_PX: usize = (GIF_SIDE * GIF_SIDE) as usize;
+/// The most one packed frame takes (RGB565 that LZ4 could not shrink); most
+/// take a quarter of it or less.
+pub const PACKED_FRAME_MAX: usize = FRAME_PX * 2 + FRAME_PX * 2 / 255 + 16;
+/// A longer GIF keeps every n-th frame. Frames are kept packed (RGB565,
+/// LZ4), a few MB for 150 of them instead of 35 MB of RGBA.
 pub const MAX_FRAMES: usize = 150;
 
 /// A GIF frame delay in centiseconds as milliseconds. 0 and 1 cs (0 and
@@ -43,24 +49,71 @@ pub fn cap_frames<T>(frames: Vec<(T, u32)>, max: usize) -> Vec<(T, u32)> {
     out
 }
 
-/// The decoded frames of one GIF, ready to blit.
+/// One opaque RGBA frame (`FRAME_BYTES`) packed for keeping: RGB565 (what
+/// the panel shows anyway), then LZ4. `unpack_into` gives it back.
+pub fn pack_frame(rgba: &[u8]) -> Box<[u8]> {
+    debug_assert_eq!(rgba.len(), FRAME_BYTES);
+    let mut px = Vec::with_capacity(FRAME_PX * 2);
+    for p in rgba.as_chunks::<4>().0 {
+        let v = ((p[0] as u16 & 0xF8) << 8) | ((p[1] as u16 & 0xFC) << 3) | (p[2] as u16 >> 3);
+        px.extend_from_slice(&v.to_le_bytes());
+    }
+    lz4_flex::block::compress(&px).into_boxed_slice()
+}
+
+/// Unpack a `pack_frame` frame into `out` (`FRAME_BYTES`) as opaque RGBA,
+/// each channel widened so that packing it again gives the same RGB565.
+/// False (and `out` unspecified) when the frame does not unpack.
+fn unpack_into(packed: &[u8], out: &mut [u8]) -> bool {
+    if out.len() != FRAME_BYTES {
+        return false;
+    }
+    // The RGB565 goes into the front half, then widens back to front: pixel
+    // i reads bytes 2i..2i+2 and writes 4i..4i+4, never ahead of a read.
+    match lz4_flex::block::decompress_into(packed, &mut out[..FRAME_PX * 2]) {
+        Ok(n) if n == FRAME_PX * 2 => {}
+        _ => return false,
+    }
+    for i in (0..FRAME_PX).rev() {
+        let v = u16::from_le_bytes([out[2 * i], out[2 * i + 1]]);
+        let (r, g, b) = ((v >> 11) as u8, ((v >> 5) & 0x3F) as u8, (v & 0x1F) as u8);
+        out[4 * i..4 * i + 4].copy_from_slice(&[
+            (r << 3) | (r >> 2),
+            (g << 2) | (g >> 4),
+            (b << 3) | (b >> 2),
+            255,
+        ]);
+    }
+    true
+}
+
+/// The decoded frames of one GIF, packed (see `pack_frame`), ready to blit.
 #[derive(Debug, PartialEq)]
 pub struct GifFrames {
-    frames: Vec<Vec<u8>>,
+    frames: Vec<Box<[u8]>>,
     delays_ms: Vec<u32>,
     total_ms: u64,
 }
 
 impl GifFrames {
-    /// Frames of `FRAME_BYTES` each with their delay; at least one.
+    /// Opaque RGBA frames of `FRAME_BYTES` each with their delay; at least one.
     pub fn new(frames: Vec<(Vec<u8>, u32)>) -> Result<GifFrames, String> {
-        if frames.is_empty() {
-            return Err("no frames".into());
-        }
         if let Some((f, _)) = frames.iter().find(|(f, _)| f.len() != FRAME_BYTES) {
             return Err(format!("frame of {} bytes, want {FRAME_BYTES}", f.len()));
         }
-        let (frames, delays_ms): (Vec<Vec<u8>>, Vec<u32>) = frames.into_iter().unzip();
+        GifFrames::from_packed(
+            frames
+                .into_iter()
+                .map(|(f, d)| (pack_frame(&f), d))
+                .collect(),
+        )
+    }
+    /// Frames already packed with `pack_frame`, with their delay; at least one.
+    pub fn from_packed(frames: Vec<(Box<[u8]>, u32)>) -> Result<GifFrames, String> {
+        if frames.is_empty() {
+            return Err("no frames".into());
+        }
+        let (frames, delays_ms): (Vec<Box<[u8]>>, Vec<u32>) = frames.into_iter().unzip();
         let total_ms = delays_ms.iter().map(|d| *d as u64).sum();
         Ok(GifFrames {
             frames,
@@ -74,8 +127,16 @@ impl GifFrames {
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
     }
-    pub fn frame(&self, i: usize) -> &[u8] {
-        &self.frames[i]
+    /// Write frame `i` into `out` (`FRAME_BYTES` of opaque RGBA). False when
+    /// there is no such frame or `out` is not frame sized.
+    pub fn blit(&self, i: usize, out: &mut [u8]) -> bool {
+        self.frames.get(i).is_some_and(|f| unpack_into(f, out))
+    }
+    /// Frame `i` as opaque RGBA (`FRAME_BYTES`).
+    pub fn frame(&self, i: usize) -> Vec<u8> {
+        let mut out = vec![0; FRAME_BYTES];
+        assert!(self.blit(i, &mut out), "gif frame {i}");
+        out
     }
     pub fn delay_ms(&self, i: usize) -> u32 {
         self.delays_ms[i]
@@ -135,9 +196,9 @@ pub enum GifState {
 }
 
 impl GifFrames {
-    /// Bytes the decoded frames take.
+    /// Bytes the packed frames take.
     pub fn bytes(&self) -> usize {
-        self.frames.len() * FRAME_BYTES
+        self.frames.iter().map(|f| f.len()).sum()
     }
 }
 
@@ -322,8 +383,10 @@ mod tests {
         assert!(GifFrames::new(vec![(vec![0; 16], 100)]).is_err());
         let g = GifFrames::new(vec![(frame(1), 100), (frame(2), 50)]).unwrap();
         assert_eq!((g.len(), g.total_ms()), (2, 150));
-        assert_eq!(g.frame(1)[0], 2);
+        assert_eq!(g.frame(1)[0], 0, "2 is below RGB565's red step");
         assert_eq!(g.delay_ms(1), 50);
+        let g = GifFrames::new(vec![(frame(0xff), 100)]).unwrap();
+        assert_eq!(g.frame(0), frame(0xff));
     }
 
     #[test]

@@ -826,7 +826,7 @@ async fn system_answers_every_section_with_nulls_where_unreadable() {
 async fn gif_memory_joins_the_config_with_the_render_loop() {
     use rackscreen_app::config::GifCfg;
     use rackscreen_app::hub::{GifStatus, StatusSnapshot};
-    use rackscreen_core::gif::{FRAME_BYTES, MAX_FRAMES};
+    use rackscreen_core::gif::{MAX_FRAMES, PACKED_FRAME_MAX};
     let f = fixture("");
     let mut cfg = Config::load_or_default(&f.hub.config_path).unwrap();
     cfg.gifs = ["cat", "dog", "spare"]
@@ -845,30 +845,30 @@ async fn gif_memory_joins_the_config_with_the_render_loop() {
             used: true,
             state: "ready",
             frames: Some(MAX_FRAMES),
-            bytes: Some(MAX_FRAMES * FRAME_BYTES),
+            bytes: Some(MAX_FRAMES * PACKED_FRAME_MAX),
             error: None,
         }],
         ..Default::default()
     });
     let (st, _, body) = send(&f.app, get("/api/gifs/memory")).await;
     assert_eq!(st, StatusCode::OK, "{body}");
-    assert_eq!(body["frame_bytes"], FRAME_BYTES);
+    assert_eq!(body["frame_bytes"], PACKED_FRAME_MAX);
     assert_eq!(body["max_frames"], MAX_FRAMES);
-    assert_eq!(body["max_gif_mb"], 33.0);
+    assert_eq!(body["max_gif_mb"], 16.5);
     let gifs = body["gifs"].as_array().unwrap();
     assert_eq!(gifs.len(), 3);
     assert_eq!(gifs[0]["state"], "ready");
     assert_eq!(gifs[0]["frames"], MAX_FRAMES);
-    assert_eq!(gifs[0]["mb"], 33.0);
+    assert_eq!(gifs[0]["mb"], 16.5);
     assert_eq!(gifs[1]["state"], "loading", "on a screen, not decoded yet");
     assert_eq!(gifs[1]["mb"], Value::Null);
     assert_eq!(gifs[2]["state"], "off");
     assert_eq!(gifs[2]["used"], false);
-    assert_eq!(body["decoded_mb"], 33.0);
-    assert_eq!(body["pending_mb"], 33.0);
+    assert_eq!(body["decoded_mb"], 16.5);
+    assert_eq!(body["pending_mb"], 16.5);
     if let Some(avail) = body["memory"]["available_mb"].as_f64() {
         let budget = body["budget_mb"].as_f64().unwrap();
-        assert!((budget - (avail + 32.96 - 150.0).max(0.0)).abs() < 0.1);
+        assert!((budget - (avail + 16.55 - 150.0).max(0.0)).abs() < 0.1);
         assert!(body["fits_more"].is_u64());
     }
 }

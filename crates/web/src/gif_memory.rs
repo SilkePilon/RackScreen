@@ -1,6 +1,7 @@
 //! `/api/gifs/memory`: how much of the Pi's RAM the decoded GIFs take and
-//! how many more fit. Every frame is kept decoded (240×240 RGBA), so a GIF
-//! costs `frames × FRAME_BYTES`, at most `MAX_FRAMES` frames.
+//! how many more fit. Every frame is kept decoded and packed (240×240
+//! RGB565, LZ4), so a GIF costs at most `frames × PACKED_FRAME_MAX`, at most
+//! `MAX_FRAMES` frames; most pack to a quarter of that.
 //!
 //! The budget: memory the GIFs could have is what is available now plus
 //! what they already hold, less a reserve for the OS and the service.
@@ -13,7 +14,7 @@ use axum::extract::State;
 use axum::Json;
 use rackscreen_app::config::Config;
 use rackscreen_app::hub::GifStatus;
-use rackscreen_core::gif::{FRAME_BYTES, MAX_FRAMES};
+use rackscreen_core::gif::{MAX_FRAMES, PACKED_FRAME_MAX};
 use serde::Serialize;
 
 use crate::{system, ApiResult, AppState};
@@ -25,7 +26,7 @@ pub const RESERVE_MB: f64 = 150.0;
 
 /// The most one GIF can take, in MB.
 pub fn max_gif_mb() -> f64 {
-    (MAX_FRAMES * FRAME_BYTES) as f64 / MIB
+    (MAX_FRAMES * PACKED_FRAME_MAX) as f64 / MIB
 }
 
 fn round1(v: f64) -> f64 {
@@ -141,7 +142,7 @@ pub fn gif_memory(state: &AppState) -> GifMemory {
             available_mb: mem.map(|m| m.available_mb),
             process_rss_mb: system::process_rss_mb().map(round1),
         },
-        frame_bytes: FRAME_BYTES,
+        frame_bytes: PACKED_FRAME_MAX,
         max_frames: MAX_FRAMES,
         max_gif_mb: round1(max_gif_mb()),
         reserve_mb: RESERVE_MB,
@@ -161,11 +162,12 @@ pub async fn memory(State(state): State<Arc<AppState>>) -> ApiResult<GifMemory> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackscreen_core::gif::FRAME_BYTES;
 
     #[test]
-    fn a_full_gif_is_about_33_mb() {
+    fn a_full_gif_is_at_most_about_17_mb() {
         let m = max_gif_mb();
-        assert!((m - 32.96).abs() < 0.01, "{m}");
+        assert!((m - 16.54).abs() < 0.01, "{m}");
     }
 
     #[test]
@@ -175,10 +177,10 @@ mod tests {
         let b = budget(600.0, decoded, 0.0);
         assert_eq!(b.budget_mb, round1(600.0 + decoded - RESERVE_MB));
         assert_eq!(b.left_mb, 450.0, "available less the reserve");
-        assert_eq!(b.fits_more, 13, "450 / 32.96");
+        assert_eq!(b.fits_more, 27, "450 / 16.55");
         // a GIF still loading takes its full size off what is left
         let p = budget(600.0, decoded, max_gif_mb());
-        assert_eq!(p.fits_more, 12);
+        assert_eq!(p.fits_more, 26);
         assert_eq!(p.budget_mb, b.budget_mb, "the budget itself is the same");
     }
 
@@ -189,7 +191,7 @@ mod tests {
         let over = budget(160.0, 70.0, 66.0);
         assert_eq!(over.budget_mb, 80.0);
         assert_eq!((over.left_mb, over.fits_more), (0.0, 0));
-        assert_eq!(budget(150.0 + 32.9, 0.0, 0.0).fits_more, 0, "just short");
+        assert_eq!(budget(150.0 + 16.5, 0.0, 0.0).fits_more, 0, "just short");
     }
 
     fn live(name: &str, used: bool, state: &'static str, frames: Option<usize>) -> GifStatus {

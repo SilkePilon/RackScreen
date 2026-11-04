@@ -17,6 +17,7 @@ pub mod http;
 pub mod iss;
 pub mod jellyfin;
 pub mod k8s;
+pub mod mem;
 pub mod open_meteo;
 pub mod owned_fs;
 pub mod prometheus;

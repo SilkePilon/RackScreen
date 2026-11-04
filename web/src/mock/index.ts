@@ -280,7 +280,7 @@ function fakeGifs(provider: GifProvider, q: string, offset: number): GifPage {
 // ---------------------------------------------------------------- system
 
 const MIB = 1024 * 1024
-const FRAME_BYTES = 240 * 240 * 4
+const FRAME_BYTES = 240 * 240 * 2
 const MAX_FRAMES = 150
 /** When each GIF a screen shows started loading (it is ready ~4 s later). */
 const gifSince = new Map<string, number>()

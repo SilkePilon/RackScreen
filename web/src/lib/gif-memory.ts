@@ -1,13 +1,13 @@
-// What GIFs cost on the Pi: every frame is kept decoded (240×240 RGBA), at
-// most max_frames per GIF. The server says what is decoded now and how much
+// What GIFs cost on the Pi: every frame is kept decoded and packed (240×240
+// RGB565, LZ4; frame_bytes is the worst case), at most max_frames per GIF. The server says what is decoded now and how much
 // room there is; this adds what the unsaved draft would load.
 
 import { useDraft } from "@/lib/draft"
 import { useGifMemory } from "@/lib/queries"
 import type { Config, GifMemory, GifMemoryRow } from "@/lib/types"
 
-/** rackscreen_core::gif::{FRAME_BYTES, MAX_FRAMES}, until the server answers. */
-export const FRAME_BYTES = 240 * 240 * 4
+/** rackscreen_core::gif::{PACKED_FRAME_MAX, MAX_FRAMES}, until the server answers. */
+export const FRAME_BYTES = 240 * 240 * 2
 export const MAX_FRAMES = 150
 const MIB = 1024 * 1024
 

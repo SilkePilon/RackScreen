@@ -41,7 +41,7 @@ export function GifMemorySection() {
       title="Memory"
       description={
         b
-          ? `Each GIF a screen shows stays decoded in RAM: ${formatMb((b.mem.frame_bytes * b.mem.max_frames) / 1024 / 1024)} at most (${b.mem.max_frames} frames), less for short ones.`
+          ? `Each GIF a screen shows stays decoded in RAM, packed: ${formatMb((b.mem.frame_bytes * b.mem.max_frames) / 1024 / 1024)} at most (${b.mem.max_frames} frames), usually a quarter of that.`
           : "Each GIF a screen shows stays decoded in RAM."
       }
     >
