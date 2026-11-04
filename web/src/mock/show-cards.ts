@@ -7,7 +7,7 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   freight: ["#2a1c4a", "#d9575b", "#f2a65a", "#2b1d33"],
   "deep-sea": ["#2a90c0", "#0a1a34", "#8affe0", "#060f22"],
   "paper-plane": ["#4aa0e6", "#7cc4f2", "#ffffff", "#5aa848"],
-  storm: ["#141927", "#2c3445", "#c9d0ff", "#0d1017"],
+  storm: ["#1c2030", "#3c4458", "#f2c632", "#24262e"],
   day: ["#6cc0ec", "#a6dcf5", "#ffe58a", "#2d5a3a"],
   space: ["#05040f", "#0b0a1d", "#d9773e", "#05040f"],
   birds: ["#f0a35a", "#e0635a", "#ffd36e", "#1f2a55"],

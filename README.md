@@ -107,7 +107,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/storm.gif" alt="Thunderstorm show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Thunderstorm</b> (<code>storm</code>) — clouds roll and rain falls; the sky flashes and a bolt cracks on the third screen.
+  <b>Thunderstorm</b> (<code>storm</code>) — storm clouds pile up over a little town; a gust turns a walker's red umbrella inside out and blows it away, lightning strikes the church spire, and when the rainbow comes out the black cat from under the porch bench sails the upturned umbrella across the big puddle.
 </p>
 
 <p align="center">

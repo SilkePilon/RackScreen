@@ -252,7 +252,7 @@ mod tests {
             [
                 ("deep-sea", "Deep sea lantern", 12.0),
                 ("paper-plane", "Air mail", 11.0),
-                ("storm", "Thunderstorm", 8.0),
+                ("storm", "Thunderstorm", 11.5),
                 ("day", "Day in a minute", 12.0),
                 ("space", "Space cruise", 8.0),
                 ("birds", "Birds at sunset", 9.0),
