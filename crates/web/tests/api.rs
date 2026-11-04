@@ -1156,6 +1156,23 @@ async fn tailscale_actions_map_to_fixed_commands_and_readable_errors() {
         assert_eq!(st, StatusCode::OK, "{path}: {b}");
         assert_eq!(r.calls().last().unwrap(), call);
     }
+    // already shared: nothing to run
+    let n = r.calls().len();
+    let (st, _, b) = send(
+        &f.app,
+        tpost(&f, "/api/tailscale/serve", json!({"on": true})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{b}");
+    assert_eq!(b["url"], "https://rackscreen.tail1234.ts.net");
+    assert_eq!(r.calls()[n..], ["tailscale serve status --json"]);
+
+    // nothing served yet: add ours, never with --yes
+    r.respond("tailscale serve status --json", TsOut::ok("{}"));
+    r.respond(
+        "tailscale serve --bg",
+        TsOut::ok("Available within your tailnet:\n\nhttps://rackscreen.tail1234.ts.net/\n|-- proxy http://127.0.0.1:8740\n"),
+    );
     let (st, _, b) = send(
         &f.app,
         tpost(&f, "/api/tailscale/serve", json!({"on": true})),
@@ -1165,7 +1182,16 @@ async fn tailscale_actions_map_to_fixed_commands_and_readable_errors() {
     assert_eq!(b["url"], "https://rackscreen.tail1234.ts.net");
     assert!(r
         .calls()
-        .contains(&"tailscale serve --bg --yes --https=443 http://127.0.0.1:8740".to_string()));
+        .contains(&"tailscale serve --bg --https=443 http://127.0.0.1:8740".to_string()));
+    // and turning off what is not there runs nothing
+    let n = r.calls().len();
+    let (st, _, b) = send(
+        &f.app,
+        tpost(&f, "/api/tailscale/serve", json!({"on": false})),
+    )
+    .await;
+    assert_eq!((st, &b["on"]), (StatusCode::OK, &json!(false)));
+    assert_eq!(r.calls()[n..], ["tailscale serve status --json"]);
 
     // HTTPS not enabled on the tailnet: the link to turn it on
     r.respond(
@@ -1345,4 +1371,49 @@ async fn a_waiting_browser_login_expires_but_never_kills_a_newer_one() {
     );
     assert_eq!((a.0, b.0), (StatusCode::OK, StatusCode::OK));
     assert_eq!(r.spawns_alive()[2..], [false, true]);
+}
+
+#[tokio::test]
+async fn tailscale_serve_leaves_someone_elses_https_443_alone() {
+    let r = running_runner();
+    r.respond(
+        "tailscale serve status --json",
+        TsOut::ok(r#"{"Web":{"rackscreen.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}"#),
+    );
+    let f = ts_fixture(r.clone());
+    let (_, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
+    assert_eq!(b["serve"]["on"], false);
+    for on in [true, false] {
+        let (st, _, b) = send(
+            &f.app,
+            tpost(&f, "/api/tailscale/serve", json!({ "on": on })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{b}");
+        let e = b["error"].as_str().unwrap();
+        assert!(
+            e.contains("https:443") && e.contains("http://127.0.0.1:3000"),
+            "{e}"
+        );
+    }
+    assert!(
+        r.calls()
+            .iter()
+            .all(|c| !c.starts_with("tailscale serve --")),
+        "{:?}",
+        r.calls()
+    );
+
+    // an unreadable status changes nothing either
+    r.respond("tailscale serve status --json", TsOut::fail("boom"));
+    let (st, _, _) = send(
+        &f.app,
+        tpost(&f, "/api/tailscale/serve", json!({ "on": false })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert!(r
+        .calls()
+        .iter()
+        .all(|c| !c.starts_with("tailscale serve --")));
 }

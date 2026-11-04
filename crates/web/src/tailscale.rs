@@ -445,8 +445,17 @@ pub struct RawPrefs {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct RawServe {
+    #[serde(rename = "TCP")]
+    tcp: Option<HashMap<String, RawTcp>>,
     #[serde(rename = "Web")]
     web: Option<HashMap<String, RawWeb>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RawTcp {
+    #[serde(rename = "TCPForward")]
+    tcp_forward: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -461,6 +470,10 @@ struct RawWeb {
 struct RawHandler {
     #[serde(rename = "Proxy")]
     proxy: String,
+    #[serde(rename = "Path")]
+    path: String,
+    #[serde(rename = "Text")]
+    text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -564,16 +577,73 @@ pub fn parse_prefs(text: &str) -> Option<RawPrefs> {
     serde_json::from_str(text).ok()
 }
 
+fn proxies_to(proxy: &str, port: u16) -> bool {
+    let p = proxy.trim_end_matches('/');
+    p == format!("http://127.0.0.1:{port}") || p == format!("http://localhost:{port}")
+}
+
+/// Who has `https:443` in `tailscale serve`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Https443 {
+    /// Nothing is served there.
+    Free,
+    /// Only RackScreen: `/` proxied to 127.0.0.1:<our port>, at `url`.
+    Ours { url: String },
+    /// Something else (alone or next to RackScreen), described for a message.
+    Other(String),
+}
+
+/// Read `tailscale serve status --json` for what holds https:443.
+pub fn https_443(text: &str, port: u16) -> Result<Https443, serde_json::Error> {
+    if text.trim().is_empty() {
+        return Ok(Https443::Free);
+    }
+    let raw: RawServe = serde_json::from_str(text)?;
+    if let Some(fwd) = raw
+        .tcp
+        .as_ref()
+        .and_then(|t| t.get("443"))
+        .map(|t| t.tcp_forward.as_str())
+        .filter(|f| !f.is_empty())
+    {
+        return Ok(Https443::Other(format!("a TCP forward to {fwd}")));
+    }
+    let mut ours = None;
+    let mut webs: Vec<_> = raw.web.iter().flatten().collect();
+    webs.sort_by(|a, b| a.0.cmp(b.0));
+    for (hostport, web) in webs {
+        let Some(host) = hostport.strip_suffix(":443") else {
+            continue;
+        };
+        let mut handlers: Vec<_> = web.handlers.iter().flatten().collect();
+        handlers.sort_by(|a, b| a.0.cmp(b.0));
+        for (mount, h) in handlers {
+            if mount == "/" && proxies_to(&h.proxy, port) {
+                ours = Some(format!("https://{host}"));
+                continue;
+            }
+            let what = if !h.proxy.is_empty() {
+                format!("a proxy to {}", h.proxy)
+            } else if !h.path.is_empty() {
+                format!("the files in {}", h.path)
+            } else if !h.text.is_empty() {
+                "a fixed text".to_string()
+            } else {
+                "a handler".to_string()
+            };
+            return Ok(Https443::Other(format!("{what} at {mount}")));
+        }
+    }
+    Ok(ours.map_or(Https443::Free, |url| Https443::Ours { url }))
+}
+
 /// Whether `tailscale serve` shares this UI (port `port`) over HTTPS on 443,
 /// and at which address.
 pub fn parse_serve(text: &str, port: u16) -> ServeView {
     let Ok(raw) = serde_json::from_str::<RawServe>(text) else {
         return ServeView::default();
     };
-    let ours = |p: &str| {
-        let p = p.trim_end_matches('/');
-        p == format!("http://127.0.0.1:{port}") || p == format!("http://localhost:{port}")
-    };
+    let ours = |p: &str| proxies_to(p, port);
     raw.web
         .unwrap_or_default()
         .iter()
@@ -1117,9 +1187,40 @@ pub fn bind_reaches_loopback(bind: &str) -> bool {
 pub async fn serve(State(state): State<Arc<AppState>>, Json(b): Json<OnBody>) -> ApiResult<Value> {
     require_password(&state)?;
     let ts = &state.tailscale;
+    // Only ever add or remove our own handler: https:443 may serve
+    // something someone set up by hand.
+    let status = ts_ok(ts, &["serve", "status", "--json"], TIMEOUT).await?;
+    let current = https_443(&status.stdout, state.port).map_err(|e| {
+        ApiError::internal(format!(
+            "cannot tell what Tailscale serves on https:443: {e}"
+        ))
+    })?;
     if !b.on {
-        ts_ok(ts, &["serve", "--https=443", "off"], SLOW_TIMEOUT).await?;
-        return Ok(Json(json!({ "on": false, "url": null })));
+        return match current {
+            Https443::Free => Ok(Json(json!({ "on": false, "url": null }))),
+            Https443::Other(what) => Err(ApiError(
+                StatusCode::CONFLICT,
+                format!(
+                    "Something else uses https:443 on this Pi's Tailscale ({what}), so RackScreen leaves it alone. Change it over SSH with `tailscale serve`."
+                ),
+            )),
+            Https443::Ours { .. } => {
+                ts_ok(ts, &["serve", "--https=443", "off"], SLOW_TIMEOUT).await?;
+                Ok(Json(json!({ "on": false, "url": null })))
+            }
+        };
+    }
+    match current {
+        Https443::Free => {}
+        Https443::Ours { url } => return Ok(Json(json!({ "on": true, "url": url }))),
+        Https443::Other(what) => {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                format!(
+                    "Something else already uses https:443 on this Pi's Tailscale ({what}); RackScreen will not replace it. Remove it over SSH (`tailscale serve --https=443 off`) to share this page instead."
+                ),
+            ))
+        }
     }
     let bind = ts.bind.lock().unwrap().clone();
     if !bind_reaches_loopback(&bind) {
@@ -1129,10 +1230,7 @@ pub async fn serve(State(state): State<Arc<AppState>>, Json(b): Json<OnBody>) ->
     }
     let target = format!("http://127.0.0.1:{}", state.port);
     let out = ts
-        .ts(
-            &["serve", "--bg", "--yes", "--https=443", &target],
-            SLOW_TIMEOUT,
-        )
+        .ts(&["serve", "--bg", "--https=443", &target], SLOW_TIMEOUT)
         .await
         .map_err(spawn_error)?;
     if !out.success() {
@@ -1354,6 +1452,46 @@ mod tests {
         assert_eq!(parse_serve(SERVE, 9000), ServeView::default());
         assert_eq!(parse_serve("{}", 8740), ServeView::default());
         assert_eq!(parse_serve("", 8740), ServeView::default());
+    }
+
+    #[test]
+    fn https_443_is_ours_only_with_our_proxy_alone() {
+        assert_eq!(
+            https_443(SERVE, 8740).unwrap(),
+            Https443::Ours {
+                url: "https://rackscreen.tail1234.ts.net".into()
+            }
+        );
+        assert_eq!(https_443("{}", 8740).unwrap(), Https443::Free);
+        assert_eq!(https_443("", 8740).unwrap(), Https443::Free);
+        assert!(https_443("nope", 8740).is_err());
+        // another port's UI is not ours
+        assert_eq!(
+            https_443(SERVE, 9000).unwrap(),
+            Https443::Other("a proxy to http://127.0.0.1:8740 at /".into())
+        );
+        // ours plus something else at another path: not ours to remove
+        let mixed = r#"{"Web":{"pi.ts.net:443":{"Handlers":{
+            "/":{"Proxy":"http://127.0.0.1:8740"},
+            "/grafana":{"Proxy":"http://127.0.0.1:3000"}}}}}"#;
+        assert_eq!(
+            https_443(mixed, 8740).unwrap(),
+            Https443::Other("a proxy to http://127.0.0.1:3000 at /grafana".into())
+        );
+        let files = r#"{"Web":{"pi.ts.net:443":{"Handlers":{"/":{"Path":"/srv/www"}}}}}"#;
+        assert_eq!(
+            https_443(files, 8740).unwrap(),
+            Https443::Other("the files in /srv/www at /".into())
+        );
+        let tcp = r#"{"TCP":{"443":{"TCPForward":"127.0.0.1:8443"}}}"#;
+        assert_eq!(
+            https_443(tcp, 8740).unwrap(),
+            Https443::Other("a TCP forward to 127.0.0.1:8443".into())
+        );
+        // other ports do not matter
+        let other_port =
+            r#"{"Web":{"pi.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}"#;
+        assert_eq!(https_443(other_port, 8740).unwrap(), Https443::Free);
     }
 
     #[test]
