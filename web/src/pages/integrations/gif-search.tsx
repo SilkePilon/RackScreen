@@ -359,11 +359,12 @@ function Results({ provider, q, onPick }: { provider: GifProvider; q: string; on
           </EmptyHeader>
         </Empty>
       ) : (
-        <>
-          <ul
-            className="-mr-2 max-h-[560px] scrollbar-thin columns-2 gap-2 overflow-y-auto pr-2 sm:columns-3 md:columns-4"
-            aria-label={q ? `Results for ${q}` : "Trending GIFs"}
-          >
+        <ResultsScroll
+          label={q ? `Results for ${q}` : "Trending GIFs"}
+          more={query.hasNextPage && !query.isFetchNextPageError ? () => void query.fetchNextPage() : undefined}
+          busy={query.isFetchingNextPage}
+        >
+          <ul className="columns-2 gap-2 sm:columns-3 md:columns-4">
             {hits.map((h) => (
               <li key={h.id} className="mb-2 break-inside-avoid">
                 <Tile hit={h} onClick={() => onPick(h)} />
@@ -380,7 +381,7 @@ function Results({ provider, q, onPick }: { provider: GifProvider; q: string; on
               ))}
           </ul>
           {query.hasNextPage && (
-            <div className="flex justify-center">
+            <div className="flex justify-center py-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -393,9 +394,9 @@ function Results({ provider, q, onPick }: { provider: GifProvider; q: string; on
             </div>
           )}
           {query.isFetchNextPageError && (
-            <p className="text-center text-xs text-destructive">Couldn't load more. Try again.</p>
+            <p className="pb-2 text-center text-xs text-destructive">Couldn't load more. Try again.</p>
           )}
-        </>
+        </ResultsScroll>
       )}
     </div>
   )
@@ -549,5 +550,45 @@ function AddPickDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * A fixed-height box the results scroll in vertically; the next page loads
+ * by itself when the bottom comes into view.
+ */
+function ResultsScroll({
+  label,
+  more,
+  busy,
+  children,
+}: {
+  label: string
+  more?: () => void
+  busy: boolean
+  children: React.ReactNode
+}) {
+  const box = React.useRef<HTMLDivElement>(null)
+  const end = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (!more || busy || !box.current || !end.current) return
+    const io = new IntersectionObserver((e) => e.some((x) => x.isIntersecting) && more(), {
+      root: box.current,
+      rootMargin: "0px 0px 240px 0px",
+    })
+    io.observe(end.current)
+    return () => io.disconnect()
+  }, [more, busy])
+  return (
+    <div
+      ref={box}
+      role="region"
+      aria-label={label}
+      tabIndex={0}
+      className="-mr-2 h-[440px] scrollbar-thin overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+    >
+      {children}
+      <div ref={end} className="h-px" aria-hidden />
+    </div>
   )
 }
