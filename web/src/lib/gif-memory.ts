@@ -25,6 +25,8 @@ export function gifMb(frames: number | null | undefined, frameBytes = FRAME_BYTE
 
 export function formatMb(mb: number) {
   if (mb <= 0) return "0 MB"
+  if (mb >= 10240) return `${Math.round(mb / 1024)} GB`
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
   return mb >= 100 ? `${Math.round(mb)} MB` : `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`
 }
 
@@ -74,7 +76,12 @@ export function useGifBudget(): { data: GifBudget | undefined; isError: boolean;
   const savedUsed = usedNames(d.saved)
   const est = (url: string) => gifMb(pickedFrames.get(url.trim()), mem.frame_bytes, mem.max_frames)
   const projected: ProjectedGif[] = (d.draft?.gifs ?? [])
-    .filter((g) => draftUsed.has(g.name) && rows.get(g.name)?.state !== "ready")
+    // decoded ones are counted already; failed ones are retried but, like
+    // on the server, not counted until they arrive
+    .filter((g) => {
+      const st = rows.get(g.name)?.state
+      return draftUsed.has(g.name) && st !== "ready" && !(st === "error" && savedUsed.has(g.name))
+    })
     .map((g) => ({
       name: g.name,
       mb: est(g.url),

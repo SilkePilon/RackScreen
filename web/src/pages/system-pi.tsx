@@ -262,7 +262,7 @@ function StatCards({ s, at }: { s: SystemInfo; at: number }) {
         tone={!t ? undefined : t.now ? "bad" : t.since_boot ? "warn" : "ok"}
         sub={
           !t
-            ? "Not a Raspberry Pi, or the firmware does not say"
+            ? "No firmware report here"
             : t.since_boot && !t.now
               ? `Since boot: ${throttleList(t.flags, true).join(", ")}`
               : t.now
