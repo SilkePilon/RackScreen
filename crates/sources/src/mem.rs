@@ -10,7 +10,12 @@ pub fn tune() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     // SAFETY: mallopt only sets allocator parameters.
     unsafe {
-        libc::mallopt(libc::M_ARENA_MAX, 2);
+        // One arena: the render threads' small allocations stay in glibc's
+        // per-thread cache, the rest is a few hundred locks a second. An
+        // explicit MALLOC_ARENA_MAX in the environment wins.
+        if std::env::var_os("MALLOC_ARENA_MAX").is_none() {
+            libc::mallopt(libc::M_ARENA_MAX, 1);
+        }
         // Buffers of 256 KB and up (decode canvases, big responses) get
         // their own mapping and go back to the OS when freed. A fixed value
         // also turns off glibc's threshold growth. Frames (230 KB) stay on
