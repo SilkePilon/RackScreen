@@ -18,6 +18,7 @@ pub mod world;
 
 mod boulder;
 mod fx;
+mod heist;
 mod kaiju;
 mod time_car;
 
@@ -121,6 +122,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: kaiju::SECS,
         draw: kaiju::draw,
     },
+    ShowDef {
+        id: "heist",
+        name: "The heist",
+        secs: heist::SECS,
+        draw: heist::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -178,6 +185,7 @@ mod tests {
                 ("boulder", "Temple run", 10.0),
                 ("time-car", "Time machine", 10.0),
                 ("kaiju", "Monster in the harbour", 11.0),
+                ("heist", "The heist", 10.0),
             ]
         );
     }
