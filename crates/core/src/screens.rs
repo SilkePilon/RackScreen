@@ -2,7 +2,9 @@
 
 use crate::anim::{Easing, Secs};
 use crate::theme::Role;
+use crate::transition::{Kind, Spec};
 
+/// How long a transition takes unless the config says otherwise.
 pub const TRANSITION_SECS: Secs = 0.4;
 /// Quiet time between two serialised transitions, so the SPI bus is idle for a
 /// moment before the next screen starts pushing full frames again.
@@ -15,6 +17,7 @@ pub struct Transition {
     pub to: Role,
     /// 0..1 over the whole transition; < 0.5 is the outgoing half.
     pub t: f32,
+    pub kind: Kind,
 }
 
 #[derive(Clone, Debug)]
@@ -24,6 +27,8 @@ pub struct ScreenState {
     current: usize,
     since: Secs,
     transition_started: Option<Secs>,
+    /// The running transition's style and length, or the next one's.
+    spec: Spec,
 }
 
 impl ScreenState {
@@ -47,6 +52,7 @@ impl ScreenState {
             current: 0,
             since: offset.clamp(0.0, cycle_secs),
             transition_started: None,
+            spec: Spec::default(),
         }
     }
 
@@ -84,7 +90,7 @@ impl ScreenState {
             return;
         }
         if let Some(t0) = self.transition_started {
-            if now - t0 >= TRANSITION_SECS {
+            if now - t0 >= self.spec.secs {
                 self.current = (self.current + 1) % self.roles.len();
                 self.since = now;
                 self.transition_started = None;
@@ -100,10 +106,30 @@ impl ScreenState {
             && now - self.since >= self.cycle_secs
     }
 
-    /// Begin the transition. Ignored for a static screen or one already transitioning.
+    /// Begin the transition with the last spec. Ignored for a static screen
+    /// or one already transitioning.
     pub fn start_transition(&mut self, now: Secs) {
+        self.start_transition_with(now, self.spec);
+    }
+
+    /// Begin the transition in style `spec`.
+    pub fn start_transition_with(&mut self, now: Secs, spec: Spec) {
         if self.roles.len() >= 2 && self.transition_started.is_none() {
             self.transition_started = Some(now);
+            self.spec = spec;
+        }
+    }
+
+    /// The running transition's spec (or the last one's).
+    pub fn spec(&self) -> Spec {
+        self.spec
+    }
+
+    /// Make the dwell run out `delay` seconds from `now`, so the screen
+    /// transitions then (or takes the next free slot).
+    pub fn make_due(&mut self, now: Secs, delay: Secs) {
+        if self.roles.len() >= 2 && self.transition_started.is_none() {
+            self.since = now + delay - self.cycle_secs;
         }
     }
 
@@ -154,11 +180,12 @@ impl ScreenState {
 
     pub fn transition(&self, now: Secs) -> Option<Transition> {
         let t0 = self.transition_started?;
-        let t = ((now - t0) / TRANSITION_SECS).clamp(0.0, 1.0) as f32;
+        let t = ((now - t0) / self.spec.secs).clamp(0.0, 1.0) as f32;
         Some(Transition {
             from: self.current(),
             to: self.next_role(),
             t,
+            kind: self.spec.kind,
         })
     }
 }
@@ -309,6 +336,59 @@ mod tests {
     #[test]
     fn transition_lasts_four_tenths() {
         assert_eq!(TRANSITION_SECS, 0.4);
+        let mut s = ScreenState::new(vec![Role::Cpu, Role::Mem], 5.0);
+        s.tick(5.0);
+        assert_eq!(s.transition(5.0).unwrap().kind, Kind::default());
+        s.tick(5.39);
+        assert!(s.transitioning());
+        s.tick(5.4);
+        assert!(!s.transitioning());
+    }
+
+    #[test]
+    fn a_spec_sets_the_style_and_the_length() {
+        use crate::transition::Style;
+        let spec = Spec {
+            kind: Kind::of(Style::Slide),
+            secs: 1.0,
+        };
+        let mut s = ScreenState::new(vec![Role::Cpu, Role::Mem], 5.0);
+        s.start_transition_with(5.0, spec);
+        let tr = s.transition(5.5).unwrap();
+        assert_eq!(tr.kind, Kind::of(Style::Slide));
+        assert!((tr.t - 0.5).abs() < 1e-6);
+        s.advance(5.99);
+        assert!(s.transitioning(), "a second long");
+        s.advance(6.0);
+        assert!(!s.transitioning());
+        assert_eq!(s.current(), Role::Mem);
+        assert_eq!(s.spec(), spec, "kept for the next one");
+        // the spec of a running transition is not replaced
+        s.start_transition_with(6.0, spec);
+        s.start_transition_with(6.0, Spec::default());
+        assert_eq!(s.transition(6.5).unwrap().kind, Kind::of(Style::Slide));
+    }
+
+    #[test]
+    fn make_due_ends_the_dwell_early() {
+        let mut s = ScreenState::new(vec![Role::Cpu, Role::Mem], 30.0);
+        assert!(!s.ready_to_transition(1.0));
+        s.make_due(1.0, 0.0);
+        assert!(s.ready_to_transition(1.0));
+        let mut s = ScreenState::new(vec![Role::Cpu, Role::Mem], 30.0);
+        s.make_due(1.0, 0.5);
+        assert!(!s.ready_to_transition(1.4));
+        assert!(s.ready_to_transition(1.5));
+        // a static screen and a transitioning one are left alone
+        let mut one = ScreenState::new(vec![Role::Cpu], 30.0);
+        one.make_due(1.0, 0.0);
+        assert!(!one.ready_to_transition(1.0));
+        let mut s = ScreenState::new(vec![Role::Cpu, Role::Mem], 30.0);
+        s.start_transition(1.0);
+        s.make_due(1.1, 0.0);
+        assert!(s.transitioning());
+        s.advance(1.5);
+        assert!(!s.ready_to_transition(1.6), "the new dwell runs in full");
     }
 
     #[test]

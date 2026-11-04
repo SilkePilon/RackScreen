@@ -155,6 +155,35 @@ impl Scene {
     }
 }
 
+/// What one screen shows this frame: a scene, or two blended by a
+/// transition style (`scene` is the outgoing one).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScreenFrame {
+    pub scene: Scene,
+    pub blend: Option<Blend>,
+}
+
+/// The incoming side of a two-frame transition at `t` (0 = all `scene`,
+/// 1 = all `to`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Blend {
+    pub to: Scene,
+    pub kind: crate::transition::Kind,
+    pub t: f32,
+}
+
+impl ScreenFrame {
+    pub fn single(scene: Scene) -> Self {
+        ScreenFrame { scene, blend: None }
+    }
+}
+
+impl From<Scene> for ScreenFrame {
+    fn from(scene: Scene) -> Self {
+        ScreenFrame::single(scene)
+    }
+}
+
 pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
     ui.for_role(role);
     match role {

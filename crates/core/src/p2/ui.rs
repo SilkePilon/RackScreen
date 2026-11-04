@@ -81,6 +81,18 @@ impl ScreenUi {
         self.out.as_mut().expect("set above")
     }
 
+    /// Take the outgoing role's state out, to render the old side of a
+    /// transition away from `from` while `self` renders the new side; put
+    /// it back with `put_outgoing` afterwards.
+    pub fn take_outgoing(&mut self, from: Role) -> Box<ScreenUi> {
+        self.outgoing(from);
+        self.out.take().expect("set by outgoing")
+    }
+
+    pub fn put_outgoing(&mut self, out: Box<ScreenUi>) {
+        self.out = Some(out);
+    }
+
     /// The transition is over: drop the outgoing state.
     pub fn end_transition(&mut self) {
         self.out = None;
@@ -242,6 +254,19 @@ mod tests {
             "new role starts fresh"
         );
     }
+    #[test]
+    fn take_and_put_outgoing_round_trip() {
+        let mut ui = ScreenUi::new();
+        ui.for_role(Role::Cpu);
+        ui.glide(("x", 0), 100.0, 1.0);
+        let mut out = ui.take_outgoing(Role::Cpu);
+        assert_eq!(out.role(), Some(Role::Cpu));
+        assert_eq!(ui.role(), None, "the new side starts fresh");
+        let v = out.glide(("x", 0), 100.0, 1.2);
+        ui.put_outgoing(out);
+        assert_eq!(ui.outgoing(Role::Cpu).glide(("x", 0), 100.0, 1.2), v);
+    }
+
     #[test]
     fn outgoing_keeps_the_old_roles_state_while_the_new_one_starts_fresh() {
         let mut ui = ScreenUi::new();

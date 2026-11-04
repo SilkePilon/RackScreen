@@ -8,9 +8,10 @@ use crate::event::{
 };
 use crate::history::{History, Hourly};
 use crate::screens::ScreenState;
-use crate::shows::schedule::{Request, ShowPhase, ShowRun, ShowScheduler};
+use crate::shows::schedule::{Request, ShowRun, ShowScheduler};
 use crate::shows::world::{Layout, WorldFrame};
 use crate::theme::Role;
+use crate::transition::{Spec, Transitions};
 use std::sync::Arc;
 
 /// Dwell per role on a cycling screen when the caller gives none.
@@ -380,6 +381,8 @@ pub struct Model {
     /// While serialising: the instant the next transition may start, i.e. the
     /// end of the last one plus `TRANSITION_GAP_SECS`.
     transition_free_at: Secs,
+    /// Which transition plays on a role change and around a show.
+    transitions: Transitions,
     /// xorshift64 state, for picking which waiting screen goes next.
     rng: u64,
     /// Roles whose Prometheus query came back empty on the last poll.
@@ -475,6 +478,7 @@ impl Model {
                 .collect(),
             one_at_a_time: false,
             transition_free_at: 0.0,
+            transitions: Transitions::default(),
             rng: RNG_SEED,
             exporter_missing: Vec::new(),
             arr_configured: false,
@@ -743,6 +747,59 @@ impl Model {
         xorshift(&mut self.rng)
     }
 
+    /// The transition styles for role changes and shows.
+    pub fn set_transitions(&mut self, t: Transitions) {
+        self.transitions = t;
+    }
+
+    pub fn transitions(&self) -> Transitions {
+        self.transitions
+    }
+
+    /// The spec of the next role change (a fresh random pick when so set).
+    fn next_screen_spec(&mut self) -> Spec {
+        let r = self.next_rand();
+        self.transitions.for_screen(r)
+    }
+
+    /// Make `screen` (or every cycling screen, one after the other from the
+    /// left) change to its next role now, in the configured style: the web
+    /// UI's "try it". Refused while a show runs; a screen with one role has
+    /// nothing to change to.
+    pub fn force_transition(&mut self, screen: Option<usize>, now: Secs) -> bool {
+        if self.shows.current().is_some() {
+            return false;
+        }
+        match screen {
+            Some(i) => match self.screens.get_mut(i) {
+                Some(s) if s.roles().len() >= 2 => {
+                    s.make_due(now, 0.0);
+                    true
+                }
+                _ => false,
+            },
+            None => {
+                let secs = self.transitions.screens.secs;
+                // serialised: one slot each, in order; else a quick ripple
+                let step = if self.one_at_a_time {
+                    secs + crate::screens::TRANSITION_GAP_SECS + 0.05
+                } else {
+                    secs * crate::transition::STAGGER
+                };
+                let mut any = false;
+                for i in 0..self.screens.len() {
+                    let pos = self.show_position(i);
+                    let s = &mut self.screens[i];
+                    if s.roles().len() >= 2 {
+                        s.make_due(now, pos as Secs * step);
+                        any = true;
+                    }
+                }
+                any
+            }
+        }
+    }
+
     /// Install the show schedule, the world layout and the left-to-right
     /// order (`order[pos]` is the config index of the screen at `pos`; empty
     /// means config order).
@@ -783,7 +840,7 @@ impl Model {
     }
 
     /// Left-to-right position of `screen` in the show world.
-    fn show_position(&self, screen: usize) -> u32 {
+    pub(crate) fn show_position(&self, screen: usize) -> u32 {
         self.show_order
             .iter()
             .position(|&c| c == screen)
@@ -824,9 +881,13 @@ impl Model {
             self.shows.restart(now);
         }
         let mut rng = self.rng;
+        let spec = self.transitions.for_show(xorshift(&mut rng));
+        let panels = self.screens.len() as u32;
         let started = self
             .shows
-            .tick(now, allowed, request, &mut || xorshift(&mut rng));
+            .tick(now, allowed, request, spec, panels, &mut || {
+                xorshift(&mut rng)
+            });
         self.rng = rng;
         if started {
             let total = self.shows.current().map_or(0.0, |r| r.total());
@@ -835,12 +896,7 @@ impl Model {
             }
         }
         self.show_frame = match self.shows.current().copied() {
-            Some(run)
-                if matches!(
-                    run.phase(now),
-                    Some((ShowPhase::Playing | ShowPhase::ShowOut, _))
-                ) =>
-            {
+            Some(run) if run.phase(now).is_some() => {
                 let frame = self.show_world(&run, now);
                 let f = (run.local_t(now) * crate::shows::FPS).floor() as u32;
                 Some((run.def.id, f, frame))
@@ -857,19 +913,20 @@ impl Model {
         let show_on = self.shows.current().is_some_and(|r| r.phase(now).is_some());
         let mut waiting: Vec<usize> = Vec::new();
         for (i, s) in self.screens.iter_mut().enumerate() {
-            if show_on {
-                s.advance(now);
-            } else if self.one_at_a_time {
-                // Finish a running transition; starting one is the slot holder's call.
-                s.advance(now);
-                if s.ready_to_transition(now) {
-                    waiting.push(i);
-                }
-            } else {
-                s.tick(now);
+            // Finish a running transition; starting one is decided below.
+            s.advance(now);
+            if !show_on && s.ready_to_transition(now) {
+                waiting.push(i);
             }
         }
-        self.start_one_transition(now, &waiting);
+        if self.one_at_a_time {
+            self.start_one_transition(now, &waiting);
+        } else {
+            for i in waiting {
+                let spec = self.next_screen_spec();
+                self.screens[i].start_transition_with(now, spec);
+            }
+        }
         self.tick_shows(now);
     }
 
@@ -883,9 +940,9 @@ impl Model {
             return;
         }
         let i = waiting[(self.next_rand() % waiting.len() as u64) as usize];
-        self.screens[i].start_transition(now);
-        self.transition_free_at =
-            now + crate::screens::TRANSITION_SECS + crate::screens::TRANSITION_GAP_SECS;
+        let spec = self.next_screen_spec();
+        self.screens[i].start_transition_with(now, spec);
+        self.transition_free_at = now + spec.secs + crate::screens::TRANSITION_GAP_SECS;
     }
 
     pub fn all_healthy(&self) -> bool {
@@ -2073,7 +2130,7 @@ mod tests {
         let mut now = 0.0;
         while !matches!(
             m.show_run().and_then(|r| r.phase(now)),
-            Some((ShowPhase::Playing, _))
+            Some(ShowPhase::Playing)
         ) {
             now += 0.05;
             m.tick(now);
@@ -2116,6 +2173,110 @@ mod tests {
         m.tick(end + 1.0);
         assert!(m.show_run().is_none());
         assert!(m.request_show(freight()), "accepted again once it is over");
+    }
+
+    #[test]
+    fn random_transitions_vary_per_change_and_keep_the_length() {
+        use crate::transition::{Kind, Spec, Style, Transitions};
+        let mut m = two_cycling_screens(false);
+        m.set_transitions(Transitions {
+            screens: Spec {
+                kind: Kind::of(Style::Slide),
+                secs: 0.7,
+            },
+            shows: None,
+            random: true,
+        });
+        let mut seen = std::collections::HashSet::new();
+        let mut now = 0.0;
+        while seen.len() < 4 && now < 600.0 {
+            m.tick(now);
+            for k in 0..2 {
+                if let Some(tr) = m.screen(k).unwrap().transition(now) {
+                    seen.insert(tr.kind);
+                    assert_eq!(m.screen(k).unwrap().spec().secs, 0.7);
+                }
+            }
+            now += 0.1;
+        }
+        assert!(seen.len() >= 4, "random kinds: {seen:?}");
+        // not random: always the configured kind
+        let mut m = two_cycling_screens(true);
+        m.set_transitions(Transitions {
+            screens: Spec {
+                kind: Kind::of(Style::Iris),
+                secs: 0.3,
+            },
+            shows: None,
+            random: false,
+        });
+        let starts = run_transitions(&mut m, 10.0, true);
+        assert!(starts.len() >= 2);
+        for w in starts.windows(2) {
+            assert!(w[1].1 - w[0].1 >= 0.3 + crate::screens::TRANSITION_GAP_SECS - 1e-9);
+        }
+        let mut now = 0.0;
+        let mut any = false;
+        while now < 20.0 {
+            m.tick(now);
+            if let Some(tr) = m.screen(0).unwrap().transition(now) {
+                assert_eq!(tr.kind, Kind::of(Style::Iris));
+                any = true;
+            }
+            now += 0.05;
+        }
+        assert!(any);
+    }
+
+    #[test]
+    fn force_transition_changes_now_in_order() {
+        let mut m = Model::new(Thresholds::default());
+        let roles = vec![Role::Cpu, Role::Mem];
+        m.set_screens(
+            vec![roles.clone(), vec![Role::Pods], roles.clone(), roles],
+            vec![100.0; 4],
+        );
+        m.set_one_at_a_time(true);
+        m.tick(1.0);
+        assert!(!m.screen(0).unwrap().transitioning());
+        // one screen: at once
+        assert!(m.force_transition(Some(2), 1.0));
+        m.tick(1.0);
+        assert!(m.screen(2).unwrap().transitioning());
+        assert!(!m.screen(0).unwrap().transitioning());
+        // a static screen or a missing one: nothing to change to
+        assert!(!m.force_transition(Some(1), 1.0));
+        assert!(!m.force_transition(Some(9), 1.0));
+        // let it finish, then all: one after the other, in position order
+        let mut now = 1.0;
+        while m.screen(2).unwrap().transitioning() {
+            now += 0.05;
+            m.tick(now);
+        }
+        assert!(m.force_transition(None, now));
+        let mut order = Vec::new();
+        let end = now + 6.0;
+        while now < end {
+            m.tick(now);
+            for k in 0..4 {
+                if m.screen(k).unwrap().transitioning() && order.last() != Some(&k) {
+                    order.push(k);
+                }
+            }
+            now += 0.05;
+        }
+        assert_eq!(
+            order,
+            vec![0, 2, 3],
+            "left to right, the static one skipped"
+        );
+        // not during a show
+        let mut m = cycling_show_model();
+        m.tick(0.0);
+        assert!(m.request_show(crate::shows::schedule::Request::Random));
+        m.tick(1.0);
+        assert!(m.show_run().is_some());
+        assert!(!m.force_transition(None, 1.0));
     }
 
     #[test]

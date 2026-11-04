@@ -5,9 +5,34 @@ use crate::gif::GifState;
 use crate::p2::screen::compose;
 use crate::p2::status::{connecting_scene, no_data_screen, NoData};
 use crate::p2::ui::ScreenUi;
-use crate::scene::{role_scene, Drawable, Scene, WorldRef};
-use crate::shows::schedule::ShowPhase;
+use crate::scene::{role_scene, Blend, Drawable, Scene, ScreenFrame, WorldRef};
+use crate::screens::Half;
+use crate::shows::schedule::PanelView;
 use crate::theme::Role;
+use crate::transition::Kind;
+
+/// The frame at `t` of a transition in `kind` from `from` to `to`: both
+/// scenes for a two-frame style, else one of them at the style's brightness.
+fn blend(
+    kind: Kind,
+    t: f32,
+    from: impl FnOnce() -> Scene,
+    to: impl FnOnce() -> Scene,
+) -> ScreenFrame {
+    if kind.style.uses_both_frames() {
+        return ScreenFrame {
+            scene: from(),
+            blend: Some(Blend { to: to(), kind, t }),
+        };
+    }
+    let (half, brightness) = kind.single(t);
+    let mut s = match half {
+        Half::Out => from(),
+        Half::In => to(),
+    };
+    s.fade = brightness;
+    s.into()
+}
 
 impl crate::model::Model {
     /// A role has nothing live to show: its data never arrived, or the link that
@@ -50,44 +75,63 @@ impl crate::model::Model {
         role.is_cluster() && !self.link().api
     }
 
-    /// Scene for one screen at one instant; the only call the render loop makes.
-    /// `ui` is that screen's widget state; it resets itself on a role change.
+    /// Scene for one screen at one instant: the frame's outgoing scene (the
+    /// whole frame for a single-scene transition). Tests and goldens.
     pub fn scene(&self, screen: usize, now: Secs, ui: &mut ScreenUi) -> Scene {
+        self.frame(screen, now, ui).scene
+    }
+
+    /// What `screen` shows at `now`; the only call the render loop makes.
+    /// `ui` is that screen's widget state; it resets itself on a role change.
+    pub fn frame(&self, screen: usize, now: Secs, ui: &mut ScreenUi) -> ScreenFrame {
         let state = match self.screen(screen) {
             Some(s) => s,
-            None => return connecting_scene("ms-sync", ui, now),
+            None => return connecting_scene("ms-sync", ui, now).into(),
         };
         let role = state.current();
         if let Some(run) = self.show_run() {
-            if let Some((phase, brightness)) = run.phase(now) {
-                let mut s = match phase {
-                    ShowPhase::RolesOut | ShowPhase::RolesIn => self.scene_for_role(role, now, ui),
-                    ShowPhase::Playing | ShowPhase::ShowOut => {
-                        let mut s = Scene::new();
-                        s.push(Drawable::World {
-                            frame: WorldRef(self.show_world(run, now)),
-                            x0: self.show_x0(screen),
-                        });
-                        s
-                    }
+            if let Some(view) = run.view(now, self.show_position(screen)) {
+                let world = || {
+                    let mut s = Scene::new();
+                    s.push(Drawable::World {
+                        frame: WorldRef(self.show_world(run, now)),
+                        x0: self.show_x0(screen),
+                    });
+                    s
                 };
-                s.fade = brightness;
-                return s;
+                return match view {
+                    PanelView::Role => self.scene_for_role(role, now, ui).into(),
+                    PanelView::Show => world().into(),
+                    PanelView::Mix { t, from_show: true } => blend(run.spec.kind, t, world, || {
+                        self.scene_for_role(role, now, ui)
+                    }),
+                    PanelView::Mix {
+                        t,
+                        from_show: false,
+                    } => blend(
+                        run.spec.kind,
+                        t,
+                        || self.scene_for_role(role, now, ui),
+                        world,
+                    ),
+                };
             }
         }
         if let Some(tr) = state.transition(now) {
-            let (half, brightness) = crate::screens::fade(tr.t);
-            let mut s = match half {
-                crate::screens::Half::Out => {
-                    self.scene_for_role(tr.from, now, ui.outgoing(tr.from))
-                }
-                crate::screens::Half::In => self.scene_for_role(tr.to, now, ui),
-            };
-            s.fade = brightness;
-            return s;
+            // both halves are live: the old role keeps animating in its own
+            // widget state while the new one starts fresh
+            let mut out = ui.take_outgoing(tr.from);
+            let frame = blend(
+                tr.kind,
+                tr.t,
+                || self.scene_for_role(tr.from, now, &mut out),
+                || self.scene_for_role(tr.to, now, ui),
+            );
+            ui.put_outgoing(out);
+            return frame;
         }
         ui.end_transition();
-        self.scene_for_role(role, now, ui)
+        self.scene_for_role(role, now, ui).into()
     }
 
     /// A GIF role: the current frame over the whole screen once decoded, the
