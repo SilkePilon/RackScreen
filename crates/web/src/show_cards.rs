@@ -27,11 +27,17 @@ const LAYOUT: Layout = Layout { panels: 4, gap: 0 };
 /// The first is the card's face, so it is the show's best moment.
 fn moments(id: &str) -> [f64; FRAMES] {
     match id {
-        "storm" => [0.5, 0.3, 0.55, 0.8],
-        "day" => [0.45, 0.15, 0.7, 0.9],
-        "paper-plane" => [0.6, 0.3, 0.2, 0.9],
-        "space" => [0.65, 0.35, 0.5, 0.8],
-        "fireworks" => [0.85, 0.65, 0.75, 0.35],
+        "freight" => [0.46, 0.25, 0.7, 0.9],
+        "deep-sea" => [0.3, 0.63, 0.95, 0.8],
+        "paper-plane" => [0.51, 0.9, 0.25, 0.7],
+        "storm" => [0.5, 0.96, 0.3, 0.75],
+        "day" => [0.95, 0.08, 0.45, 0.75],
+        "space" => [0.56, 0.92, 0.25, 0.75],
+        "birds" => [0.3, 0.78, 0.55, 0.95],
+        "fireworks" => [0.58, 0.97, 0.3, 0.8],
+        "alpine" => [0.3, 0.78, 0.94, 0.55],
+        "caravan" => [0.6, 0.37, 0.92, 0.15],
+        "desert-night" => [0.31, 0.88, 0.6, 0.15],
         "boulder" => [0.5, 0.2, 0.85, 0.95],
         "time-car" => [0.43, 0.15, 0.52, 0.76],
         "kaiju" => [0.57, 0.27, 0.71, 0.84],
