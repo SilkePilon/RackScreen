@@ -142,7 +142,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/alpine.gif" alt="Mountains: alpine dawn show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Mountains: alpine dawn</b> (<code>alpine</code>) — the sun rises behind three snowy ranges while an eagle glides across.
+  <b>Mountains: alpine dawn</b> (<code>alpine</code>) — the peaks turn from pink alpenglow to gold as the sun rises over misty valleys, pines, a chalet and a little cable car; a climber with a huge pack slogs up the ridge across every screen while a mountain goat bounds past him, and just as he plants his flag on the summit in the sunburst, the goat eats it.
 </p>
 
 <p align="center">

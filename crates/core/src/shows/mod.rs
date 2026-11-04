@@ -257,7 +257,7 @@ mod tests {
                 ("space", "Space hitchhiker", 12.0),
                 ("birds", "Birds at sunset", 11.5),
                 ("fireworks", "Harbour fireworks", 12.0),
-                ("alpine", "Mountains: alpine dawn", 10.0),
+                ("alpine", "Mountains: alpine dawn", 12.0),
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
                 ("boulder", "Temple run", 10.0),
