@@ -11,6 +11,7 @@ mod desert_night;
 mod fireworks;
 mod freight;
 mod hyperspace;
+mod moon_landing;
 mod paper_plane;
 pub mod schedule;
 mod scifi;
@@ -113,6 +114,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: ufo::SECS,
         draw: ufo::draw,
     },
+    ShowDef {
+        id: "moon-landing",
+        name: "Lunar landing",
+        secs: moon_landing::SECS,
+        draw: moon_landing::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -169,6 +176,7 @@ mod tests {
                 ("desert-night", "Desert: night tumbleweed", 9.0),
                 ("hyperspace", "Jump to hyperspace", 10.0),
                 ("ufo", "Close encounter", 12.0),
+                ("moon-landing", "Lunar landing", 12.0),
             ]
         );
     }

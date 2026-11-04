@@ -173,6 +173,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Close encounter</b> (<code>ufo</code>) — a saucer drifts over a moonlit farm, beams up a wiggling cow and zips off; the cow floats back down under a parachute, wearing a new antenna.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/moon-landing.gif" alt="Lunar landing show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Lunar landing</b> (<code>moon-landing</code>) — a lander descends over a cratered moonscape with the Earth rising, kicks up dust and touches down; a tiny astronaut bounces out, plants a flag and waves, and an old rover snaps a photo.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
