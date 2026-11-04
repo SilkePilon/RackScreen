@@ -18,6 +18,7 @@ pub mod world;
 
 mod boulder;
 mod fx;
+mod kaiju;
 mod time_car;
 
 use world::{Layout, World, WorldFrame};
@@ -114,6 +115,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: time_car::SECS,
         draw: time_car::draw,
     },
+    ShowDef {
+        id: "kaiju",
+        name: "Monster in the harbour",
+        secs: kaiju::SECS,
+        draw: kaiju::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -170,6 +177,7 @@ mod tests {
                 ("desert-night", "Desert: night tumbleweed", 9.0),
                 ("boulder", "Temple run", 10.0),
                 ("time-car", "Time machine", 10.0),
+                ("kaiju", "Monster in the harbour", 11.0),
             ]
         );
     }
