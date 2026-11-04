@@ -16,6 +16,9 @@ mod space;
 mod storm;
 pub mod world;
 
+mod boulder;
+mod fx;
+
 use world::{Layout, World, WorldFrame};
 
 /// Frames per second every show is drawn at ("on twos").
@@ -98,6 +101,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: desert_night::SECS,
         draw: desert_night::draw,
     },
+    ShowDef {
+        id: "boulder",
+        name: "Temple run",
+        secs: boulder::SECS,
+        draw: boulder::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -152,6 +161,7 @@ mod tests {
                 ("alpine", "Mountains: alpine dawn", 10.0),
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
+                ("boulder", "Temple run", 10.0),
             ]
         );
     }
