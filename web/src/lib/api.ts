@@ -100,8 +100,7 @@ export const api = {
 
   config: () => get<ConfigResponse>("/config"),
   saveConfig: (config: Config) => put<SaveResponse>("/config", { config }),
-  validateConfig: (config: unknown) =>
-    post<{ ok: boolean; error?: string }>("/config/validate", { config }),
+  validateConfig: (config: unknown) => post<{ ok: boolean; error?: string }>("/config/validate", { config }),
   validateYaml: (yaml: string) => post<{ ok: boolean; error?: string }>("/config/validate", { yaml }),
   yaml: () => get<{ yaml: string }>("/config/yaml"),
   saveYaml: (yaml: string) => put<SaveResponse>("/config/yaml", { yaml }),
@@ -120,8 +119,7 @@ export const api = {
 
   spotify: () => get<SpotifyState>("/spotify"),
   spotifyLogin: () => post<{ url: string }>("/spotify/login"),
-  spotifyCallback: (pasted: string) =>
-    post<{ ok: boolean; status: string }>("/spotify/callback", { pasted }),
+  spotifyCallback: (pasted: string) => post<{ ok: boolean; status: string }>("/spotify/callback", { pasted }),
   spotifyLogout: () => post<unknown>("/spotify/logout"),
 
   gifProviders: () => get<GifProviders>("/gifs/providers"),
@@ -129,9 +127,10 @@ export const api = {
     get<GifPage>(`/gifs/search?${new URLSearchParams({ provider, q, ...(offset ? { offset } : {}) })}`),
   gifTrending: (provider: GifProvider, offset?: string | null) =>
     get<GifPage>(`/gifs/trending?${new URLSearchParams({ provider, ...(offset ? { offset } : {}) })}`),
-  gifTrendingTerms: (provider: GifProvider) => get<{ terms: string[] }>(`/gifs/trending-terms?provider=${provider}`),
+  gifTrendingTerms: (provider: GifProvider) =>
+    get<{ terms: string[] }>(`/gifs/trending-terms?provider=${provider}`),
 
-  update: () => get<UpdateState>("/update"),
+  update: (force = false) => get<UpdateState>(force ? "/update?force=1" : "/update"),
   startUpdate: () => post<unknown>("/update"),
 
   tailscale: () => get<TailscaleState>("/tailscale"),

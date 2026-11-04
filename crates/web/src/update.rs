@@ -1,4 +1,5 @@
-//! `/api/update`: the latest release (checked at most hourly) and a
+//! `/api/update`: the latest release (checked at most hourly, or on
+//! `?force=1` from Check again, at most every `FORCE_MIN`) and a
 //! self-update job that runs `sudo -n /usr/local/bin/rackscreen update`.
 //!
 //! The update restarts this very service, so the job's state and log are
@@ -10,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::Json;
 use rackscreen_ops::update::{fetch_latest, is_newer};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::{ApiError, ApiResult, AppState};
 
 pub const CHECK_EVERY: Duration = Duration::from_secs(3600);
+/// Check again looks up the release at most this often: GitHub allows 60
+/// unauthenticated requests an hour.
+pub const FORCE_MIN: Duration = Duration::from_secs(15);
 pub const SUDO_CHECK_EVERY: Duration = Duration::from_secs(60);
 pub const BINARY: &str = "/usr/local/bin/rackscreen";
 
@@ -99,6 +103,12 @@ impl Job {
             }
             // settle it on disk so a later restart does not decide again
             let _ = job.save(path);
+        } else if job.from != current
+            && job.target.as_deref().map(|t| t.trim_start_matches('v')) != Some(current)
+        {
+            // a job an older process finished, for a release this one is not
+            // running: its log says nothing about now
+            return Job::default();
         }
         job
     }
@@ -171,15 +181,30 @@ async fn can_self_update() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-pub async fn get_update(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
+#[derive(Deserialize, Default)]
+pub struct UpdateQuery {
+    /// Look the release up now instead of trusting the hourly cache.
+    #[serde(default)]
+    force: Option<String>,
+}
+
+pub async fn get_update(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<UpdateQuery>,
+) -> ApiResult<Value> {
     let current = state.hub.version;
+    let every = if q.force.is_some() {
+        FORCE_MIN
+    } else {
+        CHECK_EVERY
+    };
     let need_check = state
         .update
         .lock()
         .unwrap()
         .latest
         .as_ref()
-        .is_none_or(|(t, _)| t.elapsed() >= CHECK_EVERY);
+        .is_none_or(|(t, _)| t.elapsed() >= every);
     if need_check {
         let found = tokio::task::spawn_blocking(|| fetch_latest().ok().map(|r| r.tag))
             .await
@@ -314,6 +339,20 @@ mod tests {
         let mut u = UpdateState::load(Some(path.clone()), "0.13.0");
         u.finish(JobState::Done);
         assert_eq!(Job::load(&path, "0.13.0").state, JobState::Done);
+        // a job an older process finished for another release is forgotten
+        u.job = Job {
+            state: JobState::Done,
+            from: "0.14.1".into(),
+            target: Some("v0.14.4".into()),
+            log: vec!["old".into()],
+        };
+        u.persist();
+        assert_eq!(Job::load(&path, "0.16.1"), Job::default());
+        assert_eq!(
+            Job::load(&path, "0.14.4").state,
+            JobState::Done,
+            "the one it installed"
+        );
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(Job::load(&path, "0.13.0"), Job::default());
     }

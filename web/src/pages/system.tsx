@@ -16,15 +16,7 @@ import { toast } from "sonner"
 import { CopyButton } from "@/components/copy-button"
 import { PageBody, PageIntro } from "@/components/page"
 import { Segmented } from "@/components/segmented"
-import {
-  NumberRow,
-  Row,
-  RowSkeleton,
-  Section,
-  SecretRow,
-  SettingsCard,
-  TextRow,
-} from "@/components/settings"
+import { NumberRow, Row, RowSkeleton, Section, SecretRow, SettingsCard, TextRow } from "@/components/settings"
 import { useTheme } from "@/components/theme-provider"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
@@ -109,6 +101,12 @@ function UpdateSection() {
       toast.error("Update did not start", { description: errorMessage(e) })
     },
   })
+  // Check again skips the Pi's hourly cache of the latest release
+  const check = useMutation({
+    mutationFn: () => api.update(true),
+    onSuccess: (data) => qc.setQueryData(keys.update, data),
+    onError: (e) => toast.error("Could not check", { description: errorMessage(e) }),
+  })
   const [prevState, setPrevState] = React.useState(u?.job.state)
   if (u && u.job.state !== prevState) {
     setPrevState(u.job.state)
@@ -178,8 +176,8 @@ function UpdateSection() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Update to {u.latest}?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    RackScreen downloads the release, replaces itself and restarts. The panels and this page go
-                    away for a moment and come back on their own.
+                    RackScreen downloads the release, replaces itself and restarts. The panels and this page
+                    go away for a moment and come back on their own.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -190,12 +188,17 @@ function UpdateSection() {
             </AlertDialog>
           ) : u?.newer ? (
             <div className="flex items-center gap-1.5">
-              <code className="rounded-md border bg-muted/50 px-2 py-1 font-mono text-xs">sudo rackscreen update</code>
+              <code className="rounded-md border bg-muted/50 px-2 py-1 font-mono text-xs">
+                sudo rackscreen update
+              </code>
               <CopyButton text="sudo rackscreen update" iconOnly label="Copy command" variant="ghost" />
             </div>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => void update.refetch()} disabled={update.isFetching}>
-              <RefreshCwIcon data-icon="inline-start" className={update.isFetching ? "animate-spin" : undefined} />
+            <Button variant="ghost" size="sm" onClick={() => check.mutate()} disabled={check.isPending}>
+              <RefreshCwIcon
+                data-icon="inline-start"
+                className={check.isPending ? "animate-spin" : undefined}
+              />
               Check again
             </Button>
           )}
@@ -206,7 +209,7 @@ function UpdateSection() {
             <ol className="flex flex-col gap-1 font-mono text-xs text-muted-foreground">
               {u.job.log.map((l, i) => (
                 <li key={i} className="flex gap-2">
-                  <span className="text-muted-foreground/50 tabular">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="tabular text-muted-foreground/50">{String(i + 1).padStart(2, "0")}</span>
                   {l}
                 </li>
               ))}
@@ -416,7 +419,10 @@ function uptime(since: number) {
 function Service() {
   const info = useInfo()
   const status = useStatus()
-  const restart = useControl(() => api.restart(), () => "Panels restarting")
+  const restart = useControl(
+    () => api.restart(),
+    () => "Panels restarting"
+  )
   const i = info.data
   return (
     <Section title="Service">
@@ -429,7 +435,12 @@ function Service() {
               : undefined
           }
         >
-          <Button variant="outline" size="sm" onClick={() => restart.mutate(undefined)} disabled={restart.isPending}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => restart.mutate(undefined)}
+            disabled={restart.isPending}
+          >
             <RotateCwIcon data-icon="inline-start" />
             Restart panels
           </Button>

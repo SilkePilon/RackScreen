@@ -83,7 +83,7 @@ export const useSpotify = () =>
 export const useUpdate = () =>
   useQuery({
     queryKey: keys.update,
-    queryFn: api.update,
+    queryFn: () => api.update(),
     staleTime: 60_000,
     refetchInterval: (q) => (q.state.data?.job.state === "running" ? 1000 : 5 * 60_000),
   })
