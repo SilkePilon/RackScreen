@@ -20,6 +20,7 @@ mod boulder;
 mod fx;
 mod heist;
 mod kaiju;
+mod shark;
 mod time_car;
 
 use world::{Layout, World, WorldFrame};
@@ -128,6 +129,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: heist::SECS,
         draw: heist::draw,
     },
+    ShowDef {
+        id: "shark",
+        name: "Beach day",
+        secs: shark::SECS,
+        draw: shark::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -186,6 +193,7 @@ mod tests {
                 ("time-car", "Time machine", 10.0),
                 ("kaiju", "Monster in the harbour", 11.0),
                 ("heist", "The heist", 10.0),
+                ("shark", "Beach day", 10.0),
             ]
         );
     }
