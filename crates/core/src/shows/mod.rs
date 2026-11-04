@@ -94,7 +94,7 @@ pub const SHOWS: &[ShowDef] = &[
     },
     ShowDef {
         id: "fireworks",
-        name: "Fireworks",
+        name: "Harbour fireworks",
         secs: fireworks::SECS,
         draw: fireworks::draw,
     },
@@ -256,7 +256,7 @@ mod tests {
                 ("day", "Day in a minute", 12.0),
                 ("space", "Space hitchhiker", 12.0),
                 ("birds", "Birds at sunset", 11.5),
-                ("fireworks", "Fireworks", 8.0),
+                ("fireworks", "Harbour fireworks", 12.0),
                 ("alpine", "Mountains: alpine dawn", 10.0),
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),

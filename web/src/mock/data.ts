@@ -8,7 +8,7 @@ export const SHOWS: ShowInfo[] = [
   { id: "day", title: "Day in a minute" },
   { id: "space", title: "Space hitchhiker" },
   { id: "birds", title: "Birds at sunset" },
-  { id: "fireworks", title: "Fireworks" },
+  { id: "fireworks", title: "Harbour fireworks" },
   { id: "alpine", title: "Mountains: alpine dawn" },
   { id: "caravan", title: "Desert: caravan" },
   { id: "desert-night", title: "Desert: night tumbleweed" },

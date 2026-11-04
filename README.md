@@ -132,10 +132,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
 </p>
 
 <p align="center">
-  <img src=".github/media/shows/fireworks.gif" alt="Fireworks show across four screens" width="720">
+  <img src=".github/media/shows/fireworks.gif" alt="Harbour fireworks show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Fireworks</b> (<code>fireworks</code>) — rockets launch one screen at a time over a city skyline, then a finale on every screen.
+  <b>Harbour fireworks</b> (<code>fireworks</code>) — peonies, a golden willow, a ring, a crossette and a glitter strobe burst over a city harbour, lighting the clouds and mirrored in the water while the crowd on the quay cheers; one rocket from the barge is a dud and falls back smouldering, the finale sends the dog under a bench, and in the quiet after, the dud goes off late as a big pink heart.
 </p>
 
 <p align="center">
