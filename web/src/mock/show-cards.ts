@@ -30,6 +30,7 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   "moon-landing": ["#020208", "#6a6a7a", "#d8a838", "#7a7a82"],
   mech: ["#46206a", "#e0605a", "#5af0ff", "#1e1430"],
   "black-hole": ["#03020a", "#120814", "#ffd27a", "#03020a"],
+  lighthouse: ["#141a2e", "#1e4656", "#fff4c8", "#30364a"],
 }
 
 function still(id: string, frame: number): string {

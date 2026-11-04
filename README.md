@@ -234,6 +234,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Event horizon</b> (<code>black-hole</code>) — a black hole's accretion disk swirls, lensed into a halo over its shadow and fed by a companion star; a tiny probe is caught, spirals in, stretches into a streak and vanishes in a flash that fires jets from the poles.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/lighthouse.gif" alt="Lighthouse keeper show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Lighthouse keeper</b> (<code>lighthouse</code>) — a stormy night over rolling, spray-torn swells; the lighthouse beam sweeps every screen, lighting the rain, finds a little fishing boat lost in the waves and holds it all the way in, and the keeper's cat lowers a bucket from the gallery to collect its fish.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

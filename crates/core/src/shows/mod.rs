@@ -31,6 +31,7 @@ mod boulder;
 mod fx;
 mod heist;
 mod kaiju;
+mod lighthouse;
 mod shark;
 mod time_car;
 
@@ -206,6 +207,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: black_hole::SECS,
         draw: black_hole::draw,
     },
+    ShowDef {
+        id: "lighthouse",
+        name: "Lighthouse keeper",
+        secs: lighthouse::SECS,
+        draw: lighthouse::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -275,6 +282,7 @@ mod tests {
                 ("moon-landing", "Lunar landing", 12.0),
                 ("mech", "Giant robot at dusk", 11.0),
                 ("black-hole", "Event horizon", 10.0),
+                ("lighthouse", "Lighthouse keeper", 12.0),
             ]
         );
     }

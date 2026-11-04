@@ -70,6 +70,18 @@ pub fn vgrad(g: &mut World, stops: &[u32], x0: i32, x1: i32, y0: i32, y1: i32) {
     }
 }
 
+/// Smooth value noise in `0..1`, one random value per integer lattice
+/// point, for clouds and mist.
+pub fn vnoise(x: f64, y: f64, seed: f64) -> f64 {
+    let (xi, yi) = (x.floor(), y.floor());
+    let (fx, fy) = (x - xi, y - yi);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let h = |a: f64, b: f64| super::world::rnd(a * 57.0 + b * 131.0 + seed);
+    let top = h(xi, yi) + (h(xi + 1.0, yi) - h(xi, yi)) * sx;
+    let bot = h(xi, yi + 1.0) + (h(xi + 1.0, yi + 1.0) - h(xi, yi + 1.0)) * sx;
+    top + (bot - top) * sy
+}
+
 /// A soft round light: `c` blended in with strength falling off to the rim.
 pub fn glow(g: &mut World, c: u32, cx: f64, cy: f64, r: f64, k: f64) {
     let ri = r.ceil() as i32 + 1;

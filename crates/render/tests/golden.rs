@@ -1581,6 +1581,17 @@ fn show_batch_c() {
 }
 
 #[test]
+fn show_batch_d() {
+    for (id, t, name) in [
+        ("lighthouse", 5.0, "show_lighthouse_found"),
+        ("lighthouse", 11.5, "show_lighthouse_toll"),
+    ] {
+        let def = rackscreen_core::shows::by_id(id).unwrap();
+        check(name, &show_strip(def, t));
+    }
+}
+
+#[test]
 fn show_batch_a() {
     for (id, t, name) in [
         ("hyperspace", 4.5, "show_hyperspace_charge"),
