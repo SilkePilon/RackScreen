@@ -120,16 +120,12 @@ function Stat({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-2 bg-card px-5 py-4">
-      <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-        {tone && (
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              tone === "ok" ? "bg-success" : tone === "warn" ? "bg-warning" : "bg-destructive"
-            )}
-            aria-hidden
-          />
+      <span
+        className={cn(
+          "text-[13px]",
+          tone === "warn" ? "text-warning" : tone === "bad" ? "text-destructive" : "text-muted-foreground"
         )}
+      >
         {label}
       </span>
       <span className="flex min-w-0 items-baseline gap-1.5">

@@ -677,13 +677,11 @@ function Connected({ t }: { t: TailscaleState }) {
             }
             badge={
               connected ? (
-                <Badge variant="secondary" className="gap-1.5 font-normal">
-                  <span className="size-1.5 rounded-full bg-success" />
+                <Badge variant="secondary" className="font-normal">
                   Connected
                 </Badge>
               ) : (
-                <Badge variant="outline" className="gap-1.5 font-normal text-muted-foreground">
-                  <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+                <Badge variant="outline" className="font-normal text-muted-foreground">
                   {t.backend_state === "Starting" ? "Starting" : "Disconnected"}
                 </Badge>
               )
@@ -932,13 +930,6 @@ function PeerRow({ p }: { p: TailscaleDevice }) {
     <li className="flex items-center gap-3 px-5 py-3">
       <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
         <Icon className={cn("size-4", p.online ? "text-foreground" : "text-muted-foreground")} />
-        <span
-          className={cn(
-            "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-card",
-            p.online ? "bg-success" : "bg-muted-foreground/50"
-          )}
-          aria-label={p.online ? "Online" : "Offline"}
-        />
       </span>
       <div className="flex min-w-0 flex-1 flex-col">
         <span

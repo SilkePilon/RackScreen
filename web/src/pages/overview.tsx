@@ -254,10 +254,10 @@ function ActionTitle({ icon: Icon, title, hint }: { icon: React.ElementType; tit
 }
 
 const TONE: Record<Tone, string> = {
-  ok: "bg-success",
-  warn: "bg-warning",
-  bad: "bg-destructive",
-  muted: "bg-muted-foreground/40",
+  ok: "text-muted-foreground",
+  warn: "text-warning",
+  bad: "text-destructive",
+  muted: "text-muted-foreground",
 }
 
 function Tiles() {
@@ -268,8 +268,7 @@ function Tiles() {
       {tiles
         ? tiles.map((t) => (
             <div key={t.key} className="flex flex-col gap-2 bg-card px-5 py-4">
-              <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                <span className={cn("size-1.5 rounded-full", TONE[t.tone])} aria-hidden />
+              <span className={cn("text-[13px]", TONE[t.tone])}>
                 {t.label}
               </span>
               <span className="flex min-w-0 items-baseline gap-1.5">
@@ -288,11 +287,11 @@ function Tiles() {
   )
 }
 
-const LINK: Record<LinkState, { dot: string; label: string }> = {
-  ok: { dot: "bg-success", label: "Connected" },
-  warn: { dot: "bg-warning", label: "Degraded" },
-  down: { dot: "bg-destructive", label: "Down" },
-  off: { dot: "bg-muted-foreground/30", label: "Off" },
+const LINK: Record<LinkState, { text: string; label: string }> = {
+  ok: { text: "", label: "Connected" },
+  warn: { text: "text-warning", label: "Degraded" },
+  down: { text: "text-destructive", label: "Down" },
+  off: { text: "text-muted-foreground", label: "Off" },
 }
 
 function Links() {
@@ -303,20 +302,13 @@ function Links() {
       {links
         ? links.map((l) => (
             <div key={l.name} className="flex items-center gap-3 px-5 py-3">
-              <span className="relative flex size-2">
-                {l.state === "down" && (
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/60 motion-reduce:hidden" />
-                )}
-                <span className={cn("relative size-2 rounded-full", LINK[l.state].dot)} />
-              </span>
               <span className="sr-only">{LINK[l.state].label}:</span>
-              <span className={cn("text-sm font-medium", l.state === "off" && "text-muted-foreground")}>{l.name}</span>
+              <span className={cn("text-sm font-medium", LINK[l.state].text)}>{l.name}</span>
               <span className="ml-auto truncate text-right text-[13px] text-muted-foreground">{l.detail}</span>
             </div>
           ))
         : Array.from({ length: 5 }, (_, i) => (
             <div key={i} className="flex items-center gap-3 px-5 py-3.5">
-              <Skeleton className="size-2 rounded-full" />
               <Skeleton className="h-3.5 w-28" />
               <Skeleton className="ml-auto h-3 w-24" />
             </div>

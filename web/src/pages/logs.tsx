@@ -230,12 +230,6 @@ export default function Logs() {
           )}
           role="status"
         >
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              paused ? "bg-muted-foreground" : live === "live" ? "bg-success animate-pulse" : "bg-warning",
-            )}
-          />
           {paused ? "Paused" : live === "live" ? "Live" : live === "down" ? "Reconnecting" : "Connecting"}
         </span>
       </HeaderActions>

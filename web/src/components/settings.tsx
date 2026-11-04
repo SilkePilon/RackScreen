@@ -430,8 +430,7 @@ export function SecretRow({ id, muted }: { id: SecretPath; muted?: boolean }) {
       New value
     </Badge>
   ) : isSet ? (
-    <Badge variant="secondary" className="gap-1 font-normal text-muted-foreground">
-      <span className="size-1.5 rounded-full bg-success" />
+    <Badge variant="secondary" className="font-normal text-muted-foreground">
       Set
     </Badge>
   ) : (
