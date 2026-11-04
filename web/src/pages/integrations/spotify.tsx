@@ -71,7 +71,7 @@ function Body() {
             title="Redirect URI"
             description="Add exactly this address to your app's Redirect URIs in the Spotify dashboard."
           >
-            <code className="rounded-md border bg-muted/50 px-2 py-1 font-mono text-xs">{REDIRECT}</code>
+            <code className="min-w-0 rounded-md border bg-muted/50 px-2 py-1 font-mono text-xs break-all">{REDIRECT}</code>
             <CopyButton text={REDIRECT} iconOnly label="Copy redirect URI" variant="ghost" />
           </Row>
         </SettingsCard>

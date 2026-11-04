@@ -164,7 +164,7 @@ function QuickActions() {
   const nightActive = status.data?.night.active
 
   return (
-    <SettingsCard className="sm:flex-row sm:divide-x sm:divide-y-0">
+    <SettingsCard className="sm:grid sm:grid-cols-2 sm:gap-px sm:divide-y-0 sm:bg-hairline xl:flex xl:flex-row xl:gap-0 xl:divide-x xl:bg-card [&>*]:bg-card">
       <div className="flex flex-1 flex-col gap-3 p-4">
         <ActionTitle icon={ScanEyeIcon} title="Identify" hint="Number on each panel" />
         <Button variant="outline" onClick={() => identify.mutate(undefined)} disabled={identify.isPending}>
