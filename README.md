@@ -128,7 +128,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/birds.gif" alt="Birds at sunset show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Birds at sunset</b> (<code>birds</code>) — a V of birds flaps across a pixel sunset over the sea.
+  <b>Birds at sunset</b> (<code>birds</code>) — geese in a V cross a marsh at sunset with reeds, a heron and an angler's boat mirrored in the water; one little straggler lags behind, skims the water past the heron and drops onto a mooring post worn out, until the flock swings back for it and lets it lead them home across the sinking sun.
 </p>
 
 <p align="center">

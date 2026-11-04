@@ -10,7 +10,7 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   storm: ["#1c2030", "#3c4458", "#f2c632", "#24262e"],
   day: ["#3a84de", "#e0806a", "#fff6c8", "#5aa040"],
   space: ["#05060f", "#b83e8a", "#e8b878", "#9ad8f0"],
-  birds: ["#f0a35a", "#e0635a", "#ffd36e", "#1f2a55"],
+  birds: ["#8a3a7a", "#f8964a", "#ffd27a", "#5a2c5e"],
   fireworks: ["#0a0b18", "#121327", "#b6f26b", "#14152a"],
   alpine: ["#2b3a67", "#8a86b8", "#e6ecff", "#1f2c4c"],
   caravan: ["#8fcdf0", "#f4e2a8", "#6b4a2a", "#d8a85a"],

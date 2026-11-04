@@ -1526,7 +1526,8 @@ fn show_round_one() {
 #[test]
 fn show_round_two() {
     for (id, t, name) in [
-        ("birds", 4.0, "show_birds"),
+        ("birds", 3.5, "show_birds_heron"),
+        ("birds", 9.0, "show_birds_leader"),
         ("fireworks", 6.4, "show_fireworks_finale"),
         ("alpine", 7.0, "show_alpine"),
         // At 25 mm gaps the camels are behind the bezel at t 5 and the
