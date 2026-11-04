@@ -485,7 +485,7 @@ function AddPickDialog({
     <Dialog open={!!pick} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         {pick && (
-          <form onSubmit={submit} className="flex flex-col gap-5">
+          <form onSubmit={submit} className="flex min-w-0 flex-col gap-5">
             <DialogHeader>
               <DialogTitle>Add this GIF</DialogTitle>
               <DialogDescription className="truncate">
