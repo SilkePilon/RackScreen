@@ -331,6 +331,12 @@ The **Screens** page of the web UI edits them: drag roles to reorder, add from t
 
 Only one screen changes at a time by default, the next one picked at random from those whose interval has elapsed, because four displays transitioning together stall the shared SPI bus; **Display** in the web UI (or `display.one_at_a_time` in the config) turns that off.
 
+### Transitions
+
+How one role gives way to the next is a style you pick under **Transitions** on the **Display** page (or `transitions:` in the config). Every card there plays a live preview. The styles: **fade** (via black, the default), **crossfade**, **cut**, **slide** (the next role pushes the old one out), **cover** (it slides in over the old one), **wipe** (a soft edge sweeps across), **iris** (a circle opens from the middle, or closes into it), **clock** (a sweep from twelve o'clock), **dissolve** (soft patches), **zoom** (the old one scales away as the next one scales in) and **blinds** (strips). Slide, cover and wipe take a direction (left, right, up, down), iris and zoom in or out, clock clockwise or not, blinds horizontal or vertical. The duration runs from 0.15 to 2 s; *Random style each time* picks a style and direction per transition (never a cut).
+
+Shows go in and out through the same style, or their own under *Shows use*; a directional style sweeps across the four panels one after the other, from the left (from the right for a leftward one), so a wipe runs along the rack. *Try it on the panels* makes every cycling screen change role now, in the saved style (the button waits until the draft is saved, and is refused during a show, at night and under the test pattern). Styles that change every pixel every frame (crossfade, slide, cover, dissolve, zoom) push a full frame over SPI each time; they look smoothest at 30–60 fps. A config without a `transitions` block behaves exactly as before: the 0.4 s fade via black.
+
 Besides these, a screen can show a GIF: the role `gif:<name>` plays the GIF called `<name>` in the `gifs:` list; see [GIF role](#gif-role). GIFs appear in the role picker after the built-in roles.
 
 In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade to black and then show a dim moon until morning, when the moon fades out and the screens come back on their own. The panels stay on all night.
@@ -525,6 +531,14 @@ display:
   fps: 60
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
   one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
+
+transitions:
+  style: fade-black        # fade-black, crossfade, cut, slide, cover, wipe, iris, clock, dissolve, zoom, blinds
+  direction: left          # for slide/cover/wipe: left, right, up, down; iris/zoom: in, out;
+                           # clock: cw, ccw; blinds: horizontal, vertical (empty = the style's default)
+  secs: 0.4                # 0.15 to 2
+  random: false            # a random style (and direction) for every transition
+  # shows: { style: wipe, direction: right, secs: 0.6 }   # the shows' own; default: the same as above
 
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,

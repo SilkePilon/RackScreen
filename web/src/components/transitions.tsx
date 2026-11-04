@@ -129,7 +129,7 @@ function Preview({ spec, className }: { spec: PreviewSpec; className?: string })
       width={PX}
       height={PX}
       aria-hidden
-      className={cn("size-14 rounded-full bg-black ring-1 ring-white/10 [image-rendering:auto]", className)}
+      className={cn("size-12 rounded-full bg-black ring-1 ring-white/10 sm:size-14", className)}
     />
   )
 }
@@ -170,7 +170,7 @@ function StyleCards() {
               data-style={s.id}
               onClick={() => pick(s.id)}
               className={cn(
-                "group flex items-center gap-3 rounded-lg border p-2.5 text-left transition-[border-color,background-color,box-shadow]",
+                "group flex items-center gap-2.5 rounded-lg border p-2.5 text-left sm:gap-3 transition-[border-color,background-color,box-shadow]",
                 "hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                 selected
                   ? "border-primary/70 bg-primary/[0.06] shadow-[inset_0_0_0_1px_var(--primary)] dark:bg-primary/[0.08]"
@@ -182,7 +182,7 @@ function StyleCards() {
                 <span className={cn("text-[13px] font-medium", selected ? "text-foreground" : "text-foreground/90")}>
                   {s.title}
                 </span>
-                <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{s.blurb}</span>
+                <span className="line-clamp-3 text-xs leading-snug text-muted-foreground">{s.blurb}</span>
               </div>
             </button>
           )

@@ -112,6 +112,14 @@ display:
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
   one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
 
+transitions:
+  style: fade-black        # fade-black, crossfade, cut, slide, cover, wipe, iris, clock, dissolve, zoom, blinds
+  direction: left          # for slide/cover/wipe: left, right, up, down; iris/zoom: in, out;
+                           # clock: cw, ccw; blinds: horizontal, vertical (empty = the style's default)
+  secs: 0.4                # 0.15 to 2
+  random: false            # a random style (and direction) for every transition
+  # shows: { style: wipe, direction: right, secs: 0.6 }   # the shows' own; default: the same as above
+
 # Each screen cycles through its `roles` list, `cycle_secs` seconds each.
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,

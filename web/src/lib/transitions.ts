@@ -38,16 +38,16 @@ export interface StyleInfo {
 }
 
 export const STYLES: StyleInfo[] = [
-  { id: "fade-black", title: "Fade", blurb: "Dims to black, then the next one comes up.", directions: [], defaultDirection: "left", heavy: false },
-  { id: "crossfade", title: "Crossfade", blurb: "Blends straight into the next one.", directions: [], defaultDirection: "left", heavy: true },
-  { id: "cut", title: "Cut", blurb: "No animation at all.", directions: [], defaultDirection: "left", heavy: false },
-  { id: "slide", title: "Slide", blurb: "The next one pushes the old one out.", directions: ["left", "right", "up", "down"], defaultDirection: "left", heavy: true },
-  { id: "cover", title: "Cover", blurb: "The next one slides in over the old one.", directions: ["left", "right", "up", "down"], defaultDirection: "left", heavy: true },
-  { id: "wipe", title: "Wipe", blurb: "A soft edge sweeps the next one in.", directions: ["left", "right", "up", "down"], defaultDirection: "left", heavy: false },
-  { id: "iris", title: "Iris", blurb: "A circle opens from the middle, or closes into it.", directions: ["in", "out"], defaultDirection: "out", heavy: false },
-  { id: "clock", title: "Clock", blurb: "Sweeps round from twelve o'clock.", directions: ["cw", "ccw"], defaultDirection: "cw", heavy: false },
+  { id: "fade-black", title: "Fade", blurb: "Dims to black, then up.", directions: [], defaultDirection: "left", heavy: false },
+  { id: "crossfade", title: "Crossfade", blurb: "Blends into the next one.", directions: [], defaultDirection: "left", heavy: true },
+  { id: "cut", title: "Cut", blurb: "No animation.", directions: [], defaultDirection: "left", heavy: false },
+  { id: "slide", title: "Slide", blurb: "Pushes the old one out.", directions: ["left", "right", "up", "down"], defaultDirection: "left", heavy: true },
+  { id: "cover", title: "Cover", blurb: "Slides in over the old one.", directions: ["left", "right", "up", "down"], defaultDirection: "left", heavy: true },
+  { id: "wipe", title: "Wipe", blurb: "A soft edge sweeps across.", directions: ["left", "right", "up", "down"], defaultDirection: "left", heavy: false },
+  { id: "iris", title: "Iris", blurb: "A circle opens, or closes.", directions: ["in", "out"], defaultDirection: "out", heavy: false },
+  { id: "clock", title: "Clock", blurb: "Sweeps round from twelve.", directions: ["cw", "ccw"], defaultDirection: "cw", heavy: false },
   { id: "dissolve", title: "Dissolve", blurb: "Melts over in soft patches.", directions: [], defaultDirection: "left", heavy: true },
-  { id: "zoom", title: "Zoom", blurb: "The old one scales away as the next one scales in.", directions: ["in", "out"], defaultDirection: "in", heavy: true },
+  { id: "zoom", title: "Zoom", blurb: "Scales away, scales in.", directions: ["in", "out"], defaultDirection: "in", heavy: true },
   { id: "blinds", title: "Blinds", blurb: "Strips reveal the next one.", directions: ["horizontal", "vertical"], defaultDirection: "horizontal", heavy: false },
 ]
 

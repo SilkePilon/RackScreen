@@ -160,6 +160,10 @@ in-memory, 30 days).
 * `POST /api/control/pattern` `{ "on": true }` → test pattern on all panels until turned off (or 10 min).
 * `POST /api/control/role` `{ "screen": 0, "role": "weather" }` → that screen jumps to that role now (must be in its list).
 * `POST /api/control/play` `{ "show": "freight" | "random" }`.
+* `POST /api/control/transition-test` `{ "screen"?: 0 }` → that screen (or
+  every cycling screen, left to right in show order) changes to its next role
+  now, in the saved transition style. 409 with a plain-English reason during a
+  show, at night, under the test pattern, or when nothing cycles.
 * `POST /api/control/night` `{ "mode": "auto" | "on" | "off" }`. The override
   is kept by the hub (it survives monitor restarts, it does not survive a
   process restart) and `/api/status` reports it right away; the answer's
@@ -282,7 +286,7 @@ Pages (left sidebar like the reference, grouped):
   while waiting for a login). The Overview shows a "Tailscale · <name>" chip
   on "This Pi"; System lists `tailscale0` and the MagicDNS name. Mock:
   `?ts=missing|nosudo|setup|login|approve|running` (`&nohttps`).
-* **Display**: brightness, fps, SPI chunk, one at a time, night window, thresholds.
+* **Display**: brightness, fps, SPI chunk, one at a time, transitions (below), night window, thresholds.
 * **Shows**: card grid, enable, every N min, gap, panel order, play now.
 * **Logs**: live stream, level filter, search, pause, auto-scroll, copy.
 * **System**: version + update (one click when allowed, else copyable command),
@@ -295,6 +299,36 @@ saved" icon on changed fields (like the reference's ↺); skeletons while loadin
 reconnect banner when the API is down (service restarting); toasts for results;
 mobile layout (sidebar becomes a sheet); `prefers-reduced-motion` respected;
 dark theme by default with a light theme toggle.
+
+## Transitions (added 2026-11-04)
+
+Config block `transitions: { style, direction, secs, random, shows? }`
+(`crates/app/src/config.rs`, validated against `rackscreen_core::transition`).
+`direction` may be empty (the style's default) and is ignored by styles
+without one. `shows` is the shows' own `{ style, direction, secs }` or absent.
+An absent block is today's look: `fade-black`, 0.4 s.
+
+Core (`crates/core/src/transition.rs`): `Style` × `Direction` → `Kind`,
+`Spec { kind, secs }`, `Transitions { screens, shows, random }`, a random
+pool (every kind but the cut), and `composite(kind, from, to, out, t)` over
+two 240×240 RGBA frames with ease-in-out-cubic and a 2 px soft edge where
+there is an edge. `fade-black` and `cut` are single-scene styles (one scene at
+a brightness, the old pipeline); the rest render both scenes. The model hands
+the run loop a `ScreenFrame { scene, blend: Option<Blend { to, kind, t }> }`;
+the worker renders both into reusable buffers and composites. Around a show a
+run is `In → Playing → Out` with one transition each; a staggering style
+delays panel `pos` by `pos × 0.25 × secs` (reversed for a leftward one) so
+the style sweeps along the rack; the show's clock starts half-way through the
+last panel's transition in, which keeps the old 0.2 s timing for the default.
+
+Web: a Transitions section on the Display page (`web/src/components/transitions.tsx`),
+with `web/src/lib/transitions.ts` porting the compositor so each style card
+plays a real preview between two sample screens at 72 px (one shared
+`requestAnimationFrame` clock; a static mid-point frame under
+`prefers-reduced-motion`). Direction control only for styles that have one;
+duration slider 0.15–2 s; random switch; *Shows use* select with its own
+direction and length; *Try it* calls the control above once the draft is
+saved. Styles that change every pixel every frame carry a hint.
 
 ## Testing
 
