@@ -34,7 +34,7 @@ export function Segmented<T extends string>({
           disabled={o.disabled}
           size={size}
           className={cn(
-            "rounded-md px-3 text-[13px] font-normal text-muted-foreground tabular hover:bg-transparent hover:text-foreground disabled:opacity-40",
+            "rounded-md px-3 text-[13px] font-normal text-muted-foreground tabular hover:bg-transparent hover:text-foreground disabled:opacity-40 max-sm:flex-1",
             "data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-[#222]",
             size === "default" && "h-7",
           )}

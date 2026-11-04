@@ -45,8 +45,8 @@ export function Section({
 }) {
   return (
     <section className="flex scroll-mt-6 flex-col gap-3" id={id} aria-label={title}>
-      <div className="flex items-end justify-between gap-4 px-1">
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 px-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <h2 className="text-[15px] font-semibold tracking-tight text-foreground">{title}</h2>
           {description && <p className="text-[13px] text-muted-foreground">{description}</p>}
         </div>
@@ -120,6 +120,8 @@ export function Row({
   return (
     <div
       data-setting-id={id}
+      data-slot="row"
+      data-stack={stack || undefined}
       className={cn(
         "flex scroll-mt-24 gap-x-6 gap-y-3 px-5 py-4 transition-[opacity,background-color]",
         stack ? "flex-col" : "flex-col sm:flex-row sm:items-center sm:justify-between",
@@ -142,7 +144,15 @@ export function Row({
         {d && <div className="max-w-xl text-[13px] leading-relaxed text-pretty text-muted-foreground">{d}</div>}
       </div>
       {children !== undefined && (
-        <div className={cn("flex shrink-0 items-center gap-2", !stack && "sm:justify-end")}>{children}</div>
+        <div
+          data-slot="row-control"
+          className={cn(
+            "flex min-w-0 shrink-0 items-center gap-2",
+            !stack && "sm:justify-end",
+          )}
+        >
+          {children}
+        </div>
       )}
     </div>
   )

@@ -98,11 +98,11 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
       onOpenChange={onOpenChange}
       title="Search"
       description="Jump to a page or a setting, or run an action."
-      className="max-w-xl! border bg-popover shadow-2xl shadow-black/60"
+      className="max-w-xl! border bg-popover shadow-2xl shadow-black/60 max-sm:top-[calc(env(safe-area-inset-top)+0.75rem)]"
     >
       <Command loop className="bg-popover" filter={paletteFilter}>
         <CommandInput placeholder="Search pages, settings and actions…" />
-        <CommandList className="scrollbar-thin max-h-[min(60vh,420px)]">
+        <CommandList className="scrollbar-thin max-h-[min(60vh,420px)] max-sm:max-h-[min(50svh,420px)]">
           <CommandEmpty>Nothing matches. Try “brightness” or “spotify”.</CommandEmpty>
           <CommandGroup heading="Pages">
             {PAGES.map((p) => (
@@ -179,7 +179,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             ))}
           </CommandGroup>
         </CommandList>
-        <div className="flex items-center justify-between border-t px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-t px-3 py-2 text-xs text-muted-foreground max-sm:hidden">
           <span className="flex items-center gap-1.5">
             <CornerDownLeftIcon className="size-3" /> to open
           </span>

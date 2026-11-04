@@ -93,15 +93,15 @@ export function AppShell() {
   useJumpToSetting(main)
 
   return (
-    <div className="h-svh bg-canvas md:p-3">
+    <div className="h-svh bg-canvas pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] md:p-3">
       <SidebarProvider
         className="h-full min-h-0 overflow-hidden bg-background md:rounded-2xl md:border md:shadow-[0_0_0_1px_rgba(0,0,0,.4),0_30px_80px_-20px_rgba(0,0,0,.6)]"
         style={{ "--sidebar-width": "17rem" } as React.CSSProperties}
       >
         <AppSidebar onSearch={() => palette.setOpen(true)} />
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-hairline px-3 sm:px-6">
-            <SidebarTrigger className="-ml-1 md:hidden" />
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-hairline px-3 sm:px-6 max-md:[&_[data-slot=button]]:min-h-9 max-md:[&_[data-slot=button]]:min-w-9">
+            <SidebarTrigger className="-ml-1 size-9 md:hidden" />
             <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2.5 text-[15px]">
               <Link
                 to="/"

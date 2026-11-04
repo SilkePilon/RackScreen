@@ -20,7 +20,7 @@ export function SaveBar() {
     <div
       aria-hidden={!show}
       className={cn(
-        "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-5 transition-all duration-300 ease-out",
+        "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-all sm:px-4 sm:pb-5 duration-300 ease-out",
         show ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0",
       )}
     >
@@ -59,12 +59,12 @@ export function SaveBar() {
             </Button>
           </div>
         )}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 max-sm:pt-1 max-sm:pr-0.5">
           <span className="relative flex size-2 shrink-0">
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-50 motion-reduce:hidden" />
             <span className="relative inline-flex size-2 rounded-full bg-primary" />
           </span>
-          <p className="flex-1 truncate text-sm">
+          <p className="min-w-0 flex-1 text-sm max-sm:basis-[calc(100%-1.25rem)] sm:truncate">
             <span className="font-medium text-foreground">{n > 0 || !blocked ? "Unsaved changes" : "Invalid value"}</span>
             {(n > 0 || !blocked) && (
               <span className="text-muted-foreground tabular">
@@ -79,10 +79,21 @@ export function SaveBar() {
               </span>
             )}
           </p>
-          <Button variant="ghost" onClick={d.discard} disabled={d.saving} tabIndex={show ? 0 : -1}>
+          <Button
+            variant="ghost"
+            onClick={d.discard}
+            disabled={d.saving}
+            tabIndex={show ? 0 : -1}
+            className="max-sm:h-10 max-sm:flex-1"
+          >
             Discard
           </Button>
-          <Button onClick={() => void d.save()} disabled={d.saving || blocked || n === 0} tabIndex={show ? 0 : -1}>
+          <Button
+            onClick={() => void d.save()}
+            disabled={d.saving || blocked || n === 0}
+            tabIndex={show ? 0 : -1}
+            className="max-sm:h-10 max-sm:flex-[2]"
+          >
             {d.saving && <Spinner data-icon="inline-start" />}
             Save &amp; apply
           </Button>
@@ -90,7 +101,7 @@ export function SaveBar() {
         {d.error && (
           <p role="alert" className="flex items-start gap-2 border-t pt-2 pr-2 pb-1 text-[13px] text-destructive">
             <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
-            <span className="font-mono text-xs leading-relaxed">{d.error}</span>
+            <span className="min-w-0 font-mono text-xs leading-relaxed break-words">{d.error}</span>
           </p>
         )}
       </div>

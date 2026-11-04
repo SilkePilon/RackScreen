@@ -188,3 +188,49 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Phones. Unlayered, so these win over the utility classes.
+ * iOS zooms into any field under 16px on focus, which leaves the page
+ * zoomed and scrolling sideways: give every field 16px on small screens.
+ */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select,
+  .cm-editor .cm-content {
+    font-size: 16px;
+  }
+  /*
+   * Setting rows stack: text on top, the control spanning the row below,
+   * its last part filling what is left. A lone switch or icon button stays
+   * on the right instead.
+   */
+  [data-slot="row-control"] {
+    width: 100%;
+  }
+  [data-slot="row-control"] > :last-child {
+    flex: 1 1 0%;
+  }
+  [data-slot="row"]:not([data-stack]):has(> [data-slot="row-control"] > :only-child:is([data-slot="switch"], [data-size^="icon"])) {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    & > [data-slot="row-control"] {
+      width: auto;
+      & > :last-child {
+        flex: none;
+      }
+    }
+  }
+  /* Comfortable touch targets for the controls of a setting row. */
+  [data-slot="row-control"] :is([data-slot="input"], [data-slot="input-group"], [data-slot="select-trigger"]) {
+    height: 2.75rem;
+  }
+  [data-slot="row-control"] [data-slot="button"]:not([class*="size-"]) {
+    min-height: 2.5rem;
+  }
+  [data-slot="row-control"] [data-slot="toggle-group-item"] {
+    height: 2.25rem;
+  }
+}
