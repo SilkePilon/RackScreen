@@ -4,6 +4,7 @@
 
 mod alpine;
 mod birds;
+mod black_hole;
 mod caravan;
 mod day;
 mod deep_sea;
@@ -127,6 +128,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: mech::SECS,
         draw: mech::draw,
     },
+    ShowDef {
+        id: "black-hole",
+        name: "Event horizon",
+        secs: black_hole::SECS,
+        draw: black_hole::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -185,6 +192,7 @@ mod tests {
                 ("ufo", "Close encounter", 12.0),
                 ("moon-landing", "Lunar landing", 12.0),
                 ("mech", "Giant robot at dusk", 11.0),
+                ("black-hole", "Event horizon", 10.0),
             ]
         );
     }

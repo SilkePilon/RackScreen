@@ -1326,6 +1326,8 @@ fn show_batch_a() {
         ("moon-landing", 10.6, "show_moon_landing_flag"),
         ("mech", 3.3, "show_mech_walk"),
         ("mech", 9.5, "show_mech_wave"),
+        ("black-hole", 5.6, "show_black_hole_spiral"),
+        ("black-hole", 7.6, "show_black_hole_jets"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));

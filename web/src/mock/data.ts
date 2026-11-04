@@ -16,6 +16,7 @@ export const SHOWS: ShowInfo[] = [
   { id: "ufo", title: "Close encounter" },
   { id: "moon-landing", title: "Lunar landing" },
   { id: "mech", title: "Giant robot at dusk" },
+  { id: "black-hole", title: "Event horizon" },
 ]
 
 type R = [name: string, title: string, group: string, description: string]

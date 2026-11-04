@@ -187,6 +187,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Giant robot at dusk</b> (<code>mech</code>) — searchlights sweep a sunset over a city of lit windows; a huge mech strides across, every step shaking the ground and flushing pigeons, then turns its glowing eyes to you and waves.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/black-hole.gif" alt="Event horizon show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Event horizon</b> (<code>black-hole</code>) — a black hole's accretion disk swirls, lensed into a halo over its shadow and fed by a companion star; a tiny probe is caught, spirals in, stretches into a streak and vanishes in a flash that fires jets from the poles.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
