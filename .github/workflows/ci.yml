@@ -48,7 +48,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev
+      # The simulator's window libraries, cached between runs.
+      - uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libxkbcommon-dev libwayland-dev libx11-dev
+          version: 1
       - run: cargo clippy --workspace --all-targets --features sim,pi -- -D warnings
       - run: cargo clippy --no-default-features --features pi -- -D warnings
       - run: cargo clippy --no-default-features --features sim -- -D warnings

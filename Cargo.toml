@@ -3,7 +3,7 @@ members = ["crates/core", "crates/render", "crates/display", "crates/sources", "
 resolver = "2"
 
 [workspace.package]
-version = "0.15.1"
+version = "0.15.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/silkepilon/RackScreen"
@@ -51,3 +51,38 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Everything but the drawing path is network glue that runs a few times a
+# minute: optimise it for size. Fewer code pages resident on the Pi, and a
+# faster release build.
+[profile.release.package."*"]
+opt-level = "s"
+
+[profile.release.package.rackscreen-core]
+opt-level = 3
+[profile.release.package.rackscreen-render]
+opt-level = 3
+[profile.release.package.rackscreen-display]
+opt-level = 3
+[profile.release.package.rackscreen-app]
+opt-level = 3
+[profile.release.package.tiny-skia]
+opt-level = 3
+[profile.release.package.tiny-skia-path]
+opt-level = 3
+[profile.release.package.fontdue]
+opt-level = 3
+[profile.release.package.lz4_flex]
+opt-level = 3
+[profile.release.package.gif]
+opt-level = 3
+[profile.release.package.weezl]
+opt-level = 3
+[profile.release.package.rppal]
+opt-level = 3
+[profile.release.package.rackscreen-sources]
+opt-level = "s"
+[profile.release.package.rackscreen-web]
+opt-level = "s"
+[profile.release.package.rackscreen-ops]
+opt-level = "s"

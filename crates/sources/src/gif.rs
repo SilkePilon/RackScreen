@@ -681,7 +681,8 @@ mod tests {
             assert!(g.frame(i).chunks(4).all(|p| p[3] == 255), "opaque");
         }
         // 80x60 scales by 4 to 320x240; 40 px go each side, with the red bars
-        for y in [2, 120, 200] {
+        // (sampled inside the round panel: packing blacks out the corners)
+        for y in [110, 120, 130] {
             assert!(
                 near(px(&g, 0, 0, y), [40, 60, 160]),
                 "{:?}",
@@ -711,7 +712,8 @@ mod tests {
         );
         let g = decode(&bytes).unwrap();
         assert_eq!(g.len(), 4);
-        let (tl, br, tr) = ((10, 10), (230, 230), (230, 10));
+        // inside the round panel; packing blacks out the corners
+        let (tl, br, tr) = ((45, 45), (195, 195), (195, 45));
         let at = |i: usize, (x, y): (u32, u32)| px(&g, i, x, y);
         assert!(near(at(1, tl), [0, 255, 0]));
         assert!(near(at(1, br), [255, 0, 0]));
@@ -773,12 +775,12 @@ mod tests {
             ],
         );
         let g = decode(&bytes).unwrap();
-        assert!(near(px(&g, 0, 10, 10), [255, 0, 0]));
+        assert!(near(px(&g, 0, 45, 45), [255, 0, 0]));
         assert!(
-            near(px(&g, 1, 10, 10), [0, 0, 0]),
+            near(px(&g, 1, 45, 45), [0, 0, 0]),
             "the red is undone: transparent, so black"
         );
-        assert!(near(px(&g, 1, 230, 230), [0, 255, 0]));
+        assert!(near(px(&g, 1, 200, 200), [0, 255, 0]));
     }
 
     #[test]
@@ -796,12 +798,12 @@ mod tests {
         );
         let g = decode(&bytes).unwrap();
         assert_eq!(g.len(), 4);
-        assert!(near(px(&g, 1, 230, 230), [0, 0, 255]), "the part inside");
-        assert!(near(px(&g, 1, 10, 10), [255, 0, 0]));
-        assert!(near(px(&g, 2, 230, 230), [255, 0, 0]), "Previous undoes it");
-        assert!(near(px(&g, 2, 10, 10), [255, 0, 0]), "nothing drawn");
-        assert!(near(px(&g, 3, 10, 10), [255, 255, 255]));
-        assert!(near(px(&g, 3, 230, 230), [255, 0, 0]));
+        assert!(near(px(&g, 1, 200, 200), [0, 0, 255]), "the part inside");
+        assert!(near(px(&g, 1, 45, 45), [255, 0, 0]));
+        assert!(near(px(&g, 2, 200, 200), [255, 0, 0]), "Previous undoes it");
+        assert!(near(px(&g, 2, 45, 45), [255, 0, 0]), "nothing drawn");
+        assert!(near(px(&g, 3, 45, 45), [255, 255, 255]));
+        assert!(near(px(&g, 3, 200, 200), [255, 0, 0]));
     }
 
     #[test]

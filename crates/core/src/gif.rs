@@ -50,12 +50,25 @@ pub fn cap_frames<T>(frames: Vec<(T, u32)>, max: usize) -> Vec<(T, u32)> {
 }
 
 /// One opaque RGBA frame (`FRAME_BYTES`) packed for keeping: RGB565 (what
-/// the panel shows anyway), then LZ4. `unpack_into` gives it back.
+/// the panel shows anyway), corners black, then LZ4. `unpack_into` gives it
+/// back.
+/// The corners outside this radius (from the centre, in px, a pixel past
+/// the panel's edge) never show on the round panel and are packed black,
+/// which LZ4 all but drops.
+const PACK_RADIUS: f32 = GIF_SIDE as f32 / 2.0 + 1.0;
+
 pub fn pack_frame(rgba: &[u8]) -> Box<[u8]> {
     debug_assert_eq!(rgba.len(), FRAME_BYTES);
     let mut px = Vec::with_capacity(FRAME_PX * 2);
-    for p in rgba.as_chunks::<4>().0 {
-        let v = ((p[0] as u16 & 0xF8) << 8) | ((p[1] as u16 & 0xFC) << 3) | (p[2] as u16 >> 3);
+    let c = GIF_SIDE as f32 / 2.0;
+    for (i, p) in rgba.as_chunks::<4>().0.iter().enumerate() {
+        let (x, y) = ((i as u32 % GIF_SIDE) as f32, (i as u32 / GIF_SIDE) as f32);
+        let (dx, dy) = (x + 0.5 - c, y + 0.5 - c);
+        let v = if dx * dx + dy * dy > PACK_RADIUS * PACK_RADIUS {
+            0
+        } else {
+            ((p[0] as u16 & 0xF8) << 8) | ((p[1] as u16 & 0xFC) << 3) | (p[2] as u16 >> 3)
+        };
         px.extend_from_slice(&v.to_le_bytes());
     }
     lz4_flex::block::compress(&px).into_boxed_slice()
@@ -386,7 +399,11 @@ mod tests {
         assert_eq!(g.frame(1)[0], 0, "2 is below RGB565's red step");
         assert_eq!(g.delay_ms(1), 50);
         let g = GifFrames::new(vec![(frame(0xff), 100)]).unwrap();
-        assert_eq!(g.frame(0), frame(0xff));
+        let f = g.frame(0);
+        let at = |x: usize, y: usize| &f[(y * GIF_SIDE as usize + x) * 4..][..4];
+        assert_eq!(at(120, 120), [255; 4], "inside the panel: as given");
+        assert_eq!(at(119, 0), [255; 4], "the top edge shows");
+        assert_eq!(at(0, 0), [0, 0, 0, 255], "a corner the panel hides: black");
     }
 
     #[test]
