@@ -223,4 +223,17 @@ mod tests {
         cfg.weather.enabled = true;
         assert_eq!(needs(&cfg, Role::Weather), None);
     }
+
+    /// The Screens page shows `web/public/roles/<name>.webp` for every
+    /// built-in role; `scripts/role-previews.sh` makes them from the goldens.
+    #[test]
+    fn every_role_has_a_web_preview() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public/roles");
+        let missing: Vec<_> = Role::ALL
+            .iter()
+            .map(|r| r.name())
+            .filter(|n| !dir.join(format!("{n}.webp")).is_file())
+            .collect();
+        assert!(missing.is_empty(), "no preview for {missing:?}: run scripts/role-previews.sh");
+    }
 }

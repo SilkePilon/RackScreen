@@ -45,7 +45,7 @@ export function PanelMirror({
     <div
       className={cn(
         "relative aspect-square w-full rounded-full p-[5%]",
-        "bg-[radial-gradient(circle_at_30%_20%,#2a2a2e,#0c0c0e_60%)] shadow-[inset_0_1px_0_rgba(255,255,255,.08),0_10px_30px_-10px_rgba(0,0,0,.8)]",
+        "bg-[radial-gradient(circle_at_30%_20%,#2a2a2e,#0c0c0e_60%)] shadow-[inset_0_1px_0_rgba(255,255,255,.08)]",
         className
       )}
       role="img"

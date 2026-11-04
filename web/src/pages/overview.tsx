@@ -64,7 +64,7 @@ function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
     (role) => `Screen ${s.index + 1} → ${roleLabel(role, roles.data)}`,
   )
   return (
-    <div className="group flex min-w-0 flex-col items-center gap-3 sm:gap-4">
+    <div className="flex min-w-0 flex-col items-center gap-3 sm:gap-4">
       <PanelMirror
         screen={s.index}
         cycle={{
@@ -74,7 +74,7 @@ function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
           cycleSecs: s.cycle_secs,
           at: sampledAt,
         }}
-        className="max-w-[220px] transition-transform duration-500 ease-out group-hover:scale-[1.015]"
+        className="max-w-[220px]"
       />
       <div className="flex w-full flex-col items-center gap-1">
         <span className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase tabular">

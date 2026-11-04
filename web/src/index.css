@@ -160,6 +160,9 @@
     scrollbar-width: thin;
     scrollbar-color: var(--input) transparent;
   }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
 }
 
 /* A setting row the command palette jumped to. */
