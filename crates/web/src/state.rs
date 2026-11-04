@@ -46,6 +46,8 @@ pub struct AppState {
     pub port: u16,
     /// Recent GIPHY/Tenor answers.
     pub gif_cache: crate::gif_search::SearchCache,
+    /// The previous CPU reading, for the usage on the System page.
+    pub cpu_sampler: Mutex<crate::system::CpuSampler>,
 }
 
 impl AppState {
@@ -63,6 +65,9 @@ impl AppState {
     ) -> AppState {
         let screens = hub.frames.screens();
         let update = UpdateState::load(update_file, hub.version);
+        // a first reading now, so the first poll already has a window
+        let mut cpu = crate::system::CpuSampler::default();
+        crate::system::sample_cpu(&mut cpu);
         AppState {
             hub,
             sessions: Mutex::new(HashMap::new()),
@@ -74,6 +79,7 @@ impl AppState {
             config_lock: tokio::sync::Mutex::new(()),
             port,
             gif_cache: Default::default(),
+            cpu_sampler: Mutex::new(cpu),
         }
     }
 

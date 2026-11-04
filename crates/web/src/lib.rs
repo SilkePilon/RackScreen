@@ -15,6 +15,7 @@ pub mod spotify;
 pub mod state;
 pub mod static_files;
 pub mod status;
+pub mod system;
 pub mod update;
 
 use std::net::SocketAddr;
@@ -90,6 +91,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/control/play", post(control::play))
         .route("/control/night", post(control::night))
         .route("/control/restart", post(control::restart))
+        .route("/system", get(system::system))
         .route("/gifs/providers", get(gif_search::providers))
         .route("/gifs/search", get(gif_search::search))
         .route("/gifs/trending", get(gif_search::trending))

@@ -74,22 +74,31 @@ pub fn is_virtual_interface(name: &str) -> bool {
     .any(|p| name.starts_with(p))
 }
 
-/// `http://<ip>:<port>` for every non-loopback IPv4 address on a real
-/// interface, sorted.
-pub fn addresses(port: u16) -> Vec<String> {
-    let mut out: Vec<String> = match nix::ifaddrs::getifaddrs() {
+/// `(interface, address)` for every non-loopback, non-link-local IPv4
+/// address on a real interface, sorted.
+pub fn ipv4_interfaces() -> Vec<(String, std::net::Ipv4Addr)> {
+    let mut out: Vec<(String, std::net::Ipv4Addr)> = match nix::ifaddrs::getifaddrs() {
         Ok(addrs) => addrs
             .filter(|a| !is_virtual_interface(&a.interface_name))
             .filter_map(|a| {
-                let sa = a.address?;
-                let v4 = sa.as_sockaddr_in()?;
-                let ip = v4.ip();
+                let ip = a.address?.as_sockaddr_in()?.ip();
                 (!ip.is_loopback() && !ip.is_link_local() && !ip.is_unspecified())
-                    .then(|| format!("http://{ip}:{port}"))
+                    .then_some((a.interface_name, ip))
             })
             .collect(),
         Err(_) => Vec::new(),
     };
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// `http://<ip>:<port>` for every address of `ipv4_interfaces`, sorted.
+pub fn addresses(port: u16) -> Vec<String> {
+    let mut out: Vec<String> = ipv4_interfaces()
+        .into_iter()
+        .map(|(_, ip)| format!("http://{ip}:{port}"))
+        .collect();
     out.sort();
     out.dedup();
     out
