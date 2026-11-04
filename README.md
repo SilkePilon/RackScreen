@@ -248,6 +248,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Balloon festival</b> (<code>balloons</code>) — a misty summer dawn over a river valley; patterned hot-air balloons inflate on the meadow, burners flaring, and drift off at their own heights; the last one up has a dog in the basket, who snatches a farm's washing line on the way past and flies off dressed in laundry bunting while the farmer shakes a fist.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/rooftop-cat.gif" alt="Rooftop cat show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Rooftop cat</b> (<code>rooftop-cat</code>) — night over the city roofs, windows winking on and off and a neon fish buzzing; a ginger cat chases a moth roof to roof across the screens, nearly falls and hangs from a ledge, then leaps past the moon onto the water tower, whose hatch drops it in with a splash; a soggy head pops out and the moth settles on it.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

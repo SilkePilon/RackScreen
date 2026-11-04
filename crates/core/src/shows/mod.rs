@@ -21,6 +21,7 @@ mod mech;
 mod moon_landing;
 mod paper_plane;
 mod pirates;
+mod rooftop_cat;
 pub mod schedule;
 mod scifi;
 mod space;
@@ -220,6 +221,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: balloons::SECS,
         draw: balloons::draw,
     },
+    ShowDef {
+        id: "rooftop-cat",
+        name: "Rooftop cat",
+        secs: rooftop_cat::SECS,
+        draw: rooftop_cat::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -291,6 +298,7 @@ mod tests {
                 ("black-hole", "Event horizon", 10.0),
                 ("lighthouse", "Lighthouse keeper", 12.0),
                 ("balloons", "Balloon festival", 12.0),
+                ("rooftop-cat", "Rooftop cat", 12.0),
             ]
         );
     }

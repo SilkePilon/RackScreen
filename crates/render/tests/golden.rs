@@ -1587,6 +1587,8 @@ fn show_batch_d() {
         ("lighthouse", 11.5, "show_lighthouse_toll"),
         ("balloons", 4.4, "show_balloons_launch"),
         ("balloons", 11.5, "show_balloons_bunting"),
+        ("rooftop-cat", 9.0, "show_rooftop_cat_moon"),
+        ("rooftop-cat", 11.5, "show_rooftop_cat_soggy"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));
