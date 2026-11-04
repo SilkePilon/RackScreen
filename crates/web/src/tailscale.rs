@@ -37,6 +37,9 @@ pub const AUTH_URL_WAIT: Duration = Duration::from_secs(10);
 /// How long a browser login's `tailscale up` may wait for the user before
 /// it is killed.
 pub const LOGIN_TTL: Duration = Duration::from_secs(5 * 60);
+/// How long a `tailscale version` answer is reused (the page polls every
+/// few seconds; the version only changes with an install or update).
+pub const VERSION_CACHE: Duration = Duration::from_secs(5 * 60);
 
 /// Why every Tailscale action is refused while `web.password` is empty.
 pub const NEEDS_PASSWORD: &str =
@@ -284,6 +287,17 @@ pub struct SetupJob {
     pub log: Vec<String>,
 }
 
+/// What `tailscale version` told.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Installed {
+    /// No `tailscale` program.
+    No,
+    /// It ran; its version when it said one.
+    Yes(Option<String>),
+    /// It is there but could not be started (permissions, ...): why.
+    Unknown(String),
+}
+
 pub struct TsState {
     pub runner: Arc<dyn Runner>,
     /// The user this process runs as (who must be Tailscale's operator).
@@ -291,6 +305,8 @@ pub struct TsState {
     /// `web.bind`: `tailscale serve` can only proxy to 127.0.0.1.
     pub bind: Mutex<String>,
     can_setup: Mutex<Option<(Instant, bool)>>,
+    /// The last `tailscale version` of an installed Tailscale.
+    version: Mutex<Option<(Instant, Option<String>)>>,
     pub job: Arc<Mutex<SetupJob>>,
     /// The `tailscale up` of a browser login that is waiting for the user,
     /// tagged with the generation that started it.
@@ -309,12 +325,44 @@ impl TsState {
             user,
             bind: Mutex::new("0.0.0.0".into()),
             can_setup: Mutex::new(None),
+            version: Mutex::new(None),
             job: Arc::default(),
             login: Mutex::new(None),
             login_gen: AtomicU64::new(0),
             login_lock: tokio::sync::Mutex::new(()),
             login_ttl: Mutex::new(LOGIN_TTL),
         }
+    }
+
+    /// Whether Tailscale is installed, and its version (cached for
+    /// `VERSION_CACHE` once installed).
+    pub async fn installed(&self) -> Installed {
+        if let Some((t, v)) = self.version.lock().unwrap().clone() {
+            if t.elapsed() < VERSION_CACHE {
+                return Installed::Yes(v);
+            }
+        }
+        match self.ts(&["version"], TIMEOUT).await {
+            Ok(o) => {
+                let v = o
+                    .stdout
+                    .lines()
+                    .next()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty());
+                if o.success() {
+                    *self.version.lock().unwrap() = Some((Instant::now(), v.clone()));
+                }
+                Installed::Yes(v)
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Installed::No,
+            Err(e) => Installed::Unknown(scrub_keys(&format!("cannot run tailscale: {e}"))),
+        }
+    }
+
+    /// Ask `tailscale version` again next time (after an install).
+    pub fn forget_version(&self) {
+        *self.version.lock().unwrap() = None;
     }
 
     /// Keep `bg` as the waiting login (killing any older one); its generation.
@@ -874,18 +922,21 @@ pub async fn view(state: &AppState) -> TailscaleView {
         password_set: state.login_required(),
         ..TailscaleView::default()
     };
-    let (version, can_setup) = tokio::join!(ts.ts(&["version"], TIMEOUT), ts.can_setup());
+    let (installed, can_setup) = tokio::join!(ts.installed(), ts.can_setup());
     v.can_setup = can_setup;
-    match version {
-        Err(_) => return v,
-        Ok(o) => {
+    match installed {
+        Installed::No => return v,
+        Installed::Yes(version) => {
             v.installed = true;
-            v.version = o
-                .stdout
-                .lines()
-                .next()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty());
+            v.version = version;
+        }
+        // Only a missing program means "not installed"; anything else is
+        // a problem to show, not a reason to offer the install.
+        Installed::Unknown(why) => {
+            v.installed = true;
+            v.error = Some(why.clone());
+            v.status.health = vec![why];
+            return v;
         }
     }
     let (status, prefs, serve) = tokio::join!(
@@ -963,6 +1014,8 @@ pub async fn post_setup(State(state): State<Arc<AppState>>) -> ApiResult<Value> 
     // the sudo answer may change with this run (it does not, but the
     // cached "no" should not outlive a fresh install of the drop-in)
     *ts.can_setup.lock().unwrap() = None;
+    ts.forget_version();
+    let st = state.clone();
     tokio::spawn(async move {
         let args = ["-n", BINARY, "tailscale-setup"].map(String::from);
         let result = runner.stream("sudo", &args, sink).await;
@@ -988,6 +1041,8 @@ pub async fn post_setup(State(state): State<Arc<AppState>>) -> ApiResult<Value> 
                 JobState::Failed
             }
         };
+        // it may have installed (or updated) Tailscale
+        st.tailscale.forget_version();
         job.lock().unwrap().state = state;
     });
     Ok(Json(json!({ "ok": true })))
@@ -1055,13 +1110,10 @@ pub async fn login(
             .ok()
             .and_then(|o| parse_prefs(&o.stdout))
             .unwrap_or_default();
-        let version = ts.ts(&["version"], TIMEOUT).await.ok().and_then(|o| {
-            o.stdout
-                .lines()
-                .next()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-        });
+        let version = match ts.installed().await {
+            Installed::Yes(v) => v,
+            _ => None,
+        };
         // kept until `up` is done, then removed (on every path out)
         let key_file;
         let mut args = vec!["up".to_string()];
@@ -1281,6 +1333,8 @@ pub struct FakeRunner {
     /// What a spawned background command printed.
     pub spawn_output: Mutex<String>,
     pub missing: Mutex<bool>,
+    /// Make starting `tailscale` fail with this (other than NotFound).
+    pub start_error: Mutex<Option<io::ErrorKind>>,
     /// Every `--auth-key=file:` seen: its path, what it held and the modes
     /// of the file and its directory, read while the command "ran".
     pub key_files: Mutex<Vec<KeyFileSeen>>,
@@ -1345,6 +1399,11 @@ impl FakeRunner {
         self.calls.lock().unwrap().push(shown);
         if prog == "tailscale" && *self.missing.lock().unwrap() {
             return Err(io::Error::new(io::ErrorKind::NotFound, "no tailscale"));
+        }
+        if let Some(kind) = *self.start_error.lock().unwrap() {
+            if prog == "tailscale" {
+                return Err(io::Error::new(kind, "cannot start tailscale"));
+            }
         }
         Ok(line)
     }

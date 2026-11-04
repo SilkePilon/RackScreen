@@ -1079,6 +1079,7 @@ async fn tailscale_login_validates_and_never_echoes_the_key() {
 
     // a Tailscale too old for `file:` gets it on the command line
     r.respond("tailscale version", TsOut::ok("1.20.4\n"));
+    f.state.tailscale.forget_version();
     r.respond("tailscale up", TsOut::ok(""));
     send(
         &f.app,
@@ -1416,4 +1417,31 @@ async fn tailscale_serve_leaves_someone_elses_https_443_alone() {
         .calls()
         .iter()
         .all(|c| !c.starts_with("tailscale serve --")));
+}
+
+#[tokio::test]
+async fn tailscale_version_is_cached_and_only_a_missing_program_is_not_installed() {
+    let r = running_runner();
+    let f = ts_fixture(r.clone());
+    for _ in 0..3 {
+        let (_, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
+        assert_eq!(b["version"], "1.90.6");
+    }
+    let asked = r
+        .calls()
+        .iter()
+        .filter(|c| *c == "tailscale version")
+        .count();
+    assert_eq!(asked, 1, "cached");
+
+    // it is there, but cannot be started: say so instead of offering an install
+    let r = running_runner();
+    *r.start_error.lock().unwrap() = Some(std::io::ErrorKind::PermissionDenied);
+    let f = ts_fixture(r);
+    let (st, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(b["installed"], true);
+    let health = b["health"][0].as_str().unwrap();
+    assert!(health.contains("cannot run tailscale"), "{b}");
+    assert_eq!(b["error"], health);
 }

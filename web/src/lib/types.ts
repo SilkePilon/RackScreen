@@ -361,6 +361,7 @@ export interface GifMemory {
   fits_more: number | null
 }
 
+/** The states the page knows; a newer Tailscale may report others. */
 export type TailscaleBackendState =
   | "NoState"
   | "NeedsLogin"
@@ -368,6 +369,7 @@ export type TailscaleBackendState =
   | "Starting"
   | "Running"
   | "Stopped"
+  | (string & {})
 
 export interface TailscaleDevice {
   hostname: string
