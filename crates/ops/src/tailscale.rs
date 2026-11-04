@@ -6,14 +6,33 @@
 
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::shell::Shell;
 
-/// The official installer, run by bash so a failed download fails the
-/// pipeline instead of feeding `sh` an empty script.
-pub const INSTALL_SCRIPT: &str =
-    "set -euo pipefail; exec 2>&1; curl -fsSL --retry 2 --max-time 120 https://tailscale.com/install.sh | sh";
+/// The official installer. It is downloaded to a file first (https only,
+/// also on redirects, TLS 1.2 or newer) and run only once the download
+/// finished, so a cut-off download never runs half a script.
+pub const INSTALL_URL: &str = "https://tailscale.com/install.sh";
+
+/// `curl` arguments that save the installer to `dest`.
+pub fn download_args(dest: &str) -> Vec<&str> {
+    vec![
+        "-fsSL",
+        "--proto",
+        "=https",
+        "--proto-redir",
+        "=https",
+        "--tlsv1.2",
+        "--retry",
+        "2",
+        "--max-time",
+        "120",
+        "-o",
+        dest,
+        INSTALL_URL,
+    ]
+}
 
 /// A user name we are willing to hand to `tailscale set --operator=`.
 pub fn valid_user(user: &str) -> bool {
@@ -45,21 +64,7 @@ impl Setup<'_> {
                 say(
                     "Installing Tailscale with the official installer (this takes a minute or two)",
                 );
-                let mut failed_download = false;
-                let ok = self
-                    .sh
-                    .run_streaming("bash", &["-c", INSTALL_SCRIPT], &mut |l| {
-                        if l.starts_with("curl:") {
-                            failed_download = true;
-                        }
-                        say(l);
-                    })?;
-                if !ok {
-                    if failed_download {
-                        bail!("could not download the Tailscale installer; is the Pi online?");
-                    }
-                    bail!("the Tailscale installer failed (see above)");
-                }
+                self.install(say)?;
                 match self.version() {
                     Some(v) => say(&format!("Installed Tailscale {v}")),
                     None => bail!("the installer finished but `tailscale` is still missing"),
@@ -86,6 +91,31 @@ impl Setup<'_> {
             last = format!("{}{}", out.stderr.trim(), out.stdout.trim());
         }
         bail!("tailscale set {operator} failed: {last}")
+    }
+
+    /// Download the official installer into a fresh directory only root
+    /// can enter, run it, and remove the directory (also on errors).
+    fn install(&self, say: &mut dyn FnMut(&str)) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::Builder::new()
+            .prefix("rackscreen-tailscale-")
+            .tempdir()
+            .context("create a directory for the Tailscale installer")?;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))?;
+        let script = dir.path().join("install.sh");
+        let script = script.to_str().context("temp path is not UTF-8")?;
+        say(&format!("Downloading {INSTALL_URL}"));
+        let out = self.sh.run("curl", &download_args(script))?;
+        if !out.success() {
+            bail!(
+                "could not download the Tailscale installer; is the Pi online? ({})",
+                out.stderr.trim()
+            );
+        }
+        if !self.sh.run_streaming("sh", &[script], &mut |l| say(l))? {
+            bail!("the Tailscale installer failed (see above)");
+        }
+        Ok(())
     }
 
     /// `tailscale version`'s first line, None when it is not installed.
@@ -119,7 +149,10 @@ mod tests {
         );
         let mut log = Vec::new();
         setup(&sh).run(&mut |l| log.push(l.to_string())).unwrap();
-        assert!(!sh.called("bash"), "no install when present");
+        assert!(
+            !sh.called("curl") && !sh.called("sh "),
+            "no install when present"
+        );
         assert!(sh.called("systemctl enable --now tailscaled"));
         assert!(sh.called("tailscale set --operator=silke"));
         assert_eq!(log[0], "Tailscale 1.90.0 is installed");
@@ -129,11 +162,39 @@ mod tests {
     fn a_missing_tailscale_is_installed_and_offline_fails_cleanly() {
         let sh = FakeShell::new();
         sh.respond("tailscale version", Output::fail(127, ""));
-        sh.respond("bash", Output::fail(6, "curl: (6) Could not resolve host"));
+        sh.respond("curl", Output::fail(6, "curl: (6) Could not resolve host"));
         let e = setup(&sh).run(&mut |_| {}).unwrap_err().to_string();
         assert!(e.contains("is the Pi online"), "{e}");
-        assert!(sh.called(&format!("bash -c {INSTALL_SCRIPT}")));
+        assert!(!sh.called("sh "), "nothing runs without a full download");
         assert!(!sh.called("systemctl"));
+    }
+
+    #[test]
+    fn the_installer_is_downloaded_over_https_to_a_private_file_then_run() {
+        let sh = FakeShell::new();
+        sh.respond("tailscale version", Output::fail(127, ""));
+        let _ = setup(&sh).run(&mut |_| {});
+        let calls = sh.calls();
+        let curl = calls.iter().find(|c| c.starts_with("curl ")).unwrap();
+        assert!(
+            curl.starts_with("curl -fsSL --proto =https --proto-redir =https --tlsv1.2 "),
+            "{curl}"
+        );
+        assert!(
+            curl.ends_with(" https://tailscale.com/install.sh"),
+            "{curl}"
+        );
+        let dest = curl
+            .split(" -o ")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap();
+        assert!(dest.ends_with("/install.sh"), "{dest}");
+        assert!(calls.contains(&format!("sh {dest}")), "{calls:?}");
+        let dir = std::path::Path::new(dest).parent().unwrap();
+        assert!(!dir.exists(), "the download is removed afterwards");
     }
 
     #[test]
