@@ -316,7 +316,7 @@ export default function Logs() {
               <div
                 key={l.seq}
                 className={cn(
-                  "flex gap-3 px-4 whitespace-pre-wrap hover:bg-accent/40",
+                  "flex flex-wrap gap-x-3 px-4 whitespace-pre-wrap hover:bg-accent/40 max-sm:py-1 sm:flex-nowrap",
                   l.level === "ERROR" && "bg-destructive/[0.06]",
                   l.level === "WARN" && "bg-warning/[0.04]",
                 )}
@@ -326,7 +326,7 @@ export default function Logs() {
                 <span className="hidden w-40 shrink-0 truncate text-muted-foreground lg:inline" title={l.target}>
                   {shortTarget(l.target)}
                 </span>
-                <span className="min-w-0 flex-1 break-words text-foreground/90">
+                <span className="min-w-0 flex-1 break-words text-foreground/90 max-sm:basis-full">
                   <Highlight text={l.msg} q={q} />
                 </span>
               </div>

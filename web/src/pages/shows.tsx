@@ -115,7 +115,7 @@ function PanelOrder({ muted }: { muted?: boolean }) {
         modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
       >
         <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
-          <ol className="flex w-full max-w-md gap-3" aria-label="Screens from left to right">
+          <ol className="flex w-full max-w-md gap-2 sm:gap-3" aria-label="Screens from left to right">
             {order.map((s, pos) => (
               <OrderChip key={s} screen={s} position={pos} />
             ))}
@@ -132,7 +132,7 @@ function OrderChip({ screen, position }: { screen: number; position: number }) {
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("flex-1", isDragging && "z-10")}
+      className={cn("min-w-0 flex-1", isDragging && "z-10")}
     >
       <button
         type="button"
@@ -140,12 +140,12 @@ function OrderChip({ screen, position }: { screen: number; position: number }) {
         {...listeners}
         aria-label={`Screen ${screen + 1}, position ${position + 1} from the left`}
         className={cn(
-          "flex w-full cursor-grab touch-none flex-col items-center gap-2 rounded-xl border bg-background/40 p-3 transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:cursor-grabbing",
+          "flex w-full cursor-grab touch-none flex-col items-center gap-2 rounded-xl border bg-background/40 px-1 py-3 transition-colors sm:p-3 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:cursor-grabbing",
           isDragging && "bg-accent shadow-xl",
         )}
       >
         <PanelMirror thumb screen={screen} className="w-12 p-[3px]" />
-        <span className="text-xs font-medium tabular">Screen {screen + 1}</span>
+        <span className="text-[11px] font-medium whitespace-nowrap tabular sm:text-xs">Screen {screen + 1}</span>
       </button>
     </li>
   )

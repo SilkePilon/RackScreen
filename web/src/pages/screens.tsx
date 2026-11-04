@@ -138,7 +138,7 @@ function ScreenCard({ index, screen }: { index: number; screen: ScreenCfg }) {
     >
       <header className="flex flex-wrap items-center gap-4 border-b border-hairline px-5 py-4">
         <PanelMirror thumb screen={index} className="w-14 shrink-0 p-[4px]" />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-40 flex-1 flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             <h2 className="text-[15px] font-semibold tracking-tight">Screen {index + 1}</h2>
             {rolesDirty && <ResetButton onClick={() => d.reset(`${base}.roles`)} label="Reset roles to saved" />}
@@ -147,9 +147,9 @@ function ScreenCard({ index, screen }: { index: number; screen: ScreenCfg }) {
             SPI {screen.spi} · CS {screen.cs} · rotated {screen.rotate}°{screen.hflip ? " · mirrored" : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 max-sm:w-full">
           {cycleDirty && <ResetButton onClick={() => d.reset(`${base}.cycle_secs`)} />}
-          <label htmlFor={`cycle-${index}`} className="text-[13px] text-muted-foreground">
+          <label htmlFor={`cycle-${index}`} className="text-[13px] text-muted-foreground max-sm:flex-1">
             Each role
           </label>
           <NumberInput

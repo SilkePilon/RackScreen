@@ -64,7 +64,7 @@ function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
     (role) => `Screen ${s.index + 1} → ${roleLabel(role, roles.data)}`,
   )
   return (
-    <div className="group flex flex-col items-center gap-4">
+    <div className="group flex min-w-0 flex-col items-center gap-3 sm:gap-4">
       <PanelMirror
         screen={s.index}
         cycle={{
@@ -82,8 +82,8 @@ function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-sm font-medium">
-              {s.role.startsWith("gif:") ? roleLabel(s.role) : prettyTitle(s.title)}
+            <Button variant="ghost" size="sm" className="h-8 max-w-full gap-1 px-2 text-sm font-medium sm:h-7">
+              <span className="truncate">{s.role.startsWith("gif:") ? roleLabel(s.role) : prettyTitle(s.title)}</span>
               <ChevronDownIcon data-icon="inline-end" className="text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
@@ -107,7 +107,7 @@ function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <div className="flex h-5 items-center gap-1.5 text-xs text-muted-foreground tabular">
+        <div className="flex min-h-5 max-w-full items-center gap-1.5 text-center text-xs text-muted-foreground tabular">
           {s.showing !== "role" ? (
             <Badge variant="secondary" className="h-5 font-normal">
               {SHOWING[s.showing]}
@@ -136,7 +136,7 @@ function Panels() {
       ? order.map((i) => screens[i]).filter(Boolean)
       : screens
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-10 rounded-2xl border bg-card px-6 py-8 sm:px-8 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-x-4 gap-y-8 rounded-2xl border bg-card px-4 py-6 sm:gap-x-6 sm:gap-y-10 sm:px-8 sm:py-8 lg:grid-cols-4">
       {ordered
         ? ordered.map((s) => <PanelCard key={s.index} s={s} sampledAt={(status.data?.received ?? 0) - (status.data?.age_ms ?? 0)} />)
         : Array.from({ length: 4 }, (_, i) => (
@@ -267,7 +267,7 @@ function Tiles() {
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-hairline sm:grid-cols-3">
       {tiles
         ? tiles.map((t) => (
-            <div key={t.key} className="flex flex-col gap-2 bg-card px-5 py-4">
+            <div key={t.key} className="flex min-w-0 flex-col gap-2 bg-card px-5 py-4 max-sm:last:odd:col-span-2">
               <span className={cn("text-[13px]", TONE[t.tone])}>
                 {t.label}
               </span>
@@ -303,7 +303,7 @@ function Links() {
         ? links.map((l) => (
             <div key={l.name} className="flex items-center gap-3 px-5 py-3">
               <span className="sr-only">{LINK[l.state].label}:</span>
-              <span className={cn("text-sm font-medium", LINK[l.state].text)}>{l.name}</span>
+              <span className={cn("shrink-0 text-sm font-medium", LINK[l.state].text)}>{l.name}</span>
               <span className="ml-auto truncate text-right text-[13px] text-muted-foreground">{l.detail}</span>
             </div>
           ))
@@ -342,9 +342,9 @@ function Host() {
     <SettingsCard>
       {d
         ? rows.map(([k, v]) => (
-            <div key={k} className="flex items-center justify-between gap-4 px-5 py-3">
-              <span className="text-sm text-muted-foreground">{k}</span>
-              <span className="truncate text-[13px] text-foreground tabular">{v}</span>
+            <div key={k} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 px-5 py-3 sm:flex-nowrap">
+              <span className="shrink-0 text-sm text-muted-foreground">{k}</span>
+              <span className="ml-auto min-w-0 text-right text-[13px] text-foreground tabular sm:truncate">{v}</span>
             </div>
           ))
         : Array.from({ length: 5 }, (_, i) => (
