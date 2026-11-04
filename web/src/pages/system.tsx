@@ -48,12 +48,17 @@ import { useDraft } from "@/lib/draft"
 import { announceSave } from "@/lib/restart"
 import { keys, useAuth, useControl, useInfo, useStatus, useUpdate } from "@/lib/queries"
 
+import { ThisPi } from "@/pages/system-pi"
+
 const YamlEditor = React.lazy(() => import("@/components/yaml-editor"))
 
 export default function System() {
   return (
     <PageBody>
-      <PageIntro title="System">Version and updates, who can open this page, and the config file itself.</PageIntro>
+      <PageIntro title="System">
+        The Pi itself, version and updates, who can open this page, and the config file itself.
+      </PageIntro>
+      <ThisPi />
       <UpdateSection />
       <WebAccess />
       <Appearance />

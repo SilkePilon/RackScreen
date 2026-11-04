@@ -40,7 +40,7 @@ export function CopyButton({
     <Button
       type="button"
       variant={variant}
-      size={iconOnly ? "icon-sm" : size}
+      size={iconOnly ? (size === "icon-xs" ? "icon-xs" : "icon-sm") : size}
       aria-label={iconOnly ? label : undefined}
       onClick={async () => {
         if (await copyText(text)) {
