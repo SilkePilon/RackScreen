@@ -1585,6 +1585,8 @@ fn show_batch_d() {
     for (id, t, name) in [
         ("lighthouse", 5.0, "show_lighthouse_found"),
         ("lighthouse", 11.5, "show_lighthouse_toll"),
+        ("balloons", 4.4, "show_balloons_launch"),
+        ("balloons", 11.5, "show_balloons_bunting"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));

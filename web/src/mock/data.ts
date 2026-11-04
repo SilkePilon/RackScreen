@@ -28,6 +28,7 @@ export const SHOWS: ShowInfo[] = [
   { id: "mech", title: "Giant robot at dusk" },
   { id: "black-hole", title: "Event horizon" },
   { id: "lighthouse", title: "Lighthouse keeper" },
+  { id: "balloons", title: "Balloon festival" },
 ]
 
 type R = [name: string, title: string, group: string, description: string]

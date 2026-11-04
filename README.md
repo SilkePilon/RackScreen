@@ -241,6 +241,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Lighthouse keeper</b> (<code>lighthouse</code>) — a stormy night over rolling, spray-torn swells; the lighthouse beam sweeps every screen, lighting the rain, finds a little fishing boat lost in the waves and holds it all the way in, and the keeper's cat lowers a bucket from the gallery to collect its fish.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/balloons.gif" alt="Balloon festival show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Balloon festival</b> (<code>balloons</code>) — a misty summer dawn over a river valley; patterned hot-air balloons inflate on the meadow, burners flaring, and drift off at their own heights; the last one up has a dog in the basket, who snatches a farm's washing line on the way past and flies off dressed in laundry bunting while the farmer shakes a fist.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

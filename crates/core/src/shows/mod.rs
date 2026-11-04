@@ -4,6 +4,7 @@
 
 mod alpine;
 mod aurora;
+mod balloons;
 mod birds;
 mod black_hole;
 mod caravan;
@@ -213,6 +214,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: lighthouse::SECS,
         draw: lighthouse::draw,
     },
+    ShowDef {
+        id: "balloons",
+        name: "Balloon festival",
+        secs: balloons::SECS,
+        draw: balloons::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -283,6 +290,7 @@ mod tests {
                 ("mech", "Giant robot at dusk", 11.0),
                 ("black-hole", "Event horizon", 10.0),
                 ("lighthouse", "Lighthouse keeper", 12.0),
+                ("balloons", "Balloon festival", 12.0),
             ]
         );
     }
