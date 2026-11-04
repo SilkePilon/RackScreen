@@ -19,6 +19,7 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   dragon: ["#3e2462", "#d86a5e", "#c0403a", "#4a3050"],
   pirates: ["#5aa6e4", "#b8e0f4", "#f8f0dc", "#2a66a8"],
   aurora: ["#0c1430", "#1a5a6a", "#5af09a", "#d8e4f8"],
+  launch: ["#4a5a9a", "#d89a8a", "#f4f4f4", "#3a4a3a"],
 }
 
 function still(id: string, frame: number): string {

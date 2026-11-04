@@ -13,6 +13,7 @@ mod dino_chase;
 mod dragon;
 mod fireworks;
 mod freight;
+mod launch;
 mod paper_plane;
 mod pirates;
 pub mod schedule;
@@ -126,6 +127,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: aurora::SECS,
         draw: aurora::draw,
     },
+    ShowDef {
+        id: "launch",
+        name: "Lift-off",
+        secs: launch::SECS,
+        draw: launch::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -184,6 +191,7 @@ mod tests {
                 ("dragon", "Dragon over the castle", 10.0),
                 ("pirates", "Broadside", 11.0),
                 ("aurora", "Northern lights", 10.0),
+                ("launch", "Lift-off", 12.0),
             ]
         );
     }

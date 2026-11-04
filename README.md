@@ -175,6 +175,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Northern lights</b> (<code>aurora</code>) — green and violet curtains ripple over snowy peaks and a log cabin, mirrored in a frozen lake; a fox trots across the ice, sits down to watch, and a shooting star goes by.
 </p>
 
+<p align="center">
+  <b>Lift-off</b> (<code>launch</code>) — countdown lamps light up on a floodlit coastal pad at dawn, the engines ignite in billowing smoke, and the rocket climbs across the screens into space, drops its first stage and releases a tiny satellite that unfolds its solar panels.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
