@@ -30,6 +30,8 @@ export const keys = {
   update: ["update"] as const,
   system: ["system"] as const,
   gifMemory: ["gifs", "memory"] as const,
+  tailscale: ["tailscale"] as const,
+  tailscaleSetup: ["tailscale", "setup"] as const,
 }
 
 export const useAuth = () => useQuery({ queryKey: keys.auth, queryFn: api.auth, retry: false })
@@ -84,6 +86,23 @@ export const useUpdate = () =>
     queryFn: api.update,
     staleTime: 60_000,
     refetchInterval: (q) => (q.state.data?.job.state === "running" ? 1000 : 5 * 60_000),
+  })
+
+/** Tailscale; `every` ms polling (false: none, for pages that only peek). */
+export const useTailscale = (every: number | false = false) =>
+  useQuery({
+    queryKey: keys.tailscale,
+    queryFn: api.tailscale,
+    refetchInterval: every,
+    refetchIntervalInBackground: false,
+    staleTime: every === false ? 60_000 : 0,
+  })
+export const useTailscaleSetup = (running: boolean) =>
+  useQuery({
+    queryKey: keys.tailscaleSetup,
+    queryFn: api.tailscaleSetupJob,
+    refetchInterval: running ? 1000 : false,
+    staleTime: 0,
   })
 
 /** A fire-and-forget control action with a toast on success or failure. */

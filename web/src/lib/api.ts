@@ -15,6 +15,10 @@ import type {
   SpotifyState,
   Status,
   SystemInfo,
+  TailscaleLoginResult,
+  TailscaleServeResult,
+  TailscaleSetupJob,
+  TailscaleState,
   UpdateState,
 } from "@/lib/types"
 
@@ -127,6 +131,17 @@ export const api = {
 
   update: () => get<UpdateState>("/update"),
   startUpdate: () => post<unknown>("/update"),
+
+  tailscale: () => get<TailscaleState>("/tailscale"),
+  tailscaleSetupJob: () => get<TailscaleSetupJob>("/tailscale/setup"),
+  tailscaleSetup: () => post<unknown>("/tailscale/setup"),
+  tailscaleLogin: (body: { hostname?: string; auth_key?: string; ssh?: boolean }) =>
+    post<TailscaleLoginResult>("/tailscale/login", body),
+  tailscaleUp: () => post<unknown>("/tailscale/up"),
+  tailscaleDown: () => post<unknown>("/tailscale/down"),
+  tailscaleLogout: () => post<unknown>("/tailscale/logout"),
+  tailscaleSsh: (on: boolean) => post<unknown>("/tailscale/ssh", { on }),
+  tailscaleServe: (on: boolean) => post<TailscaleServeResult>("/tailscale/serve", { on }),
 }
 
 export function errorMessage(e: unknown): string {

@@ -360,3 +360,61 @@ export interface GifMemory {
   left_mb: number | null
   fits_more: number | null
 }
+
+export type TailscaleBackendState =
+  | "NoState"
+  | "NeedsLogin"
+  | "NeedsMachineAuth"
+  | "Starting"
+  | "Running"
+  | "Stopped"
+
+export interface TailscaleDevice {
+  hostname: string
+  /** MagicDNS name without the trailing dot; "" when there is none. */
+  dns_name: string
+  ips: string[]
+  os: string
+  online: boolean
+  last_seen: string | null
+  exit_node: boolean
+}
+
+export interface TailscaleState {
+  installed: boolean
+  version: string | null
+  /** The service user is Tailscale's operator (can run up/down/set without root). */
+  operator_ok: boolean
+  /** sudo allows the one-click `rackscreen tailscale-setup`. */
+  can_setup: boolean
+  backend_state: TailscaleBackendState | null
+  auth_url: string | null
+  self: TailscaleDevice | null
+  tailnet: string | null
+  user: { login: string; display_name: string } | null
+  peers: TailscaleDevice[]
+  ssh: boolean
+  serve: { on: boolean; url: string | null }
+  health: string[]
+  /** The Pi's hostname (the default device name). */
+  hostname: string
+  error: string | null
+}
+
+export interface TailscaleSetupJob {
+  state: "idle" | "running" | "done" | "failed"
+  log: string[]
+}
+
+export interface TailscaleLoginResult {
+  auth_url: string | null
+  running: boolean
+}
+
+export interface TailscaleServeResult {
+  on: boolean
+  url: string | null
+  /** HTTPS is off on the tailnet: where to turn it on. */
+  enable_url?: string
+  error?: string
+}

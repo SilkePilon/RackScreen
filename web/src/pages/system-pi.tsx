@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "react-router"
 import { AlertCircleIcon, TriangleAlertIcon, ZapIcon } from "lucide-react"
 
 import { CopyButton } from "@/components/copy-button"
@@ -7,7 +8,8 @@ import { Section, SettingsCard } from "@/components/settings"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { errorMessage } from "@/lib/api"
-import { getCpuHistory, useSystem } from "@/lib/queries"
+import { getCpuHistory, useSystem, useTailscale } from "@/lib/queries"
+import { tailscaleAddress } from "@/lib/tailscale"
 import type { SystemInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -310,6 +312,42 @@ function Facts({ s }: { s: SystemInfo }) {
           </FactRow>
         ))
       )}
+      <TailscaleFacts />
+    </>
+  )
+}
+
+/** The Pi's Tailscale address and MagicDNS name, when it is on a tailnet. */
+function TailscaleFacts() {
+  const t = useTailscale().data
+  const dns = tailscaleAddress(t)
+  if (!t?.self || !dns) return null
+  const ip = t.self.ips.find((i) => !i.includes(":"))
+  const url = t.serve.on && t.serve.url ? t.serve.url : null
+  return (
+    <>
+      {ip && (
+        <FactRow k="tailscale0">
+          <span className="tabular font-mono text-xs">{ip}</span>
+          <span className="-my-1">
+            <CopyButton text={ip} iconOnly size="icon-xs" label={`Copy ${ip}`} variant="ghost" />
+          </span>
+        </FactRow>
+      )}
+      <FactRow k="MagicDNS">
+        {url ? (
+          <a href={url} target="_blank" rel="noreferrer" className="truncate font-mono text-xs underline-offset-4 hover:underline">
+            {url}
+          </a>
+        ) : (
+          <Link to="/connections/tailscale" className="truncate font-mono text-xs underline-offset-4 hover:underline">
+            {dns}
+          </Link>
+        )}
+        <span className="-my-1">
+          <CopyButton text={url ?? dns} iconOnly size="icon-xs" label={`Copy ${url ?? dns}`} variant="ghost" />
+        </span>
+      </FactRow>
     </>
   )
 }

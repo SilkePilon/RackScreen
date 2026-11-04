@@ -15,6 +15,7 @@ import {
 
 import { PageBody } from "@/components/page"
 import { PanelMirror } from "@/components/panel-mirror"
+import { TsLogo } from "@/components/ts-logo"
 import { Segmented } from "@/components/segmented"
 import { Section, SettingsCard } from "@/components/settings"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -43,8 +44,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useDraft } from "@/lib/draft"
-import { nightLabel, useControl, useRoles, useShows, useStatus, useUpdate } from "@/lib/queries"
+import { nightLabel, useControl, useRoles, useShows, useStatus, useTailscale, useUpdate } from "@/lib/queries"
 import { prettyTitle, roleLabel } from "@/lib/roles"
+import { tailscaleAddress } from "@/lib/tailscale"
 import type { LinkState, NightMode, ScreenStatus, Tone } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -392,6 +394,25 @@ function Banners() {
   )
 }
 
+/** "Tailscale · <MagicDNS name>" when the Pi is on a tailnet. */
+function TailscaleChip() {
+  const t = useTailscale().data
+  const dns = tailscaleAddress(t)
+  if (!dns) return null
+  return (
+    <Link
+      to="/connections/tailscale"
+      className="inline-flex h-6 max-w-[16rem] items-center gap-1.5 rounded-full border bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      title={t?.serve.url ?? dns}
+    >
+      <TsLogo className="size-3.5" />
+      <span className="truncate">
+        Tailscale · <span className="font-mono">{dns.split(".")[0]}</span>
+      </span>
+    </Link>
+  )
+}
+
 export default function Overview() {
   return (
     <PageBody wide className="gap-12">
@@ -411,6 +432,7 @@ export default function Overview() {
         </Section>
         <Section
           title="This Pi"
+          action={<TailscaleChip />}
           description={
             <span className="inline-flex items-center gap-1.5">
               <CpuIcon className="size-3.5" /> Host and render timings.

@@ -9,6 +9,7 @@ import {
   LayoutGridIcon,
   MonitorIcon,
   MusicIcon,
+  NetworkIcon,
   ScrollTextIcon,
   SparklesIcon,
   SunMoonIcon,
@@ -20,7 +21,7 @@ export interface Page {
   path: string
   title: string
   /** Breadcrumb parent and sidebar group label. */
-  group: "RackScreen" | "Integrations" | "Maintenance"
+  group: "RackScreen" | "Integrations" | "Connections" | "Maintenance"
   icon: LucideIcon
   /** Extra words the command palette matches. */
   keywords?: string
@@ -39,6 +40,7 @@ export const PAGES: Page[] = [
   { path: "/integrations/spotify", title: "Spotify", group: "Integrations", icon: MusicIcon, keywords: "music login now playing" },
   { path: "/integrations/github", title: "GitHub", group: "Integrations", icon: GitBranchIcon, keywords: "token ci contributions" },
   { path: "/integrations/gifs", title: "GIFs", group: "Integrations", icon: ImagePlayIcon, keywords: "giphy tenor animation memory ram" },
+  { path: "/connections/tailscale", title: "Tailscale", group: "Connections", icon: NetworkIcon, keywords: "vpn remote access tailnet magicdns ssh https serve wireguard" },
   { path: "/logs", title: "Logs", group: "Maintenance", icon: ScrollTextIcon, keywords: "journal stream errors" },
   { path: "/system", title: "System", group: "Maintenance", icon: WrenchIcon, keywords: "update version password yaml backup restart cpu memory disk temperature voltage" },
 ]

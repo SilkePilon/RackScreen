@@ -107,7 +107,7 @@ export function AppShell() {
                 to="/"
                 className="hidden text-muted-foreground transition-colors hover:text-foreground sm:inline"
               >
-                {page?.group === "Integrations" ? "Integrations" : page?.group === "Maintenance" ? "Maintenance" : "RackScreen"}
+                {page && page.group !== "RackScreen" ? page.group : "RackScreen"}
               </Link>
               <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
                 /

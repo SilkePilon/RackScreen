@@ -99,6 +99,7 @@ export function AppSidebar({ onSearch }: { onSearch: () => void }) {
   const { isMobile } = useSidebar()
   const top = PAGES.filter((p) => p.group === "RackScreen")
   const integrations = PAGES.filter((p) => p.group === "Integrations")
+  const connections = PAGES.filter((p) => p.group === "Connections")
   const maintenance = PAGES.filter((p) => p.group === "Maintenance")
   return (
     <Sidebar collapsible={isMobile ? "offcanvas" : "none"} className="border-r border-sidebar-border">
@@ -116,6 +117,7 @@ export function AppSidebar({ onSearch }: { onSearch: () => void }) {
       <SidebarContent className="scrollbar-thin gap-3 px-1.5 pt-1">
         <NavGroup pages={top} />
         <NavGroup label="Integrations" pages={integrations} />
+        <NavGroup label="Connections" pages={connections} />
         <NavGroup label="Maintenance" pages={maintenance} />
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-2">

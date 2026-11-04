@@ -33,6 +33,7 @@ const router = createBrowserRouter([
       { path: "integrations/spotify", element: lazy(() => import("@/pages/integrations/spotify")) },
       { path: "integrations/github", element: lazy(() => import("@/pages/integrations/github")) },
       { path: "integrations/gifs", element: lazy(() => import("@/pages/integrations/gifs")) },
+      { path: "connections/tailscale", element: lazy(() => import("@/pages/connections/tailscale")) },
       { path: "logs", element: lazy(() => import("@/pages/logs")) },
       { path: "system", element: lazy(() => import("@/pages/system")) },
       { path: "*", element: lazy(() => import("@/pages/not-found")) },

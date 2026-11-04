@@ -2,7 +2,8 @@
 // and swaps the live-frame socket and log stream for local generators.
 // Handy toggles from the browser console: __mock.offline(true), __mock.login(true).
 // URL flags: ?login (password "rackscreen"), ?offline, ?update, ?nogifkeys (no GIF search keys),
-// ?undervolt (the Pi reports under-voltage).
+// ?undervolt (the Pi reports under-voltage), ?ts=missing|nosudo|setup|login|approve|running (Tailscale,
+// see mock/tailscale.ts).
 
 import { parse, stringify } from "yaml"
 
@@ -13,6 +14,7 @@ import { SECRET_PATHS } from "@/lib/types"
 import { defaultConfig, makeLog, rolesFor, ROLE_DEFS, SHOWS } from "@/mock/data"
 import { drawFrame } from "@/mock/frames"
 import "@/mock/show-cards"
+import { tailscaleRoute } from "@/mock/tailscale"
 
 const params = new URLSearchParams(location.search)
 
@@ -399,6 +401,9 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     return json(200, { ok: true })
   }
   if (state.loginRequired && !state.authenticated) return json(401, { error: "login required" })
+
+  const tsr = tailscaleRoute(method, p, b)
+  if (tsr) return json(...tsr)
 
   const now = Date.now()
   switch (`${method} ${p}`) {

@@ -113,8 +113,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               >
                 <p.icon />
                 <span>{p.title}</span>
-                {p.group === "Integrations" && (
-                  <span className="text-xs text-muted-foreground">Integrations</span>
+                {(p.group === "Integrations" || p.group === "Connections") && (
+                  <span className="text-xs text-muted-foreground">{p.group}</span>
                 )}
               </CommandItem>
             ))}
