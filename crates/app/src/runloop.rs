@@ -19,6 +19,7 @@ use rackscreen_core::p2::status::night_scene;
 use rackscreen_core::shows::schedule::{Request, ShowScheduler};
 use rackscreen_core::shows::world::Layout;
 use rackscreen_core::theme::Role;
+use rackscreen_core::transition::Transitions;
 use rackscreen_display::{DisplayCmd, Mailbox, PushStats};
 use rackscreen_render::frame::Orient;
 
@@ -314,6 +315,8 @@ pub struct RenderLoop {
     pub spotify_token: Option<PathBuf>,
     /// Only one screen may transition at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
+    /// The transition styles for role changes and shows.
+    pub transitions: Transitions,
     /// The four-screen show schedule, the world layout and the screen order.
     pub shows: ShowScheduler,
     pub show_layout: Layout,
@@ -402,6 +405,7 @@ impl RenderLoop {
         let mut model = Model::new(self.thresholds);
         model.set_screens(self.screens_roles.clone(), self.cycle_secs.clone());
         model.set_one_at_a_time(self.one_at_a_time);
+        model.set_transitions(self.transitions);
         // A fresh seed per boot, so the screens do not cycle in the same order
         // after every restart.
         model.set_rng_seed(
@@ -490,6 +494,21 @@ impl RenderLoop {
                         }
                     }
                     Control::Play(req) => apply_play(req, &mut model, phase),
+                    Control::TransitionTest { screen } => {
+                        let which = match screen {
+                            Some(i) => format!("screen {}", i + 1),
+                            None => "every screen".to_string(),
+                        };
+                        if phase != NightPhase::Day {
+                            tracing::info!("transition test dropped: night mode");
+                        } else if model.force_transition(screen, now) {
+                            tracing::info!("transition test: {which} changes role now");
+                        } else {
+                            tracing::info!(
+                                "transition test dropped: a show plays, or {which} has one role"
+                            );
+                        }
+                    }
                 }
             }
             if let Some((_, until)) = pattern {
@@ -558,11 +577,11 @@ impl RenderLoop {
             }
             if let Some((_, _)) = pattern {
                 for (i, s) in self.screens.iter().enumerate() {
-                    workers[i].send(Job {
-                        scene: crate::calibrate::test_pattern(s.index, s.role),
-                        fade: None,
+                    workers[i].send(Job::single(
+                        crate::calibrate::test_pattern(s.index, s.role),
+                        None,
                         force_full,
-                    })?;
+                    ))?;
                 }
                 force_full = false;
                 for w in &workers {
@@ -586,11 +605,7 @@ impl RenderLoop {
             // failed (`needs_full`) gets a full frame again within 500 ms.
             if prev == NightPhase::Icon && phase == NightPhase::Icon {
                 for w in &workers {
-                    w.send(Job {
-                        scene: night_scene(1.0),
-                        fade: None,
-                        force_full: false,
-                    })?;
+                    w.send(Job::single(night_scene(1.0), None, false))?;
                 }
                 for w in &workers {
                     w.wait()?;
@@ -627,16 +642,17 @@ impl RenderLoop {
 
             for (i, s) in self.screens.iter_mut().enumerate() {
                 let t = Instant::now();
-                let scene = match frame {
-                    NightFrame::Icon(a) => night_scene(a),
-                    NightFrame::Day | NightFrame::Fade(_) => model.scene(s.index, now, &mut s.ui),
+                let frame = match frame {
+                    NightFrame::Icon(a) => night_scene(a).into(),
+                    NightFrame::Day | NightFrame::Fade(_) => model.frame(s.index, now, &mut s.ui),
                 };
                 stats
                     .screen(i)
                     .build
                     .push(t.elapsed().as_secs_f32() * 1000.0);
                 workers[i].send(Job {
-                    scene,
+                    scene: frame.scene,
+                    blend: frame.blend,
                     fade,
                     force_full,
                 })?;

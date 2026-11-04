@@ -7,7 +7,8 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
-use rackscreen_core::scene::Scene;
+use rackscreen_core::scene::{Blend, Scene};
+use rackscreen_core::transition::composite;
 use rackscreen_display::Mailbox;
 use rackscreen_render::frame::{
     brightness_lut, darken, dirty_rects, new_pixmap, pack_oriented, Orient, Rect,
@@ -19,10 +20,24 @@ use crate::hub::FrameTap;
 
 pub struct Job {
     pub scene: Scene,
+    /// The incoming scene of a two-frame transition: both are rendered and
+    /// composited in the transition's style.
+    pub blend: Option<Blend>,
     /// Night fade progress, `Some(1.0)` = black.
     pub fade: Option<f32>,
     /// Push the whole frame (at start and after the night).
     pub force_full: bool,
+}
+
+impl Job {
+    pub fn single(scene: Scene, fade: Option<f32>, force_full: bool) -> Job {
+        Job {
+            scene,
+            blend: None,
+            fade,
+            force_full,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -42,9 +57,12 @@ pub struct ScreenFrames {
     cur: Pixmap,
     /// The last pushed frame, unrotated.
     prev: Pixmap,
+    /// The two sides of a transition, kept once allocated; only touched
+    /// while a two-frame style plays.
+    sides: Option<(Pixmap, Pixmap)>,
     first: bool,
-    /// Scene and fade of the last rendered frame.
-    last: Option<(Scene, Option<f32>)>,
+    /// Scene, blend and fade of the last rendered frame.
+    last: Option<(Scene, Option<Blend>, Option<f32>)>,
     /// The web UI's live view, fed only while someone watches.
     tap: Option<(usize, Arc<FrameTap>)>,
     /// A frame was rendered since the tap last got a copy.
@@ -59,6 +77,7 @@ impl ScreenFrames {
             lut: brightness_lut(brightness),
             cur: new_pixmap(),
             prev: new_pixmap(),
+            sides: None,
             first: true,
             last: None,
             tap: None,
@@ -97,8 +116,8 @@ impl ScreenFrames {
         if job.force_full | self.mailbox.take_needs_full() {
             self.first = true;
         }
-        let unchanged =
-            !self.first && matches!(&self.last, Some((s, f)) if *f == job.fade && *s == job.scene);
+        let unchanged = !self.first
+            && matches!(&self.last, Some((s, b, f)) if *f == job.fade && *s == job.scene && *b == job.blend);
         if unchanged {
             self.feed_tap();
             return Done {
@@ -107,7 +126,17 @@ impl ScreenFrames {
             };
         }
         let t = Instant::now();
-        r.render(&job.scene, &mut self.cur);
+        match &job.blend {
+            None => r.render(&job.scene, &mut self.cur),
+            Some(b) => {
+                let (from, to) = self
+                    .sides
+                    .get_or_insert_with(|| (new_pixmap(), new_pixmap()));
+                r.render(&job.scene, from);
+                r.render(&b.to, to);
+                composite(b.kind, from.data(), to.data(), self.cur.data_mut(), b.t);
+            }
+        }
         if let Some(f) = job.fade {
             darken(&mut self.cur, 1.0 - f);
         }
@@ -115,7 +144,7 @@ impl ScreenFrames {
         let t = Instant::now();
         self.flush();
         let flush_ms = t.elapsed().as_secs_f32() * 1000.0;
-        self.last = Some((job.scene, job.fade));
+        self.last = Some((job.scene, job.blend, job.fade));
         self.tap_dirty = true;
         self.feed_tap();
         Done {
@@ -245,11 +274,7 @@ mod tests {
     }
 
     fn job(s: Scene) -> Job {
-        Job {
-            scene: s,
-            fade: None,
-            force_full: false,
-        }
+        Job::single(s, None, false)
     }
 
     #[test]
@@ -274,25 +299,60 @@ mod tests {
         let mut r = Renderer::new().unwrap();
         f.run(&mut r, job(scene(50.0)));
         let _ = mb.take();
-        let d = f.run(
-            &mut r,
-            Job {
-                scene: scene(50.0),
-                fade: None,
-                force_full: true,
-            },
-        );
+        let d = f.run(&mut r, Job::single(scene(50.0), None, true));
         assert!(!d.skipped);
         assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == vec![Rect::full()]));
+        let d = f.run(&mut r, Job::single(scene(50.0), Some(0.5), false));
+        assert!(!d.skipped);
+    }
+
+    #[test]
+    fn a_blend_renders_both_scenes_and_composites() {
+        use rackscreen_core::scene::Blend;
+        use rackscreen_core::transition::{Direction, Kind, Style};
+        let mb = Mailbox::new();
+        let mut f = ScreenFrames::new(Orient::identity(), mb.clone(), 1.0);
+        let mut r = Renderer::new().unwrap();
+        let blend = |t: f32| {
+            Some(Blend {
+                to: scene(200.0),
+                kind: Kind::new(Style::Wipe, Direction::Right).unwrap(),
+                t,
+            })
+        };
+        let job = |t: f32| Job {
+            scene: scene(20.0),
+            blend: blend(t),
+            fade: None,
+            force_full: false,
+        };
+        assert!(!f.run(&mut r, job(0.5)).skipped);
+        let _ = mb.take();
+        // half way through a rightward wipe: the old rect (x 20) is covered
+        // by the new frame's black, the new rect (x 200) not yet revealed
+        fn px(f: &ScreenFrames, x: u32, y: u32) -> u8 {
+            f.prev.data()[((y * 240 + x) * 4) as usize]
+        }
+        assert_eq!(px(&f, 25, 105), 0, "old rect gone");
+        assert_eq!(px(&f, 205, 105), 0, "new rect not yet there");
+        // the same blend again is skipped; a different t is not
+        assert!(f.run(&mut r, job(0.5)).skipped);
+        assert!(!f.run(&mut r, job(0.95)).skipped);
+        let _ = mb.take();
+        assert_eq!(px(&f, 205, 105), 255, "the new rect, revealed");
+        assert_eq!(px(&f, 25, 105), 0);
+        // the night fade darkens the composite too
         let d = f.run(
             &mut r,
             Job {
-                scene: scene(50.0),
                 fade: Some(0.5),
-                force_full: false,
+                ..job(0.95)
             },
         );
         assert!(!d.skipped);
+        let _ = mb.take();
+        let v = px(&f, 205, 105);
+        assert!(v < 200 && v > 0, "{v}");
     }
 
     #[test]

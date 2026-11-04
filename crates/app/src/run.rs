@@ -179,6 +179,7 @@ impl Monitor {
             .then(crate::spotify::token_path)
             .flatten(),
             one_at_a_time: cfg.display.one_at_a_time,
+            transitions: cfg.transitions.to_core()?,
             shows: ShowScheduler::new(cfg.shows.enabled, cfg.shows.every_mins, cfg.shows.defs()),
             show_layout: Layout {
                 panels: panels.handles.len() as u32,

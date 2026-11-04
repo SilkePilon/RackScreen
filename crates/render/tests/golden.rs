@@ -827,6 +827,129 @@ fn fade_mid_transition() {
     check("fade_mid", &px);
 }
 
+/// Mid-transition frames of every style between the CPU and the memory
+/// screen (one golden per style, plus every direction of the wipe), so a
+/// change to the compositing shows up in review.
+#[test]
+fn transition_styles_mid_way() {
+    use rackscreen_core::transition::{composite, Kind, Style};
+    let m = full_model();
+    let from = render(&m, Role::Cpu, 1.0);
+    let to = render(&m, Role::Mem, 1.0);
+    let mut out = new_pixmap();
+    let mut kinds: Vec<Kind> = Style::ALL
+        .iter()
+        .filter(|s| s.uses_both_frames())
+        .map(|&s| Kind::of(s))
+        .collect();
+    kinds.extend(
+        Style::Wipe
+            .directions()
+            .iter()
+            .skip(1)
+            .map(|&d| Kind::new(Style::Wipe, d).unwrap()),
+    );
+    for k in kinds {
+        composite(k, from.data(), to.data(), out.data_mut(), 0.5);
+        let name = if k.style.directions().is_empty() {
+            format!("transition_{}", k.style.name())
+        } else {
+            format!("transition_{}_{}", k.style.name(), k.direction.name())
+        };
+        check(&name, &out);
+    }
+    // the single-scene styles go through the model: a cut shows the new
+    // role whole from half way, with nothing dimmed
+    let mut m = full_model();
+    m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
+    m.set_transitions(rackscreen_core::transition::Transitions {
+        screens: rackscreen_core::transition::Spec {
+            kind: Kind::of(Style::Cut),
+            secs: 0.4,
+        },
+        shows: None,
+        random: false,
+    });
+    let mut t = 0.0;
+    let t0 = loop {
+        m.tick(t);
+        if let Some(t0) = m.screen(0).unwrap().transition_started() {
+            break t0;
+        }
+        t += 1.0 / 30.0;
+        assert!(t < 10.0, "no transition");
+    };
+    let mut ui = ScreenUi::new();
+    let before = m.frame(0, t0 + 0.1, &mut ui);
+    assert!(before.blend.is_none());
+    assert_eq!(before.scene.fade, 1.0);
+    let after = m.frame(0, t0 + 0.3, &mut ui);
+    assert!(after.blend.is_none());
+    assert_eq!(after.scene.fade, 1.0);
+    assert_ne!(before.scene, after.scene, "cut over to the new role");
+}
+
+/// A two-frame style through the model: the frame carries both scenes
+/// and the worker's composite of them matches the pure function.
+#[test]
+fn transition_frame_carries_both_scenes() {
+    use rackscreen_core::transition::{composite, Direction, Kind, Spec, Style, Transitions};
+    let mut m = full_model();
+    m.set_screens(vec![vec![Role::Cpu, Role::Mem]], vec![3.0]);
+    let kind = Kind::new(Style::Slide, Direction::Up).unwrap();
+    m.set_transitions(Transitions {
+        screens: Spec { kind, secs: 0.5 },
+        shows: None,
+        random: false,
+    });
+    let mut t = 0.0;
+    let t0 = loop {
+        m.tick(t);
+        if let Some(t0) = m.screen(0).unwrap().transition_started() {
+            break t0;
+        }
+        t += 1.0 / 30.0;
+        assert!(t < 10.0, "no transition");
+    };
+    let mut ui = ScreenUi::new();
+    let f = m.frame(0, t0 + 0.25, &mut ui);
+    let b = f.blend.expect("two scenes");
+    assert_eq!(b.kind, kind);
+    assert!((b.t - 0.5).abs() < 1e-3, "{}", b.t);
+    assert_eq!(f.scene.fade, 1.0);
+    assert_eq!(b.to.fade, 1.0);
+    let mut r = Renderer::new().unwrap();
+    let (mut from, mut to, mut out) = (new_pixmap(), new_pixmap(), new_pixmap());
+    r.render(&f.scene, &mut from);
+    r.render(&b.to, &mut to);
+    composite(kind, from.data(), to.data(), out.data_mut(), b.t);
+    // the top half is the lower half of the cpu screen, the bottom half the
+    // upper half of the memory screen
+    fn row(p: &Pixmap, y: usize) -> &[u8] {
+        &p.data()[y * 240 * 4..(y + 1) * 240 * 4]
+    }
+    for y in 0..120 {
+        assert!(
+            row(&out, y) == row(&from, y + 120),
+            "row {y} is cpu row {}",
+            y + 120
+        );
+    }
+    for y in 120..240 {
+        assert!(
+            row(&out, y) == row(&to, y - 120),
+            "row {y} is mem row {}",
+            y - 120
+        );
+    }
+    check("transition_slide_up_model", &out);
+    // over: a plain frame again, the new role
+    m.tick(t0 + 0.6);
+    let f = m.frame(0, t0 + 0.6, &mut ui);
+    assert!(f.blend.is_none());
+    assert_eq!(m.current_role(0), Role::Mem);
+}
+
 #[test]
 fn p2_sample_screen() {
     // kept from Task 7: the composer on hand-written data

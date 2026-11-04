@@ -224,6 +224,9 @@ pub enum Control {
     Jump { screen: usize, role: Role },
     /// Play a show now (refused at night, like the request file).
     Play(Request),
+    /// `screen` (or every cycling screen, left to right) changes to its
+    /// next role now, in the configured style: the web UI's "try it".
+    TransitionTest { screen: Option<usize> },
 }
 
 /// Senders into the current render loop: model events (`Event::ForceNight`

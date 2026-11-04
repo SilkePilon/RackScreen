@@ -15,9 +15,13 @@ use crate::text::TextRenderer;
 
 pub struct Renderer {
     painter: Painter,
-    /// The last base layer (`scene.items[..base_len]`) and its raster.
-    base: Option<(Vec<Drawable>, Pixmap)>,
+    /// The last base layers (`scene.items[..base_len]`) and their rasters,
+    /// newest last: two, so both sides of a transition stay cached.
+    base: Vec<(Vec<Drawable>, Pixmap)>,
 }
+
+/// Base rasters kept: the two scenes of a transition.
+const BASE_CACHE: usize = 2;
 
 impl Renderer {
     pub fn new() -> Result<Self> {
@@ -27,7 +31,7 @@ impl Renderer {
                 text: TextRenderer::new()?,
                 covers: Vec::new(),
             },
-            base: None,
+            base: Vec::new(),
         })
     }
 
@@ -36,17 +40,24 @@ impl Renderer {
         let cacheable = n > 0 && matches!(scene.items.first(), Some(Drawable::Clear(_)));
         let start = if cacheable {
             let base = &scene.items[..n];
-            match &self.base {
-                Some((d, raster))
-                    if d.as_slice() == base && raster.data().len() == px.data().len() =>
-                {
-                    px.data_mut().copy_from_slice(raster.data());
+            let hit = self.base.iter().position(|(d, raster)| {
+                d.as_slice() == base && raster.data().len() == px.data().len()
+            });
+            match hit {
+                Some(i) => {
+                    px.data_mut().copy_from_slice(self.base[i].1.data());
+                    // keep the hit newest, so the other side survives
+                    let entry = self.base.remove(i);
+                    self.base.push(entry);
                 }
-                _ => {
+                None => {
                     for d in base {
                         self.painter.draw_item(px, d);
                     }
-                    self.base = Some((base.to_vec(), px.clone()));
+                    if self.base.len() >= BASE_CACHE {
+                        self.base.remove(0);
+                    }
+                    self.base.push((base.to_vec(), px.clone()));
                 }
             }
             n
@@ -398,7 +409,32 @@ mod tests {
         s.base_len -= 1;
         let mut px = new_pixmap();
         r.render(&s, &mut px);
-        assert!(r.base.is_none());
+        assert!(r.base.is_empty());
+    }
+
+    #[test]
+    fn two_bases_alternate_without_rerendering() {
+        let mut r = Renderer::new().unwrap();
+        let mut px = new_pixmap();
+        let mut a = based_scene(50.0);
+        a.items[1] = Drawable::Clear(rackscreen_core::theme::Color::hex(0x101010));
+        let b = based_scene(50.0);
+        r.render(&a, &mut px);
+        r.render(&b, &mut px);
+        assert_eq!(r.base.len(), 2);
+        let bases: Vec<Vec<Drawable>> = r.base.iter().map(|(d, _)| d.clone()).collect();
+        // both hit: the cache keeps the same two entries
+        r.render(&a, &mut px);
+        r.render(&b, &mut px);
+        let again: Vec<Vec<Drawable>> = r.base.iter().map(|(d, _)| d.clone()).collect();
+        assert_eq!(bases, again);
+        // a third base pushes the oldest out
+        let mut c = based_scene(50.0);
+        c.items[1] = Drawable::Clear(rackscreen_core::theme::Color::hex(0x202020));
+        r.render(&c, &mut px);
+        assert_eq!(r.base.len(), 2);
+        assert_eq!(r.base[1].0, c.items[..c.base_len].to_vec());
+        assert_eq!(r.base[0].0, b.items[..b.base_len].to_vec());
     }
 
     fn render_one(d: Drawable) -> Pixmap {

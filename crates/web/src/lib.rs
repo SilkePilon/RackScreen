@@ -50,6 +50,9 @@ impl ApiError {
     pub fn unavailable(msg: impl Into<String>) -> ApiError {
         ApiError(StatusCode::SERVICE_UNAVAILABLE, msg.into())
     }
+    pub fn conflict(msg: impl Into<String>) -> ApiError {
+        ApiError(StatusCode::CONFLICT, msg.into())
+    }
 }
 
 impl From<anyhow::Error> for ApiError {
@@ -91,6 +94,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/control/pattern", post(control::pattern))
         .route("/control/role", post(control::role))
         .route("/control/play", post(control::play))
+        .route("/control/transition-test", post(control::transition_test))
         .route("/control/night", post(control::night))
         .route("/control/restart", post(control::restart))
         .route("/system", get(system::system))

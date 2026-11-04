@@ -42,6 +42,9 @@ pub struct Config {
     pub spotify: SpotifyCfg,
     #[serde(default)]
     pub shows: ShowsCfg,
+    /// How one role gives way to the next, and the roles to a show.
+    #[serde(default)]
+    pub transitions: TransitionsCfg,
     /// The web UI served by the running service.
     #[serde(default)]
     pub web: WebCfg,
@@ -146,6 +149,107 @@ impl ShowsCfg {
             Some(o) if o.len() == screens => o.clone(),
             _ => (0..screens).collect(),
         }
+    }
+}
+
+/// The transition between roles, and (optionally its own) around shows.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct TransitionsCfg {
+    /// A style name: fade-black, crossfade, cut, slide, cover, wipe, iris,
+    /// clock, dissolve, zoom or blinds.
+    pub style: String,
+    /// The style's direction; empty is the style's default, and styles
+    /// without one ignore it.
+    pub direction: String,
+    /// Length in seconds, 0.15 to 2.
+    pub secs: f64,
+    /// A random style (and direction) for every transition.
+    pub random: bool,
+    /// The shows' own transition; `None` = the same as the screens'.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shows: Option<ShowTransitionCfg>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct ShowTransitionCfg {
+    pub style: String,
+    pub direction: String,
+    pub secs: f64,
+}
+
+impl Default for TransitionsCfg {
+    fn default() -> Self {
+        let spec = rackscreen_core::transition::Spec::default();
+        Self {
+            style: spec.kind.style.name().to_string(),
+            direction: String::new(),
+            secs: spec.secs,
+            random: false,
+            shows: None,
+        }
+    }
+}
+
+impl Default for ShowTransitionCfg {
+    fn default() -> Self {
+        let t = TransitionsCfg::default();
+        Self {
+            style: t.style,
+            direction: t.direction,
+            secs: t.secs,
+        }
+    }
+}
+
+/// `style`, `direction` and `secs` as a core spec, or why not.
+fn transition_spec(
+    what: &str,
+    style: &str,
+    direction: &str,
+    secs: f64,
+) -> Result<rackscreen_core::transition::Spec> {
+    use rackscreen_core::transition::{Direction, Kind, Style, MAX_SECS, MIN_SECS};
+    let st = Style::parse(style).ok_or_else(|| {
+        let known: Vec<&str> = Style::ALL.iter().map(|s| s.name()).collect();
+        anyhow::anyhow!(
+            "{what}.style: unknown transition '{style}' (known: {})",
+            known.join(", ")
+        )
+    })?;
+    let dir = if st.directions().is_empty() || direction.is_empty() {
+        st.default_direction()
+    } else {
+        Direction::parse(direction)
+            .ok_or_else(|| anyhow::anyhow!("{what}.direction: unknown direction '{direction}'"))?
+    };
+    let kind = Kind::new(st, dir).map_err(|e| anyhow::anyhow!("{what}.direction: {e}"))?;
+    anyhow::ensure!(
+        secs.is_finite() && (MIN_SECS..=MAX_SECS).contains(&secs),
+        "{what}.secs must be between {MIN_SECS} and {MAX_SECS} (got {secs})"
+    );
+    Ok(rackscreen_core::transition::Spec { kind, secs })
+}
+
+impl TransitionsCfg {
+    /// The core settings; errors are what `validate` reports.
+    pub fn to_core(&self) -> Result<rackscreen_core::transition::Transitions> {
+        let screens = transition_spec("transitions", &self.style, &self.direction, self.secs)?;
+        let shows = match &self.shows {
+            Some(s) => Some(transition_spec(
+                "transitions.shows",
+                &s.style,
+                &s.direction,
+                s.secs,
+            )?),
+            None => None,
+        };
+        Ok(rackscreen_core::transition::Transitions {
+            screens,
+            shows,
+            random: self.random,
+        })
     }
 }
 
@@ -904,6 +1008,7 @@ impl Config {
                 self.screens.len()
             );
         }
+        self.transitions.to_core()?;
         let url = self.jellyfin.url.trim();
         anyhow::ensure!(
             url.is_empty() || url.starts_with("http://") || url.starts_with("https://"),
@@ -958,6 +1063,104 @@ mod tests {
         assert_eq!(c.screens[0].rotate, 0);
         assert_eq!(c.display.fps, 60);
         assert!(c.display.one_at_a_time, "on unless the file says otherwise");
+        // no transitions block: the fade via black of before, 0.4 s
+        assert_eq!(c.transitions, TransitionsCfg::default());
+        assert_eq!(
+            c.transitions.to_core().unwrap(),
+            rackscreen_core::transition::Transitions::default()
+        );
+        assert_eq!(c.transitions.style, "fade-black");
+        assert_eq!(c.transitions.direction, "", "the style's default");
+        assert_eq!(c.transitions.secs, 0.4);
+        assert!(!c.transitions.random);
+        assert!(c.transitions.shows.is_none());
+    }
+
+    #[test]
+    fn transitions_parse_and_validate() {
+        use rackscreen_core::transition::{Direction, Kind, Style};
+        let base = "screens:\n  - { role: cpu, spi: 0, cs: 0, dc: 6, rst: 5 }\n";
+        let c = Config::from_yaml(&format!(
+            "{base}transitions:\n  style: slide\n  direction: up\n  secs: 0.6\n  random: true\n  shows: {{ style: wipe, direction: right, secs: 1 }}\n"
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let t = c.transitions.to_core().unwrap();
+        assert_eq!(
+            t.screens.kind,
+            Kind::new(Style::Slide, Direction::Up).unwrap()
+        );
+        assert_eq!(t.screens.secs, 0.6);
+        assert!(t.random);
+        let shows = t.shows.unwrap();
+        assert_eq!(
+            shows.kind,
+            Kind::new(Style::Wipe, Direction::Right).unwrap()
+        );
+        assert_eq!(shows.secs, 1.0);
+        // a style without a direction ignores whatever is there
+        let c = Config::from_yaml(&format!(
+            "{base}transitions:\n  style: crossfade\n  direction: cw\n"
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        assert_eq!(
+            c.transitions.to_core().unwrap().screens.kind,
+            Kind::of(Style::Crossfade)
+        );
+        // the shows block fills its own defaults; an empty direction is the
+        // style's own
+        let c = Config::from_yaml(&format!("{base}transitions:\n  shows: {{ style: iris }}\n"))
+            .unwrap();
+        c.validate().unwrap();
+        let shows = c.transitions.to_core().unwrap().shows.unwrap();
+        assert_eq!(shows.kind, Kind::of(Style::Iris));
+        assert_eq!(shows.secs, 0.4);
+        let c = Config::from_yaml(&format!("{base}transitions:\n  style: zoom\n")).unwrap();
+        assert_eq!(
+            c.transitions.to_core().unwrap().screens.kind,
+            Kind::new(Style::Zoom, Direction::In).unwrap()
+        );
+        // the round trip keeps the block (and leaves `shows` out while unset)
+        let y = Config::default().to_yaml().unwrap();
+        assert!(y.contains("transitions:"), "{y}");
+        assert!(y.contains("style: fade-black"), "{y}");
+        assert!(!y.contains("shows: null"), "{y}");
+        // bad values
+        for (yaml, want) in [
+            (
+                "transitions:\n  style: swoosh\n",
+                "unknown transition 'swoosh'",
+            ),
+            (
+                "transitions:\n  style: slide\n  direction: cw\n",
+                "'slide' takes direction left, right, up, down (got cw)",
+            ),
+            (
+                "transitions:\n  style: slide\n  direction: sideways\n",
+                "unknown direction 'sideways'",
+            ),
+            (
+                "transitions:\n  secs: 0.1\n",
+                "transitions.secs must be between",
+            ),
+            (
+                "transitions:\n  secs: 3\n",
+                "transitions.secs must be between",
+            ),
+            (
+                "transitions:\n  shows: { style: iris, direction: left }\n",
+                "transitions.shows.direction",
+            ),
+            (
+                "transitions:\n  shows: { style: nope }\n",
+                "transitions.shows.style: unknown",
+            ),
+        ] {
+            let c = Config::from_yaml(&format!("{base}{yaml}")).unwrap();
+            let err = c.validate().unwrap_err().to_string();
+            assert!(err.contains(want), "{yaml:?}: {err}");
+        }
     }
 
     #[test]
