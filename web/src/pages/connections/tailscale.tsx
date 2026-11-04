@@ -1,11 +1,13 @@
 import * as React from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Link } from "react-router"
 import QRCode from "qrcode"
 import {
   ChevronRightIcon,
   ExternalLinkIcon,
   GlobeLockIcon,
   KeyRoundIcon,
+  LockKeyholeIcon,
   LaptopIcon,
   LogOutIcon,
   MonitorIcon,
@@ -50,6 +52,7 @@ import { cn } from "@/lib/utils"
 
 const SETUP_CMD = "sudo rackscreen tailscale-setup"
 const ADMIN = "https://login.tailscale.com/admin/machines"
+const ACLS = "https://login.tailscale.com/admin/acls"
 
 function ago(iso: string | null) {
   if (!iso) return "Never seen"
@@ -121,8 +124,10 @@ function Body({
   setWaiting: (v: boolean) => void
 }) {
   const phase = phaseOf(t)
+  const locked = !t.password_set
   return (
     <>
+      {locked && <NeedsPassword />}
       {t.health.length > 0 && phase === "connected" && (
         <Alert>
           <TriangleAlertIcon />
@@ -136,10 +141,92 @@ function Body({
           </AlertDescription>
         </Alert>
       )}
-      {phase === "setup" && <Setup t={t} />}
-      {phase === "login" && <Login t={t} waiting={waiting} setWaiting={setWaiting} />}
-      {phase === "approve" && <Approve />}
-      {phase === "connected" && <Connected t={t} />}
+      {/* A disabled fieldset turns off every input, switch and button inside. */}
+      <fieldset disabled={locked} aria-disabled={locked || undefined} className="contents">
+        {phase === "setup" && <Setup t={t} />}
+        {phase === "login" && <Login t={t} waiting={waiting} setWaiting={setWaiting} />}
+        {phase === "approve" && <Approve />}
+        {phase === "connected" && <Connected t={t} />}
+      </fieldset>
+    </>
+  )
+}
+
+/** Tailscale can open the Pi to a whole tailnet, so it waits for a web password. */
+function NeedsPassword() {
+  return (
+    <Alert>
+      <LockKeyholeIcon />
+      <AlertTitle>Set a web password first</AlertTitle>
+      <AlertDescription>
+        <p>
+          Tailscale can give remote access to this Pi, so RackScreen only manages it once this page asks for a
+          password. Set one under System → Web access, then come back here.
+        </p>
+        <Button asChild size="sm" className="mt-2">
+          <Link to="/system#web.password">Set a password</Link>
+        </Button>
+      </AlertDescription>
+    </Alert>
+  )
+}
+
+/**
+ * The Tailscale SSH switch. Turning it on asks first: the tailnet's access
+ * rules, not this page, decide who may log in and as whom.
+ */
+function SshSwitch({
+  id,
+  checked,
+  onChange,
+  disabled,
+}: {
+  id?: string
+  checked: boolean
+  onChange: (on: boolean) => void
+  disabled?: boolean
+}) {
+  const [asking, setAsking] = React.useState(false)
+  return (
+    <>
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={(v) => (v ? setAsking(true) : onChange(false))}
+        disabled={disabled}
+        aria-label="Tailscale SSH"
+      />
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Turn on Tailscale SSH?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="flex flex-col gap-2">
+                <p>
+                  Your tailnet's access rules (ACLs) decide who may SSH into the Pi and as which user,
+                  possibly root. RackScreen does not check them.
+                </p>
+                <p>
+                  Look at the <span className="text-foreground">ssh</span> section of your{" "}
+                  <a
+                    href={ACLS}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground underline underline-offset-4"
+                  >
+                    access controls
+                  </a>{" "}
+                  before you turn this on, especially on a shared tailnet.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => onChange(true)}>Turn on SSH</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
@@ -352,9 +439,9 @@ function Login({
           <Row
             title="Allow Tailscale SSH"
             htmlFor="ts-ssh"
-            description="Devices you allow can SSH into the Pi, signed in with Tailscale instead of keys. You can change this later."
+            description="Off by default. Devices your tailnet's access rules allow can SSH into the Pi, signed in with Tailscale instead of keys. You can change this later."
           >
-            <Switch id="ts-ssh" checked={ssh} onCheckedChange={setSsh} disabled={waiting} />
+            <SshSwitch id="ts-ssh" checked={ssh} onChange={setSsh} disabled={waiting} />
           </Row>
         </SettingsCard>
       </Section>
@@ -654,14 +741,9 @@ function Connected({ t }: { t: TailscaleState }) {
                 Tailscale SSH
               </span>
             }
-            description="Devices your access rules allow can SSH into the Pi, signed in with Tailscale instead of keys."
+            description="Devices your tailnet's access rules allow can SSH into the Pi, signed in with Tailscale instead of keys."
           >
-            <Switch
-              checked={sshOn}
-              onCheckedChange={(v) => ssh.mutate(v)}
-              disabled={ssh.isPending}
-              aria-label="Tailscale SSH"
-            />
+            <SshSwitch checked={!!sshOn} onChange={(v) => ssh.mutate(v)} disabled={ssh.isPending} />
           </Row>
         </SettingsCard>
       </Section>

@@ -19,6 +19,8 @@ struct Fixture {
     hub: Arc<Hub>,
     state: Arc<AppState>,
     app: Router,
+    /// A logged-in session (Tailscale fixtures only; "" elsewhere).
+    session: String,
 }
 
 fn fixture(password: &str) -> Fixture {
@@ -42,6 +44,7 @@ fn fixture(password: &str) -> Fixture {
         hub,
         state,
         app,
+        session: String::new(),
     }
 }
 
@@ -875,22 +878,49 @@ async fn gif_memory_joins_the_config_with_the_render_loop() {
 
 use rackscreen_web::tailscale::{FakeRunner, Output as TsOut};
 
+/// A web password is set and the requests carry a logged-in session:
+/// Tailscale refuses every action without one.
 fn ts_fixture(runner: Arc<FakeRunner>) -> Fixture {
+    ts_fixture_pw(runner, "hunter2")
+}
+
+fn ts_fixture_pw(runner: Arc<FakeRunner>, password: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
-    Config::default().save(&path).unwrap();
+    let mut cfg = Config::default();
+    cfg.web.password = password.into();
+    cfg.save(&path).unwrap();
     let hub = Arc::new(Hub::new(path, true, "9.9.9", LogSink::new(50), 8));
     let state = Arc::new(
-        AppState::with_update_file(hub.clone(), String::new(), 8740, None)
+        AppState::with_update_file(hub.clone(), password.into(), 8740, None)
             .with_tailscale(runner, "silke"),
     );
+    let session = if password.is_empty() {
+        String::new()
+    } else {
+        state.new_session()
+    };
     let app = router(state.clone());
     Fixture {
         _dir: dir,
         hub,
         state,
         app,
+        session,
     }
+}
+
+fn tget(f: &Fixture, path: &str) -> Request<Body> {
+    let mut b = Request::get(path);
+    if !f.session.is_empty() {
+        b = b.header(header::COOKIE, format!("rs_session={}", f.session));
+    }
+    b.body(Body::empty()).unwrap()
+}
+
+fn tpost(f: &Fixture, path: &str, body: Value) -> Request<Body> {
+    let cookie = (!f.session.is_empty()).then_some(f.session.as_str());
+    post_json("POST", path, body, true, cookie)
 }
 
 fn running_runner() -> Arc<FakeRunner> {
@@ -914,17 +944,13 @@ fn running_runner() -> Arc<FakeRunner> {
     r
 }
 
-fn post(path: &str, body: Value) -> Request<Body> {
-    post_json("POST", path, body, true, None)
-}
-
 #[tokio::test]
 async fn tailscale_missing_offers_the_setup_when_sudo_allows_it() {
     let r = Arc::new(FakeRunner::default());
     *r.missing.lock().unwrap() = true;
     r.respond("sudo -n -l", TsOut::fail("sudo: a password is required"));
     let f = ts_fixture(r.clone());
-    let (st, _, body) = send(&f.app, get("/api/tailscale")).await;
+    let (st, _, body) = send(&f.app, tget(&f, "/api/tailscale")).await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(body["installed"], false);
     assert_eq!(body["can_setup"], false);
@@ -934,7 +960,7 @@ async fn tailscale_missing_offers_the_setup_when_sudo_allows_it() {
         .calls()
         .contains(&"sudo -n -l /usr/local/bin/rackscreen tailscale-setup".to_string()));
     // the sudo answer is cached for a minute
-    send(&f.app, get("/api/tailscale")).await;
+    send(&f.app, tget(&f, "/api/tailscale")).await;
     let sudo_checks = r.calls().iter().filter(|c| c.starts_with("sudo")).count();
     assert_eq!(sudo_checks, 1);
 }
@@ -942,7 +968,7 @@ async fn tailscale_missing_offers_the_setup_when_sudo_allows_it() {
 #[tokio::test]
 async fn tailscale_running_has_the_documented_shape() {
     let f = ts_fixture(running_runner());
-    let (st, _, b) = send(&f.app, get("/api/tailscale")).await;
+    let (st, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(b["installed"], true);
     assert_eq!(b["version"], "1.90.6");
@@ -971,7 +997,7 @@ async fn tailscale_running_has_the_documented_shape() {
         TsOut::ok(r#"{"OperatorUser":"pi"}"#),
     );
     let f = ts_fixture(r);
-    let (_, _, b) = send(&f.app, get("/api/tailscale")).await;
+    let (_, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
     assert_eq!(b["operator_ok"], false);
     assert_eq!(b["ssh"], false);
 }
@@ -986,7 +1012,7 @@ async fn tailscale_login_validates_and_never_echoes_the_key() {
         json!({"auth_key": "not-a-key"}),
         json!({"auth_key": "tskey-abc --ssh"}),
     ] {
-        let (st, _, b) = send(&f.app, post("/api/tailscale/login", body.clone())).await;
+        let (st, _, b) = send(&f.app, tpost(&f, "/api/tailscale/login", body.clone())).await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "{body}");
         assert!(!b["error"].as_str().unwrap().contains("tskey-abc"), "{b}");
     }
@@ -994,7 +1020,8 @@ async fn tailscale_login_validates_and_never_echoes_the_key() {
 
     let (st, _, b) = send(
         &f.app,
-        post(
+        tpost(
+            &f,
             "/api/tailscale/login",
             json!({"hostname": "rack", "auth_key": "tskey-auth-k123CNTRL-secret", "ssh": true}),
         ),
@@ -1014,7 +1041,11 @@ async fn tailscale_login_validates_and_never_echoes_the_key() {
     );
     let (st, _, b) = send(
         &f.app,
-        post("/api/tailscale/login", json!({"auth_key": "tskey-auth-x"})),
+        tpost(
+            &f,
+            "/api/tailscale/login",
+            json!({"auth_key": "tskey-auth-x"}),
+        ),
     )
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
@@ -1031,7 +1062,7 @@ async fn tailscale_browser_login_returns_the_link() {
     *r.spawn_output.lock().unwrap() =
         "\nTo authenticate, visit:\n\n\thttps://login.tailscale.com/a/abc123\n".into();
     let f = ts_fixture(r.clone());
-    let (st, _, b) = send(&f.app, post("/api/tailscale/login", json!({}))).await;
+    let (st, _, b) = send(&f.app, tpost(&f, "/api/tailscale/login", json!({}))).await;
     assert_eq!(st, StatusCode::OK, "{b}");
     assert_eq!(b["auth_url"], "https://login.tailscale.com/a/abc123");
     assert!(r.calls().contains(&"tailscale up".to_string()));
@@ -1046,7 +1077,11 @@ async fn tailscale_browser_login_returns_the_link() {
         "tailscale status --json",
         TsOut::ok(include_str!("fixtures/tailscale-status-needslogin.json")),
     );
-    let (_, _, b) = send(&f.app, post("/api/tailscale/login", json!({"ssh": false}))).await;
+    let (_, _, b) = send(
+        &f.app,
+        tpost(&f, "/api/tailscale/login", json!({"ssh": false})),
+    )
+    .await;
     assert_eq!(b["auth_url"], "https://login.tailscale.com/a/1a2b3c4d5e6f");
 }
 
@@ -1074,11 +1109,15 @@ async fn tailscale_actions_map_to_fixed_commands_and_readable_errors() {
             "tailscale serve --https=443 off",
         ),
     ] {
-        let (st, _, b) = send(&f.app, post(path, body)).await;
+        let (st, _, b) = send(&f.app, tpost(&f, path, body)).await;
         assert_eq!(st, StatusCode::OK, "{path}: {b}");
         assert_eq!(r.calls().last().unwrap(), call);
     }
-    let (st, _, b) = send(&f.app, post("/api/tailscale/serve", json!({"on": true}))).await;
+    let (st, _, b) = send(
+        &f.app,
+        tpost(&f, "/api/tailscale/serve", json!({"on": true})),
+    )
+    .await;
     assert_eq!(st, StatusCode::OK, "{b}");
     assert_eq!(b["url"], "https://rackscreen.tail1234.ts.net");
     assert!(r
@@ -1095,7 +1134,11 @@ async fn tailscale_actions_map_to_fixed_commands_and_readable_errors() {
             ..TsOut::default()
         },
     );
-    let (st, _, b) = send(&f.app, post("/api/tailscale/serve", json!({"on": true}))).await;
+    let (st, _, b) = send(
+        &f.app,
+        tpost(&f, "/api/tailscale/serve", json!({"on": true})),
+    )
+    .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(b["on"], false);
     assert_eq!(
@@ -1108,7 +1151,7 @@ async fn tailscale_actions_map_to_fixed_commands_and_readable_errors() {
         "tailscale down",
         TsOut::fail("Access denied: prefs write access denied\n\nUse 'sudo tailscale down'.\nTo not require root, use 'sudo tailscale set --operator=$USER' once."),
     );
-    let (st, _, b) = send(&f.app, post("/api/tailscale/down", json!({}))).await;
+    let (st, _, b) = send(&f.app, tpost(&f, "/api/tailscale/down", json!({}))).await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
     assert!(
         b["error"].as_str().unwrap().contains("finish the setup"),
@@ -1119,7 +1162,13 @@ async fn tailscale_actions_map_to_fixed_commands_and_readable_errors() {
     let n = r.calls().len();
     let (st, _, _) = send(
         &f.app,
-        post_json("POST", "/api/tailscale/logout", json!({}), false, None),
+        post_json(
+            "POST",
+            "/api/tailscale/logout",
+            json!({}),
+            false,
+            Some(&f.session),
+        ),
     )
     .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
@@ -1137,13 +1186,13 @@ async fn tailscale_setup_runs_the_root_helper_as_a_job() {
         true,
     );
     let f = ts_fixture(r.clone());
-    let (_, _, b) = send(&f.app, get("/api/tailscale/setup")).await;
+    let (_, _, b) = send(&f.app, tget(&f, "/api/tailscale/setup")).await;
     assert_eq!(b, json!({"state": "idle", "log": []}));
-    let (st, _, _) = send(&f.app, post("/api/tailscale/setup", json!({}))).await;
+    let (st, _, _) = send(&f.app, tpost(&f, "/api/tailscale/setup", json!({}))).await;
     assert_eq!(st, StatusCode::OK);
     let mut job = Value::Null;
     for _ in 0..50 {
-        job = send(&f.app, get("/api/tailscale/setup")).await.2;
+        job = send(&f.app, tget(&f, "/api/tailscale/setup")).await.2;
         if job["state"] != "running" {
             break;
         }
@@ -1157,9 +1206,9 @@ async fn tailscale_setup_runs_the_root_helper_as_a_job() {
 
     // sudo says no: the job says how to allow it
     *r.stream_lines.lock().unwrap() = (vec!["sudo: a password is required".into()], false);
-    send(&f.app, post("/api/tailscale/setup", json!({}))).await;
+    send(&f.app, tpost(&f, "/api/tailscale/setup", json!({}))).await;
     for _ in 0..50 {
-        job = send(&f.app, get("/api/tailscale/setup")).await.2;
+        job = send(&f.app, tget(&f, "/api/tailscale/setup")).await.2;
         if job["state"] != "running" {
             break;
         }
@@ -1174,4 +1223,45 @@ async fn tailscale_setup_runs_the_root_helper_as_a_job() {
         .as_str()
         .unwrap()
         .contains("sudo rackscreen install"));
+}
+
+#[tokio::test]
+async fn tailscale_actions_need_a_web_password() {
+    let r = running_runner();
+    let f = ts_fixture_pw(r.clone(), "");
+    // reading is fine, and says why the actions are off
+    let (st, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(b["password_set"], false);
+    let before = r.calls().len();
+    for (path, body) in [
+        ("/api/tailscale/setup", json!({})),
+        ("/api/tailscale/login", json!({})),
+        ("/api/tailscale/login", json!({"auth_key": "tskey-auth-x"})),
+        ("/api/tailscale/up", json!({})),
+        ("/api/tailscale/down", json!({})),
+        ("/api/tailscale/logout", json!({})),
+        ("/api/tailscale/ssh", json!({"on": true})),
+        ("/api/tailscale/serve", json!({"on": true})),
+        ("/api/tailscale/serve", json!({"on": false})),
+    ] {
+        let (st, _, b) = send(&f.app, tpost(&f, path, body)).await;
+        assert_eq!(st, StatusCode::FORBIDDEN, "{path}: {b}");
+        assert_eq!(
+            b["error"],
+            "Set a web password first (System → Web access): Tailscale can give remote access to this Pi."
+        );
+    }
+    assert_eq!(r.calls().len(), before, "no command ran");
+
+    // with a password, the guard wants the session
+    let f = ts_fixture(r.clone());
+    let (_, _, b) = send(&f.app, tget(&f, "/api/tailscale")).await;
+    assert_eq!(b["password_set"], true);
+    let (st, _, _) = send(
+        &f.app,
+        post_json("POST", "/api/tailscale/up", json!({}), true, None),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
 }

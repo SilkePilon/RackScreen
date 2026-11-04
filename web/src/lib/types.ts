@@ -387,6 +387,8 @@ export interface TailscaleState {
   operator_ok: boolean
   /** sudo allows the one-click `rackscreen tailscale-setup`. */
   can_setup: boolean
+  /** `web.password` is set; every Tailscale action is refused (403) without it. */
+  password_set: boolean
   backend_state: TailscaleBackendState | null
   auth_url: string | null
   self: TailscaleDevice | null

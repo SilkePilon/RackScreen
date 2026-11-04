@@ -6,6 +6,8 @@
 //   approve  waiting for an admin to approve the device
 //   running  logged in and connected (the default)
 // Add `&nohttps` to have "Share over HTTPS" ask to turn on HTTPS first.
+// Like the real API, every action needs a web password: add `&login` (or set
+// one under System) to use them; without it the page shows how to set one.
 
 import type { TailscaleDevice, TailscaleSetupJob, TailscaleState } from "@/lib/types"
 
@@ -87,13 +89,14 @@ const ts = {
 
 const loggedIn = () => ts.backend === "Running" || ts.backend === "Stopped"
 
-function view(): TailscaleState {
+function view(passwordSet: boolean): TailscaleState {
   const dns = `${ts.name}.tail1234.ts.net`
   return {
     installed: ts.installed,
     version: ts.installed ? "1.90.6" : null,
     operator_ok: ts.installed && ts.operator,
     can_setup: ts.canSetup,
+    password_set: passwordSet,
     backend_state: !ts.installed ? null : !ts.operator ? "Stopped" : ts.backend,
     auth_url: ts.backend === "NeedsLogin" ? ts.authUrl : null,
     self: loggedIn()
@@ -124,9 +127,17 @@ let loginTimer: ReturnType<typeof setTimeout> | undefined
 export function tailscaleRoute(
   method: string,
   p: string,
-  b: Record<string, unknown>
+  b: Record<string, unknown>,
+  passwordSet: boolean
 ): [number, unknown] | null {
   if (!p.startsWith("/tailscale")) return null
+  if (method !== "GET" && !passwordSet)
+    return [
+      403,
+      {
+        error: "Set a web password first (System → Web access): Tailscale can give remote access to this Pi.",
+      },
+    ]
   const needOperator = () =>
     !ts.installed
       ? "Tailscale is not installed on the Pi"
@@ -135,7 +146,7 @@ export function tailscaleRoute(
         : null
   switch (`${method} ${p}`) {
     case "GET /tailscale":
-      return [200, view()]
+      return [200, view(passwordSet)]
     case "GET /tailscale/setup":
       return [200, ts.job]
     case "POST /tailscale/setup": {

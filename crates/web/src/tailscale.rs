@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,10 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 pub const SLOW_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a browser login may take to offer its link.
 pub const AUTH_URL_WAIT: Duration = Duration::from_secs(10);
+
+/// Why every Tailscale action is refused while `web.password` is empty.
+pub const NEEDS_PASSWORD: &str =
+    "Set a web password first (System → Web access): Tailscale can give remote access to this Pi.";
 
 pub const NEEDS_SETUP: &str =
     "RackScreen may not manage Tailscale yet: finish the setup first (it makes the service user Tailscale's operator)";
@@ -611,6 +616,17 @@ pub fn friendly(out: &Output) -> String {
     msg
 }
 
+/// Tailscale can open the Pi to a whole tailnet (and SSH, possibly as
+/// root), so nothing here changes without a password guarding the UI. The
+/// auth guard already demands the session whenever one is set.
+pub fn require_password(state: &AppState) -> Result<(), ApiError> {
+    if state.login_required() {
+        Ok(())
+    } else {
+        Err(ApiError(StatusCode::FORBIDDEN, NEEDS_PASSWORD.into()))
+    }
+}
+
 fn spawn_error(e: io::Error) -> ApiError {
     if e.kind() == io::ErrorKind::NotFound {
         ApiError::bad_request("Tailscale is not installed on the Pi")
@@ -637,6 +653,8 @@ pub struct TailscaleView {
     pub version: Option<String>,
     pub operator_ok: bool,
     pub can_setup: bool,
+    /// `web.password` is set; every action below needs it.
+    pub password_set: bool,
     #[serde(flatten)]
     pub status: StatusView,
     pub ssh: bool,
@@ -651,6 +669,7 @@ pub async fn view(state: &AppState) -> TailscaleView {
     let ts = &state.tailscale;
     let mut v = TailscaleView {
         hostname: crate::host::hostname().to_lowercase(),
+        password_set: state.login_required(),
         ..TailscaleView::default()
     };
     let (version, can_setup) = tokio::join!(ts.ts(&["version"], TIMEOUT), ts.can_setup());
@@ -717,6 +736,7 @@ fn push_log(job: &Mutex<SetupJob>, line: String) {
 }
 
 pub async fn post_setup(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
+    require_password(&state)?;
     let ts = &state.tailscale;
     {
         let mut j = ts.job.lock().unwrap();
@@ -782,6 +802,7 @@ pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(body): Json<LoginBody>,
 ) -> ApiResult<Value> {
+    require_password(&state)?;
     let ts = &state.tailscale;
     let hostname = body
         .hostname
@@ -892,16 +913,19 @@ pub async fn login(
 }
 
 pub async fn up(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
+    require_password(&state)?;
     ts_ok(&state.tailscale, &["up"], SLOW_TIMEOUT).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn down(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
+    require_password(&state)?;
     ts_ok(&state.tailscale, &["down"], SLOW_TIMEOUT).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn logout(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
+    require_password(&state)?;
     drop(state.tailscale.login.lock().unwrap().take());
     ts_ok(&state.tailscale, &["logout"], SLOW_TIMEOUT).await?;
     Ok(Json(json!({ "ok": true })))
@@ -913,6 +937,7 @@ pub struct OnBody {
 }
 
 pub async fn ssh(State(state): State<Arc<AppState>>, Json(b): Json<OnBody>) -> ApiResult<Value> {
+    require_password(&state)?;
     let args: &[&str] = if b.on {
         &["set", "--ssh=true"]
     } else {
@@ -932,6 +957,7 @@ pub fn bind_reaches_loopback(bind: &str) -> bool {
 }
 
 pub async fn serve(State(state): State<Arc<AppState>>, Json(b): Json<OnBody>) -> ApiResult<Value> {
+    require_password(&state)?;
     let ts = &state.tailscale;
     if !b.on {
         ts_ok(ts, &["serve", "--https=443", "off"], SLOW_TIMEOUT).await?;

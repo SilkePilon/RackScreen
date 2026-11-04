@@ -402,7 +402,7 @@ async function handle(method: string, path: string, body: unknown, headers: Head
   }
   if (state.loginRequired && !state.authenticated) return json(401, { error: "login required" })
 
-  const tsr = tailscaleRoute(method, p, b)
+  const tsr = tailscaleRoute(method, p, b, state.loginRequired)
   if (tsr) return json(...tsr)
 
   const now = Date.now()
