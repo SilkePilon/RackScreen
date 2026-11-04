@@ -259,7 +259,7 @@ mod tests {
                 ("fireworks", "Harbour fireworks", 12.0),
                 ("alpine", "Mountains: alpine dawn", 12.0),
                 ("caravan", "Desert: caravan", 12.0),
-                ("desert-night", "Desert: night tumbleweed", 9.0),
+                ("desert-night", "Desert: night tumbleweed", 12.0),
                 ("boulder", "Temple run", 10.0),
                 ("time-car", "Time machine", 10.0),
                 ("kaiju", "Monster in the harbour", 11.0),

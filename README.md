@@ -156,7 +156,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/desert-night.gif" alt="Desert: night tumbleweed show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Desert: night tumbleweed</b> (<code>desert-night</code>) — a tumbleweed rolls past cactus silhouettes under a big moon; a shooting star streaks over.
+  <b>Desert: night tumbleweed</b> (<code>desert-night</code>) — under a big full moon and the Milky Way a coyote on a rock tries to howl, but a tumbleweed bounces across every screen and sails over its head; it snags on a saguaro (an elf owl stares), the coyote gets its howl with a shooting star, then a gust bowls the weed back onto its head and it howls on in its new hat.
 </p>
 
 <p align="center">

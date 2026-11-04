@@ -1534,8 +1534,8 @@ fn show_round_two() {
         ("alpine", 11.3, "show_alpine_goat"),
         ("caravan", 4.4, "show_caravan_mirage"),
         ("caravan", 11.0, "show_caravan_drink"),
-        ("desert-night", 5.2, "show_desert_night"),
-        ("desert-night", 5.5, "show_desert_night_star"),
+        ("desert-night", 3.7, "show_desert_night_duck"),
+        ("desert-night", 10.5, "show_desert_night_hat"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));
