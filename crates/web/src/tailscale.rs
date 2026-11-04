@@ -24,7 +24,7 @@ use axum::Json;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
 use crate::update::{JobState, BINARY, SUDO_CHECK_EVERY};
 use crate::{ApiError, ApiResult, AppState};
@@ -136,6 +136,28 @@ pub trait Runner: Send + Sync {
 
 pub struct RealRunner;
 
+/// Hand every line of `r` to `f`, without the line ending; bytes that are
+/// not UTF-8 become U+FFFD instead of ending the read and stalling the pipe.
+async fn lossy_lines(r: impl AsyncRead + Unpin, mut f: impl FnMut(String)) {
+    let mut r = BufReader::new(r);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match r.read_until(b'\n', &mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if buf.ends_with(b"\n") {
+                    buf.pop();
+                    if buf.ends_with(b"\r") {
+                        buf.pop();
+                    }
+                }
+                f(String::from_utf8_lossy(&buf).into_owned());
+            }
+        }
+    }
+}
+
 fn command(prog: &str, args: &[String]) -> tokio::process::Command {
     let mut c = tokio::process::Command::new(prog);
     c.args(args)
@@ -196,18 +218,8 @@ impl Runner for RealRunner {
             let so = child.stdout.take().expect("piped");
             let se = child.stderr.take().expect("piped");
             let l2 = line.clone();
-            let out = tokio::spawn(async move {
-                let mut lines = BufReader::new(so).lines();
-                while let Ok(Some(l)) = lines.next_line().await {
-                    line(l);
-                }
-            });
-            let err = tokio::spawn(async move {
-                let mut lines = BufReader::new(se).lines();
-                while let Ok(Some(l)) = lines.next_line().await {
-                    l2(l);
-                }
-            });
+            let out = tokio::spawn(lossy_lines(so, move |l| line(l)));
+            let err = tokio::spawn(lossy_lines(se, move |l| l2(l)));
             let status = child.wait().await?;
             let _ = out.await;
             let _ = err.await;
@@ -234,16 +246,13 @@ impl Runner for RealRunner {
         .flatten()
         {
             let output = output.clone();
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(pipe).lines();
-                while let Ok(Some(l)) = lines.next_line().await {
-                    let mut o = output.lock().unwrap();
-                    if o.len() < 16 * 1024 {
-                        o.push_str(&l);
-                        o.push('\n');
-                    }
+            tokio::spawn(lossy_lines(pipe, move |l| {
+                let mut o = output.lock().unwrap();
+                if o.len() < 16 * 1024 {
+                    o.push_str(&l);
+                    o.push('\n');
                 }
-            });
+            }));
         }
         let done = exited.clone();
         tokio::spawn(async move {
@@ -1653,6 +1662,27 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert_eq!(*exited.lock().unwrap(), Some(None));
+    }
+
+    #[tokio::test]
+    async fn streamed_output_that_is_not_utf8_keeps_coming() {
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let sink = lines.clone();
+        let ok = RealRunner
+            .stream(
+                "sh",
+                &[
+                    "-c".into(),
+                    r"printf 'a\377b\nnext\n'; printf 'e\376\n' >&2".into(),
+                ],
+                Arc::new(move |l| sink.lock().unwrap().push(l)),
+            )
+            .await
+            .unwrap();
+        assert!(ok);
+        let mut got = lines.lock().unwrap().clone();
+        got.sort();
+        assert_eq!(got, ["a\u{FFFD}b", "e\u{FFFD}", "next"]);
     }
 
     #[tokio::test]

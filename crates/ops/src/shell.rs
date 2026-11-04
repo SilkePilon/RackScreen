@@ -78,7 +78,6 @@ impl Shell for RealShell {
     }
 
     fn run_streaming(&self, cmd: &str, args: &[&str], line: &mut dyn FnMut(&str)) -> Result<bool> {
-        use std::io::{BufRead, BufReader};
         use std::process::Stdio;
         let mut child = Command::new(cmd)
             .args(args)
@@ -89,21 +88,39 @@ impl Shell for RealShell {
             .with_context(|| format!("spawn {cmd}"))?;
         let stderr = child.stderr.take().expect("piped");
         let err_lines = std::thread::spawn(move || {
-            BufReader::new(stderr)
-                .lines()
-                .map_while(|l| l.ok())
-                .collect::<Vec<_>>()
+            let mut v = Vec::new();
+            lossy_lines(stderr, |l| v.push(l));
+            v
         });
-        for l in BufReader::new(child.stdout.take().expect("piped"))
-            .lines()
-            .map_while(|l| l.ok())
-        {
-            line(&l);
-        }
+        lossy_lines(child.stdout.take().expect("piped"), |l| line(&l));
         for l in err_lines.join().unwrap_or_default() {
             line(&l);
         }
         Ok(child.wait()?.success())
+    }
+}
+
+/// Hand every line of `r` to `f`, without the line ending. Bytes that are
+/// not UTF-8 become U+FFFD instead of ending the read (which would leave
+/// the writer stuck on a full pipe).
+pub fn lossy_lines(r: impl std::io::Read, mut f: impl FnMut(String)) {
+    use std::io::BufRead;
+    let mut r = std::io::BufReader::new(r);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match r.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if buf.ends_with(b"\n") {
+                    buf.pop();
+                    if buf.ends_with(b"\r") {
+                        buf.pop();
+                    }
+                }
+                f(String::from_utf8_lossy(&buf).into_owned());
+            }
+        }
     }
 }
 
@@ -182,5 +199,22 @@ mod tests {
             .unwrap();
         assert!(!ok);
         assert_eq!(lines, ["a", "c", "b"]);
+    }
+
+    #[test]
+    fn output_that_is_not_utf8_keeps_streaming() {
+        let mut lines = Vec::new();
+        let ok = RealShell
+            .run_streaming(
+                "sh",
+                &[
+                    "-c",
+                    r"printf 'a\377b\r\nnext\n'; printf 'e\376\n' >&2; printf tail",
+                ],
+                &mut |l| lines.push(l.to_string()),
+            )
+            .unwrap();
+        assert!(ok);
+        assert_eq!(lines, ["a\u{FFFD}b", "next", "tail", "e\u{FFFD}"]);
     }
 }
