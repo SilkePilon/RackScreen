@@ -180,6 +180,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Lunar landing</b> (<code>moon-landing</code>) — a lander descends over a cratered moonscape with the Earth rising, kicks up dust and touches down; a tiny astronaut bounces out, plants a flag and waves, and an old rover snaps a photo.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/mech.gif" alt="Giant robot at dusk show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Giant robot at dusk</b> (<code>mech</code>) — searchlights sweep a sunset over a city of lit windows; a huge mech strides across, every step shaking the ground and flushing pigeons, then turns its glowing eyes to you and waves.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

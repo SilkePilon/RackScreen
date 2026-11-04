@@ -11,6 +11,7 @@ mod desert_night;
 mod fireworks;
 mod freight;
 mod hyperspace;
+mod mech;
 mod moon_landing;
 mod paper_plane;
 pub mod schedule;
@@ -120,6 +121,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: moon_landing::SECS,
         draw: moon_landing::draw,
     },
+    ShowDef {
+        id: "mech",
+        name: "Giant robot at dusk",
+        secs: mech::SECS,
+        draw: mech::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -177,6 +184,7 @@ mod tests {
                 ("hyperspace", "Jump to hyperspace", 10.0),
                 ("ufo", "Close encounter", 12.0),
                 ("moon-landing", "Lunar landing", 12.0),
+                ("mech", "Giant robot at dusk", 11.0),
             ]
         );
     }

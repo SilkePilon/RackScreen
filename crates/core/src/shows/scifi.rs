@@ -1,5 +1,5 @@
 //! Drawing helpers the sci-fi shows share: lines, ordered dither, colour
-//! mixing and see-through tints.
+//! mixing, see-through tints and a screen shake.
 
 use super::world::{js_round, World};
 
@@ -57,5 +57,20 @@ pub fn glow(g: &mut World, cx: f64, cy: f64, r: f64, c: u32, a: f64) {
                 tint(g, x0 + x, y0 + y, c, a * (1.0 - d) * (1.0 - d));
             }
         }
+    }
+}
+
+/// Shift the whole world down by `dy` px (a ground shake); the top row
+/// repeats into the strip that opens up.
+pub fn shake(g: &mut World, dy: i32) {
+    if dy <= 0 {
+        return;
+    }
+    let row = g.frame.width as usize * 4;
+    let h = g.h() as usize;
+    let dy = (dy as usize).min(h - 1);
+    g.frame.rgba.copy_within(0..(h - dy) * row, dy * row);
+    for y in 0..dy {
+        g.frame.rgba.copy_within(dy * row..(dy + 1) * row, y * row);
     }
 }
