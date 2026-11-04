@@ -64,6 +64,9 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Install Tailscale if missing, start it and let the service user manage it
+    /// (what the web UI's Tailscale page runs through sudo)
+    TailscaleSetup,
     /// Play a show now on every screen (not at night)
     Play {
         /// Show id (freight, ...) or `random`
@@ -318,6 +321,18 @@ fn main() -> Result<()> {
                 rackscreen_ops::update::run_cli(VERSION)
             };
             std::process::exit(code);
+        }
+        Some(Cmd::TailscaleSetup) => {
+            ensure_root()?;
+            let setup = rackscreen_ops::tailscale::Setup {
+                sh: &RealShell,
+                user: service_user(),
+                retry_wait: std::time::Duration::from_secs(1),
+            };
+            setup.run(&mut |l| {
+                println!("{l}");
+                let _ = std::io::stdout().flush();
+            })
         }
         Some(Cmd::Play { show }) => {
             let (_, warning) = rackscreen_app::play::write_for_service_user(&show)?;

@@ -33,7 +33,8 @@ impl Paths {
     pub fn unit(&self) -> PathBuf {
         self.p("etc/systemd/system/rackscreen@.service")
     }
-    /// The sudoers drop-in that lets the service user run `rackscreen update`.
+    /// The sudoers drop-in that lets the service user run `rackscreen update`
+    /// and `rackscreen tailscale-setup`.
     pub fn sudoers(&self) -> PathBuf {
         self.p("etc/sudoers.d/rackscreen")
     }

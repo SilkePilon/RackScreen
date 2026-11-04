@@ -43,7 +43,9 @@ impl StepId {
             StepId::Binary => "Install binary to /usr/local/bin",
             StepId::Config => "Write config /etc/rackscreen/config.yaml",
             StepId::Owner => "Hand /etc/rackscreen to the service user",
-            StepId::Sudoers => "Allow the service user to run rackscreen update",
+            StepId::Sudoers => {
+                "Allow the service user to run rackscreen update and tailscale-setup"
+            }
             StepId::Groups => "Add user to spi and gpio groups",
             StepId::Service => "Install and start systemd service",
             StepId::Boot => "Enable SPI in boot files",
@@ -51,9 +53,13 @@ impl StepId {
     }
 }
 
-/// The sudoers drop-in: only `rackscreen update`, as root, no password.
+/// The sudoers drop-in: exactly `rackscreen update` and `rackscreen
+/// tailscale-setup` (no other arguments), as root, no password.
 pub fn sudoers_text(user: &str, binary: &str) -> String {
-    format!("{user} ALL=(root) NOPASSWD: {binary} update\n")
+    format!(
+        "{user} ALL=(root) NOPASSWD: {binary} update\n\
+         {user} ALL=(root) NOPASSWD: {binary} tailscale-setup\n"
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -499,7 +505,8 @@ mod tests {
         let path = dir.path().join("etc/sudoers.d/rackscreen");
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "silke ALL=(root) NOPASSWD: /usr/local/bin/rackscreen update\n"
+            "silke ALL=(root) NOPASSWD: /usr/local/bin/rackscreen update\n\
+             silke ALL=(root) NOPASSWD: /usr/local/bin/rackscreen tailscale-setup\n"
         );
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,

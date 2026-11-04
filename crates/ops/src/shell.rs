@@ -49,6 +49,17 @@ pub trait Shell: Send + Sync {
         }
         Ok(out)
     }
+
+    /// Run, handing each line of output (stdout, then stderr) to `line` as
+    /// it comes; true on exit 0. The default waits for the whole output.
+    fn run_streaming(&self, cmd: &str, args: &[&str], line: &mut dyn FnMut(&str)) -> Result<bool> {
+        let out = self.run(cmd, args)?;
+        out.stdout
+            .lines()
+            .chain(out.stderr.lines())
+            .for_each(&mut *line);
+        Ok(out.success())
+    }
 }
 
 pub struct RealShell;
@@ -64,6 +75,35 @@ impl Shell for RealShell {
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         })
+    }
+
+    fn run_streaming(&self, cmd: &str, args: &[&str], line: &mut dyn FnMut(&str)) -> Result<bool> {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+        let mut child = Command::new(cmd)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("spawn {cmd}"))?;
+        let stderr = child.stderr.take().expect("piped");
+        let err_lines = std::thread::spawn(move || {
+            BufReader::new(stderr)
+                .lines()
+                .map_while(|l| l.ok())
+                .collect::<Vec<_>>()
+        });
+        for l in BufReader::new(child.stdout.take().expect("piped"))
+            .lines()
+            .map_while(|l| l.ok())
+        {
+            line(&l);
+        }
+        for l in err_lines.join().unwrap_or_default() {
+            line(&l);
+        }
+        Ok(child.wait()?.success())
     }
 }
 
@@ -128,5 +168,19 @@ mod tests {
     fn real_shell_runs_true() {
         assert!(RealShell.run("true", &[]).unwrap().success());
         assert!(!RealShell.run("false", &[]).unwrap().success());
+    }
+
+    #[test]
+    fn real_shell_streams_stdout_then_stderr() {
+        let mut lines = Vec::new();
+        let ok = RealShell
+            .run_streaming(
+                "sh",
+                &["-c", "echo a; echo b >&2; echo c; exit 3"],
+                &mut |l| lines.push(l.to_string()),
+            )
+            .unwrap();
+        assert!(!ok);
+        assert_eq!(lines, ["a", "c", "b"]);
     }
 }
