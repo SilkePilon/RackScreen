@@ -58,7 +58,7 @@ pub const SHOWS: &[ShowDef] = &[
     },
     ShowDef {
         id: "deep-sea",
-        name: "Deep sea",
+        name: "Deep sea lantern",
         secs: deep_sea::SECS,
         draw: deep_sea::draw,
     },
@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(
             got,
             [
-                ("deep-sea", "Deep sea", 10.0),
+                ("deep-sea", "Deep sea lantern", 12.0),
                 ("paper-plane", "Paper plane", 8.0),
                 ("storm", "Thunderstorm", 8.0),
                 ("day", "Day in a minute", 12.0),

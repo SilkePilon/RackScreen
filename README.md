@@ -90,10 +90,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
 </p>
 
 <p align="center">
-  <img src=".github/media/shows/deep-sea.gif" alt="Deep sea show across four screens" width="720">
+  <img src=".github/media/shows/deep-sea.gif" alt="Deep sea lantern show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Deep sea</b> (<code>deep-sea</code>) — kelp sways, light rays drift, bubbles rise and a school of orange fish swims across.
+  <b>Deep sea lantern</b> (<code>deep-sea</code>) — a school of fish splits around a sea turtle on a sunlit reef and follows a little light into the deep, until an anglerfish opens its jaws; while it sulks, an octopus steals the lure as a reading lamp.
 </p>
 
 <p align="center">

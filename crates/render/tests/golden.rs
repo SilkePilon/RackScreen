@@ -1507,8 +1507,8 @@ fn show_freight() {
 #[test]
 fn show_round_one() {
     for (id, t, name) in [
-        ("deep-sea", 5.0, "show_deep_sea"),
-        ("deep-sea", 6.0, "show_deep_sea_school"),
+        ("deep-sea", 7.6, "show_deep_sea_jaws"),
+        ("deep-sea", 11.4, "show_deep_sea_lamp"),
         ("paper-plane", 5.2, "show_paper_plane"),
         ("storm", 3.95, "show_storm"),
         ("day", 3.0, "show_day"),

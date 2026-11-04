@@ -5,7 +5,7 @@ import { setShowCardFactory } from "@/lib/show-card"
 
 const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: string]> = {
   freight: ["#2a1c4a", "#d9575b", "#f2a65a", "#2b1d33"],
-  "deep-sea": ["#0b3a63", "#0b2a50", "#f2a03a", "#08203d"],
+  "deep-sea": ["#2a90c0", "#0a1a34", "#8affe0", "#060f22"],
   "paper-plane": ["#5aaee6", "#7cc6f0", "#ffffff", "#a6dcf5"],
   storm: ["#141927", "#2c3445", "#c9d0ff", "#0d1017"],
   day: ["#6cc0ec", "#a6dcf5", "#ffe58a", "#2d5a3a"],
