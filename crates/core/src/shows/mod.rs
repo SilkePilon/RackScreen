@@ -18,6 +18,7 @@ pub mod world;
 
 mod boulder;
 mod fx;
+mod time_car;
 
 use world::{Layout, World, WorldFrame};
 
@@ -107,6 +108,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: boulder::SECS,
         draw: boulder::draw,
     },
+    ShowDef {
+        id: "time-car",
+        name: "Time machine",
+        secs: time_car::SECS,
+        draw: time_car::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -162,6 +169,7 @@ mod tests {
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
                 ("boulder", "Temple run", 10.0),
+                ("time-car", "Time machine", 10.0),
             ]
         );
     }
