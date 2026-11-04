@@ -38,8 +38,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { api, ApiError, errorMessage } from "@/lib/api"
 import { useDraft } from "@/lib/draft"
 import { gifNameError, suggestName } from "@/lib/gif"
+import { formatMb, gifMb, keptFrames, MAX_FRAMES, rememberFrames } from "@/lib/gif-memory"
 import type { Config, GifCfg, GifHit, GifProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { BudgetWarning } from "@/pages/integrations/gif-memory"
 
 const PROVIDER_NAME: Record<GifProvider, string> = { giphy: "GIPHY", tenor: "Tenor" }
 const NO_SCREEN = "none"
@@ -406,7 +408,7 @@ function Tile({ hit, onClick }: { hit: GifHit; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      title={label}
+      title={hit.frames ? `${label} · ${hit.frames} frames, ~${formatMb(gifMb(hit.frames))} on the Pi` : label}
       aria-label={`Add ${label}`}
       className="group relative block w-full overflow-hidden rounded-lg bg-muted ring-1 ring-border transition-[box-shadow,transform] hover:ring-2 hover:ring-primary/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:scale-[0.98]"
       style={{ aspectRatio: `${hit.width || 1} / ${hit.height || 1}` }}
@@ -424,8 +426,9 @@ function Tile({ hit, onClick }: { hit: GifHit; onClick: () => void }) {
           loaded ? "opacity-100" : "opacity-0"
         )}
       />
-      <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-2 pt-6 pb-1.5 text-left text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-        {label}
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-2 bg-gradient-to-t from-black/80 to-transparent px-2 pt-6 pb-1.5 text-left text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {hit.frames ? <span className="shrink-0 text-white/75 tabular">~{formatMb(gifMb(hit.frames))}</span> : null}
       </span>
     </button>
   )
@@ -469,6 +472,7 @@ function AddPickDialog({
     e.preventDefault()
     setTouched(true)
     if (!pick || nameErr || dupe) return
+    rememberFrames(pick.url, pick.frames)
     d.update((c) => addGif(c, { name: n, url: pick.url }, screen))
     toast.success(`Added ${n}`, {
       description: screen === null ? "Save to keep it." : `On screen ${screen + 1} once you save.`,
@@ -496,9 +500,14 @@ function AddPickDialog({
                   className="size-full object-cover"
                 />
               </div>
-              <p className="text-[13px] text-muted-foreground">
-                Roughly how it sits on a round panel. The Pi downloads the full GIF once.
-              </p>
+              <div className="flex flex-col gap-1 text-[13px] text-muted-foreground">
+                <p>Roughly how it sits on a round panel. The Pi downloads the full GIF once.</p>
+                <p className="text-foreground tabular">
+                  {pick.frames
+                    ? `${pick.frames} frames · about ${formatMb(gifMb(pick.frames))} of memory${pick.frames > MAX_FRAMES ? `, ${keptFrames(pick.frames)} frames kept` : ""}`
+                    : `Up to ${formatMb(gifMb(null))} of memory`}
+                </p>
+              </div>
             </div>
             <FieldGroup>
               <Field data-invalid={(touched && !!nameErr) || undefined}>
@@ -526,6 +535,7 @@ function AddPickDialog({
                 <ScreenSelect id="pick-screen" value={screen} onChange={setScreen} />
               </Field>
             </FieldGroup>
+            {screen !== null && !dupe && <BudgetWarning mb={gifMb(pick.frames)} known={!!pick.frames} />}
             {dupe && <p className="text-[13px] text-destructive">{dupe.name} already is this GIF.</p>}
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={onClose}>

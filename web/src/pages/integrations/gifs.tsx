@@ -41,7 +41,9 @@ import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDraft } from "@/lib/draft"
 import { classifyLink, gifNameError } from "@/lib/gif"
+import { gifMb } from "@/lib/gif-memory"
 import type { Config, GifCfg } from "@/lib/types"
+import { BudgetWarning, GifMemoryMeta, GifMemorySection } from "@/pages/integrations/gif-memory"
 import { addGif, GifSearch, ScreenSelect } from "@/pages/integrations/gif-search"
 
 const RATINGS = [
@@ -60,9 +62,10 @@ export default function Gifs() {
     <PageBody>
       <PageIntro title="GIFs">
         Search GIPHY and Tenor, or paste any https link ending in .gif. A screen shows a GIF as the role{" "}
-        <code className="font-mono text-xs">gif:&lt;name&gt;</code>. Each GIF a screen uses takes up to about 35 MB
-        of memory on the Pi.
+        <code className="font-mono text-xs">gif:&lt;name&gt;</code>. Only GIFs a screen shows are downloaded and kept
+        in memory.
       </PageIntro>
+      <GifMemorySection />
       <Section
         title="Add a GIF"
         description={
@@ -239,6 +242,7 @@ function PasteForm() {
           </div>
         </FieldGroup>
       </div>
+      {screen !== null && link.ok && <BudgetWarning mb={gifMb(null)} known={false} />}
       <div className="flex justify-end">
         <Button type="submit">
           <PlusIcon data-icon="inline-start" />
@@ -309,6 +313,9 @@ function GifRow({ gif, index, onEdit }: { gif: GifCfg; index: number; onEdit: ()
           <span className="truncate">{gif.url}</span>
           <ExternalLinkIcon className="size-3 shrink-0" />
         </a>
+      </div>
+      <div className="hidden shrink-0 sm:block">
+        <GifMemoryMeta name={gif.name} onScreen={used.length > 0} />
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Tooltip>
