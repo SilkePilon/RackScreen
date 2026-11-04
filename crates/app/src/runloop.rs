@@ -22,7 +22,10 @@ use rackscreen_core::theme::Role;
 use rackscreen_display::{DisplayCmd, Mailbox, PushStats};
 use rackscreen_render::frame::Orient;
 
-use crate::hub::{Control, Hub, LinkStatus, NightStatus, ScreenStat, ScreenStatus, StatusSnapshot};
+use crate::hub::{
+    gif_status, Control, GifStatus, Hub, LinkStatus, NightStatus, ScreenStat, ScreenStatus,
+    StatusSnapshot,
+};
 use crate::night::{NightFrame, NightPhase};
 use crate::worker::{Job, ScreenWorker};
 
@@ -679,6 +682,23 @@ impl RenderLoop {
         }
     }
 
+    /// Where each configured GIF stands; only the ones a screen shows are
+    /// downloaded, the rest are `off`.
+    fn gif_rows(&self, model: &Model) -> Vec<GifStatus> {
+        self.gif_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let i = i.min(u16::MAX as usize) as u16;
+                let used = self
+                    .screens_roles
+                    .iter()
+                    .any(|roles| roles.contains(&Role::Gif(i)));
+                gif_status(name, used, model.gif(i))
+            })
+            .collect()
+    }
+
     fn snapshot(
         &self,
         model: &Model,
@@ -724,6 +744,7 @@ impl RenderLoop {
             links: link_rows(model.link(), self.links, heard, model),
             stats: stats.to_vec(),
             tiles: model.tiles().into_iter().map(Into::into).collect(),
+            gifs: self.gif_rows(model),
         }
     }
 }

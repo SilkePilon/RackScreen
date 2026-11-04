@@ -9,6 +9,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use rackscreen_core::event::Event;
+use rackscreen_core::gif::GifState;
 use rackscreen_core::shows::schedule::Request;
 use rackscreen_core::theme::Role;
 use serde::Serialize;
@@ -310,6 +311,42 @@ impl Default for NightStatus {
     }
 }
 
+/// One configured GIF as the render loop holds it.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct GifStatus {
+    /// Its name under `gifs:`.
+    pub name: String,
+    /// Some screen of the running config shows it (only those are decoded).
+    pub used: bool,
+    /// `off` (no screen shows it), `loading`, `ready` or `error`.
+    pub state: &'static str,
+    /// Decoded frames, when ready.
+    pub frames: Option<usize>,
+    /// Bytes the decoded frames take, when ready.
+    pub bytes: Option<usize>,
+    /// Why the last attempt failed.
+    pub error: Option<String>,
+}
+
+/// The status row of GIF `name` in `state`; `used` when a screen shows it.
+pub fn gif_status(name: &str, used: bool, state: &GifState) -> GifStatus {
+    let (state, frames, bytes, error) = match state {
+        GifState::Ready(f) => ("ready", Some(f.0.len()), Some(f.0.bytes()), None),
+        // an unused GIF is never downloaded: whatever the model holds is stale
+        _ if !used => ("off", None, None, None),
+        GifState::Loading => ("loading", None, None, None),
+        GifState::Failed(e) => ("error", None, None, Some(e.clone())),
+    };
+    GifStatus {
+        name: name.to_string(),
+        used,
+        state,
+        frames,
+        bytes,
+        error,
+    }
+}
+
 /// What the render loop publishes about once a second.
 #[derive(Clone, Debug, Serialize, PartialEq, Default)]
 pub struct StatusSnapshot {
@@ -318,6 +355,8 @@ pub struct StatusSnapshot {
     pub links: Vec<LinkStatus>,
     pub stats: Vec<ScreenStat>,
     pub tiles: Vec<TileStatus>,
+    /// Every configured GIF, in `gifs:` order.
+    pub gifs: Vec<GifStatus>,
 }
 
 /// The supervisor's view of the monitor.
@@ -458,6 +497,7 @@ impl Hub {
             let mut s = self.status.lock().unwrap();
             s.screens.clear();
             s.stats.clear();
+            s.gifs.clear();
         }
     }
 
@@ -591,6 +631,31 @@ mod tests {
         hub.set_control(Some(h3));
         assert!(rx3.try_recv().is_err());
         assert_eq!(hub.status().night.mode, "auto");
+    }
+
+    #[test]
+    fn gif_rows_tell_state_size_and_errors() {
+        use rackscreen_core::gif::{GifFrames, GifRef, FRAME_BYTES};
+        let frames = GifFrames::new(vec![(vec![0; FRAME_BYTES], 50); 3]).unwrap();
+        let ready = GifState::Ready(GifRef(Arc::new(frames)));
+        let r = gif_status("cat", true, &ready);
+        assert_eq!(
+            (r.state, r.frames, r.bytes),
+            ("ready", Some(3), Some(3 * FRAME_BYTES))
+        );
+        let l = gif_status("dog", true, &GifState::Loading);
+        assert_eq!((l.state, l.frames, l.error), ("loading", None, None));
+        let e = gif_status("x", true, &GifState::Failed("404".into()));
+        assert_eq!((e.state, e.error.as_deref()), ("error", Some("404")));
+        assert_eq!(gif_status("x", false, &GifState::Loading).state, "off");
+        assert_eq!(
+            gif_status("x", false, &GifState::Failed("old".into())).error,
+            None,
+            "not on a screen: not tried"
+        );
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["name"], "cat");
+        assert_eq!(json["used"], true);
     }
 
     #[test]

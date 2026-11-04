@@ -1144,11 +1144,11 @@ impl Model {
             Event::Gif { index, frames } => {
                 *self.gif_slot(index) = crate::gif::GifState::Ready(frames);
             }
-            Event::GifFailed { index, .. } => {
+            Event::GifFailed { index, reason } => {
                 let slot = self.gif_slot(index);
                 // A GIF that plays keeps playing.
                 if !matches!(slot, crate::gif::GifState::Ready(_)) {
-                    *slot = crate::gif::GifState::Failed;
+                    *slot = crate::gif::GifState::Failed(reason);
                 }
             }
             Event::Weather {

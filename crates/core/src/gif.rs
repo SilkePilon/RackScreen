@@ -130,8 +130,15 @@ pub enum GifState {
     #[default]
     Loading,
     Ready(GifRef),
-    /// The last attempt failed; the source retries.
-    Failed,
+    /// The last attempt failed (why); the source retries.
+    Failed(String),
+}
+
+impl GifFrames {
+    /// Bytes the decoded frames take.
+    pub fn bytes(&self) -> usize {
+        self.frames.len() * FRAME_BYTES
+    }
 }
 
 /// What a pasted link needs before its `.gif` can be downloaded.

@@ -107,7 +107,7 @@ impl crate::model::Model {
                 s
             }
             GifState::Loading => compose(&no_data_screen(role, NoData::Loading), ui, now),
-            GifState::Failed => compose(&no_data_screen(role, NoData::GifFailed), ui, now),
+            GifState::Failed(_) => compose(&no_data_screen(role, NoData::GifFailed), ui, now),
         }
     }
 
