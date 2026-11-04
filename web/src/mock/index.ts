@@ -9,7 +9,18 @@ import { parse, stringify } from "yaml"
 
 import { setLiveFactory, setLogStreamFactory, type LiveSocket, type LogSource } from "@/lib/live"
 import { setAt, getAt } from "@/lib/path"
-import type { Config, GifHit, GifPage, GifProvider, LogLine, NightMode, SecretPath, Showing, Status, UpdateState } from "@/lib/types"
+import type {
+  Config,
+  GifHit,
+  GifPage,
+  GifProvider,
+  LogLine,
+  NightMode,
+  SecretPath,
+  Showing,
+  Status,
+  UpdateState,
+} from "@/lib/types"
 import { SECRET_PATHS } from "@/lib/types"
 import { STYLES, type TransitionDirection } from "@/lib/transitions"
 import { defaultConfig, makeLog, rolesFor, ROLE_DEFS, SHOWS } from "@/mock/data"
@@ -130,7 +141,11 @@ function status(): Status {
       { name: "qBittorrent", state: "down", detail: "connection refused" },
       { name: "Electricity Maps", state: "ok", detail: "NL, updated 2 min ago" },
       { name: "Open-Meteo", state: "ok", detail: "updated 6 min ago" },
-      { name: "Spotify", state: state.spotifyLoggedIn ? "ok" : "warn", detail: state.spotifyLoggedIn ? "Logged in as Silke" : "Not logged in" },
+      {
+        name: "Spotify",
+        state: state.spotifyLoggedIn ? "ok" : "warn",
+        detail: state.spotifyLoggedIn ? "Logged in as Silke" : "Not logged in",
+      },
       { name: "GitHub", state: "ok", detail: "4,812 requests left" },
       { name: "Jellyfin", state: "off", detail: "Turned off" },
     ],
@@ -142,17 +157,40 @@ function status(): Status {
       fps: 60,
     })),
     tiles: [
-      { key: "cpu", label: "Cluster CPU", value: String(Math.round(18 + wob(0) * 30)), unit: "%", tone: "ok" },
-      { key: "mem", label: "Cluster memory", value: String(Math.round(61 + wob(1) * 6)), unit: "%", tone: "ok" },
+      {
+        key: "cpu",
+        label: "Cluster CPU",
+        value: String(Math.round(18 + wob(0) * 30)),
+        unit: "%",
+        tone: "ok",
+      },
+      {
+        key: "mem",
+        label: "Cluster memory",
+        value: String(Math.round(61 + wob(1) * 6)),
+        unit: "%",
+        tone: "ok",
+      },
       { key: "pods", label: "Pods running", value: "112", unit: "", tone: "ok" },
       { key: "nodes", label: "Nodes ready", value: "7/7", unit: "", tone: "ok" },
       { key: "alerts", label: "Alerts firing", value: "1", unit: "", tone: "warn" },
-      { key: "temp", label: "Hottest node", value: String(Math.round(58 + wob(2) * 8)), unit: "°C", tone: "muted" },
+      {
+        key: "temp",
+        label: "Hottest node",
+        value: String(Math.round(58 + wob(2) * 8)),
+        unit: "°C",
+        tone: "muted",
+      },
       { key: "weather", label: "Utrecht", value: "11", unit: "°C", tone: "muted" },
       { key: "renewable", label: "Renewable", value: "61", unit: "%", tone: "ok" },
       { key: "music", label: "Now playing", value: "Teardrop", unit: "Massive Attack", tone: "muted" },
     ],
-    host: { cpu_temp_c: +(49 + wob(3) * 4).toFixed(1), load1: +(0.3 + wob(4) * 0.4).toFixed(2), mem_used_mb: 312, mem_total_mb: 906 },
+    host: {
+      cpu_temp_c: +(49 + wob(3) * 4).toFixed(1),
+      load1: +(0.3 + wob(4) * 0.4).toFixed(2),
+      mem_used_mb: 312,
+      mem_total_mb: 906,
+    },
   }
 }
 
@@ -160,7 +198,8 @@ function validate(c: Config): string | null {
   if (!c.screens?.length) return "config needs at least one [[screens]] entry"
   const gifs = c.gifs ?? []
   for (const [i, g] of gifs.entries()) {
-    if (!/^[a-z0-9-]+$/.test(g.name)) return `gifs: '${g.name}' is not a valid name (lowercase letters, digits and -)`
+    if (!/^[a-z0-9-]+$/.test(g.name))
+      return `gifs: '${g.name}' is not a valid name (lowercase letters, digits and -)`
     if (gifs.slice(0, i).some((o) => o.name === g.name)) return `gifs: '${g.name}' is listed twice`
     const u = g.url.trim()
     if (!/^https:\/\//.test(u) || !/(giphy\.com|tenor\.com|\.gif($|\?))/.test(u))
@@ -171,33 +210,53 @@ function validate(c: Config): string | null {
     if (!s.roles.length) return `screen ${i + 1}: screen has no roles`
     for (const r of s.roles) {
       if (r.startsWith("gif:")) {
-        if (!gifs.some((g) => `gif:${g.name}` === r)) return `unknown GIF '${r}': add '${r.slice(4)}' under gifs:`
+        if (!gifs.some((g) => `gif:${g.name}` === r))
+          return `unknown GIF '${r}': add '${r.slice(4)}' under gifs:`
       } else if (!known.has(r)) return `unknown screen role '${r}'`
     }
-    if (![0, 90, 180, 270].includes(s.rotate)) return `screen '${s.roles[0]}': rotate must be 0, 90, 180 or 270 (got ${s.rotate})`
+    if (![0, 90, 180, 270].includes(s.rotate))
+      return `screen '${s.roles[0]}': rotate must be 0, 90, 180 or 270 (got ${s.rotate})`
     if (s.cycle_secs < 3 || s.cycle_secs > 300)
       return `screen '${s.roles[0]}': cycle_secs must be between 3 and 300 (got ${s.cycle_secs})`
   }
   if (!["g", "pg", "pg-13", "r"].includes(c.gif_search?.rating ?? "g"))
     return `gif_search.rating must be g, pg, pg-13 or r (got ${c.gif_search.rating})`
-  if (c.electricity.enabled && !c.electricity.zone.trim()) return "electricity.zone must be set when electricity is enabled"
-  if ((c.location.lat === null) !== (c.location.lon === null)) return "location needs both lat and lon, or neither"
+  if (c.electricity.enabled && !c.electricity.zone.trim())
+    return "electricity.zone must be set when electricity is enabled"
+  if ((c.location.lat === null) !== (c.location.lon === null))
+    return "location needs both lat and lon, or neither"
   if ((c.weather.enabled || c.rain.enabled || c.iss.enabled) && c.location.lat === null)
     return "weather, rain and iss need location.lat and location.lon"
-  for (const [n, s] of [["weather", c.weather.poll_secs], ["rain", c.rain.poll_secs], ["github", c.github.poll_secs]] as const)
+  for (const [n, s] of [
+    ["weather", c.weather.poll_secs],
+    ["rain", c.rain.poll_secs],
+    ["github", c.github.poll_secs],
+  ] as const)
     if (s < 60) return `${n}.poll_secs must be at least 60 (got ${s})`
   if (c.shows.every_mins < 2) return `shows.every_mins must be at least 2 (got ${c.shows.every_mins})`
   const tr = c.transitions ?? { style: "fade-black", direction: "", secs: 0.4, random: false }
-  for (const [what, t] of [["transitions", tr], ...(tr.shows ? [["transitions.shows", tr.shows] as const] : [])] as const) {
+  for (const [what, t] of [
+    ["transitions", tr],
+    ...(tr.shows ? [["transitions.shows", tr.shows] as const] : []),
+  ] as const) {
     const info = STYLES.find((s) => s.id === t.style)
-    if (!info) return `${what}.style: unknown transition '${t.style}' (known: ${STYLES.map((s) => s.id).join(", ")})`
-    if (info.directions.length && t.direction && !info.directions.includes(t.direction as TransitionDirection))
+    if (!info)
+      return `${what}.style: unknown transition '${t.style}' (known: ${STYLES.map((s) => s.id).join(", ")})`
+    if (
+      info.directions.length &&
+      t.direction &&
+      !info.directions.includes(t.direction as TransitionDirection)
+    )
       return `${what}.direction: transition '${t.style}' takes direction ${info.directions.join(", ")} (got ${t.direction})`
     if (!(t.secs >= 0.15 && t.secs <= 2)) return `${what}.secs must be between 0.15 and 2 (got ${t.secs})`
   }
-  if (c.shows.gap_mm < 0 || c.shows.gap_mm > 200) return `shows.gap_mm must be between 0 and 200 (got ${c.shows.gap_mm})`
+  if (c.shows.gap_mm < 0 || c.shows.gap_mm > 200)
+    return `shows.gap_mm must be between 0 and 200 (got ${c.shows.gap_mm})`
   const url = c.jellyfin.url.trim()
   if (url && !/^https?:\/\//.test(url)) return `jellyfin.url must start with http:// or https:// (got ${url})`
+  const ha = c.homeassistant.url.trim()
+  if (ha && !/^https?:\/\//.test(ha))
+    return `homeassistant.url must start with http:// or https:// (got ${ha})`
   if (!/^[A-Za-z0-9]*$/.test(c.spotify.client_id.trim()))
     return `spotify.client_id must be letters and digits only (got ${c.spotify.client_id})`
   return null
@@ -207,7 +266,8 @@ function save(incoming: Config, fromYaml: boolean) {
   const err = validate(incoming)
   if (err) return json(400, { error: err })
   const webChanged =
-    JSON.stringify({ ...state.config.web, password: null }) !== JSON.stringify({ ...incoming.web, password: null })
+    JSON.stringify({ ...state.config.web, password: null }) !==
+    JSON.stringify({ ...incoming.web, password: null })
   for (const p of SECRET_PATHS) {
     const v = getAt(incoming, p)
     if (fromYaml) {
@@ -235,7 +295,20 @@ function save(incoming: Config, fromYaml: boolean) {
 }
 
 // Fake GIF search: animated SVG previews as data URLs, nothing from the network.
-const WORDS = ["happy", "dance", "party", "cat", "wow", "yes", "spin", "wave", "jump", "cheers", "hype", "chill"]
+const WORDS = [
+  "happy",
+  "dance",
+  "party",
+  "cat",
+  "wow",
+  "yes",
+  "spin",
+  "wave",
+  "jump",
+  "cheers",
+  "hype",
+  "chill",
+]
 function hash(s: string) {
   let h = 2166136261
   for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619)
@@ -261,13 +334,26 @@ function fakeGifs(provider: GifProvider, q: string, offset: number): GifPage {
   for (let i = offset; i < Math.min(offset + 25, total); i++) {
     const seed = hash(`${provider}:${q}:${i}`)
     const word = q || WORDS[seed % WORDS.length]
-    const [w, h] = [[200, 113], [200, 200], [200, 150], [200, 267], [200, 112]][seed % 5]
+    const [w, h] = [
+      [200, 113],
+      [200, 200],
+      [200, 150],
+      [200, 267],
+      [200, 112],
+    ][seed % 5]
     const id = seed.toString(36) + i.toString(36)
-    const slug = word.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "gif"
+    const slug =
+      word
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "gif"
     results.push({
       id,
       title: `${word[0].toUpperCase()}${word.slice(1)} ${["GIF", "Reaction", "Loop", "Mood"][seed % 4]}`,
-      url: provider === "giphy" ? `https://giphy.com/gifs/${id}` : `https://media.tenor.com/${id}AAAAC/${slug}.gif`,
+      url:
+        provider === "giphy"
+          ? `https://giphy.com/gifs/${id}`
+          : `https://media.tenor.com/${id}AAAAC/${slug}.gif`,
       preview: fakePreview(seed, w, h),
       width: w,
       height: h,
@@ -287,7 +373,9 @@ const gifSince = new Map<string, number>()
 const sysStart = Date.now()
 
 function usedGifNames() {
-  return new Set(state.config.screens.flatMap((s) => s.roles.filter((r) => r.startsWith("gif:")).map((r) => r.slice(4))))
+  return new Set(
+    state.config.screens.flatMap((s) => s.roles.filter((r) => r.startsWith("gif:")).map((r) => r.slice(4)))
+  )
 }
 
 function mockGifRows() {
@@ -300,14 +388,28 @@ function mockGifRows() {
     }
     if (!gifSince.has(g.name)) gifSince.set(g.name, now)
     if (g.url.includes("tenor.com/view/nod")) {
-      return { name: g.name, used: true, state: "error" as const, frames: null, mb: null, error: "HTTP 404 from media.tenor.com" }
+      return {
+        name: g.name,
+        used: true,
+        state: "error" as const,
+        frames: null,
+        mb: null,
+        error: "HTTP 404 from media.tenor.com",
+      }
     }
     if (now - gifSince.get(g.name)! < 4000) {
       return { name: g.name, used: true, state: "loading" as const, frames: null, mb: null, error: null }
     }
     const raw = 20 + (hash(g.url) % 200)
     const frames = raw <= MAX_FRAMES ? raw : Math.ceil(raw / Math.ceil(raw / MAX_FRAMES))
-    return { name: g.name, used: true, state: "ready" as const, frames, mb: +((frames * FRAME_BYTES) / MIB).toFixed(1), error: null }
+    return {
+      name: g.name,
+      used: true,
+      state: "ready" as const,
+      frames,
+      mb: +((frames * FRAME_BYTES) / MIB).toFixed(1),
+      error: null,
+    }
   })
 }
 
@@ -361,13 +463,33 @@ function system() {
       usage_pct: +usage.toFixed(1),
       temp_c: +(51 + wave(23) * 6).toFixed(1),
       freq_mhz: usage > 30 ? 1400 : 600,
-      load: [+(0.9 + wave(11) * 0.8).toFixed(2), +(1.1 + wave(40) * 0.3).toFixed(2), +(1.05 + wave(90) * 0.1).toFixed(2)],
+      load: [
+        +(0.9 + wave(11) * 0.8).toFixed(2),
+        +(1.1 + wave(40) * 0.3).toFixed(2),
+        +(1.05 + wave(90) * 0.1).toFixed(2),
+      ],
     },
-    memory: { total_mb: m.total, available_mb: m.available, used_mb: m.total - m.available, swap_total_mb: 99, swap_used_mb: 12 },
+    memory: {
+      total_mb: m.total,
+      available_mb: m.available,
+      used_mb: m.total - m.available,
+      swap_total_mb: 99,
+      swap_used_mb: 12,
+    },
     disk: { path: "/", total_gb: 29.1, used_gb: 6.4 },
-    process: { rss_mb: m.rss, cpu_pct: +proc.toFixed(1), threads: 11, uptime_secs: Math.floor(Date.now() / 1000) - state.started },
+    process: {
+      rss_mb: m.rss,
+      cpu_pct: +proc.toFixed(1),
+      threads: 11,
+      uptime_secs: Math.floor(Date.now() / 1000) - state.started,
+    },
     throttled: params.has("undervolt")
-      ? { now: true, since_boot: true, flags: ["under_voltage", "throttled", "under_voltage_since_boot", "throttled_since_boot"], raw: 0x50005 }
+      ? {
+          now: true,
+          since_boot: true,
+          flags: ["under_voltage", "throttled", "under_voltage_since_boot", "throttled_since_boot"],
+          raw: 0x50005,
+        }
       : { now: false, since_boot: false, flags: [], raw: 0 },
     network: [
       { iface: "eth0", ipv4: "192.168.1.172" },
@@ -395,10 +517,14 @@ async function handle(method: string, path: string, body: unknown, headers: Head
   const url = new URL(path, location.origin)
   const p = url.pathname.replace(/^\/api/, "")
   const b = (body ?? {}) as Record<string, unknown>
-  if (method !== "GET" && headers.get("X-RackScreen") !== "1") return json(403, { error: "missing X-RackScreen header" })
+  if (method !== "GET" && headers.get("X-RackScreen") !== "1")
+    return json(403, { error: "missing X-RackScreen header" })
 
   if (p === "/auth" && method === "GET")
-    return json(200, { required: state.loginRequired, authenticated: !state.loginRequired || state.authenticated })
+    return json(200, {
+      required: state.loginRequired,
+      authenticated: !state.loginRequired || state.authenticated,
+    })
   if (p === "/auth/login") {
     const ok = b.password === (state.secretValues["web.password"] || "rackscreen")
     if (!ok) return json(401, { error: "Wrong password" })
@@ -455,7 +581,9 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       return json(200, err ? { ok: false, error: err } : { ok: true })
     }
     case "GET /config/yaml":
-      return json(200, { yaml: "# RackScreen configuration (written by rackscreen)\n" + stringify(fullConfig()) })
+      return json(200, {
+        yaml: "# RackScreen configuration (written by rackscreen)\n" + stringify(fullConfig()),
+      })
     case "PUT /config/yaml": {
       let parsed: Config
       try {
@@ -474,7 +602,8 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     case "POST /control/role": {
       const screen = Number(b.screen)
       const s = state.config.screens[screen]
-      if (!s || !s.roles.includes(String(b.role))) return json(400, { error: `screen ${screen + 1} has no role '${b.role}'` })
+      if (!s || !s.roles.includes(String(b.role)))
+        return json(400, { error: `screen ${screen + 1} has no role '${b.role}'` })
       state.jumps.set(screen, { role: String(b.role), at: now })
       return json(200, { ok: true })
     }
@@ -487,8 +616,10 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     case "POST /control/transition-test": {
       const showing = screenNow(0, now).showing
       if (showing === "show") return json(409, { error: "Wait for the show to finish first." })
-      if (showing === "night") return json(409, { error: "The panels are asleep: switch night mode off first." })
-      if (showing === "pattern" || showing === "identify") return json(409, { error: "The test pattern is on: turn it off first." })
+      if (showing === "night")
+        return json(409, { error: "The panels are asleep: switch night mode off first." })
+      if (showing === "pattern" || showing === "identify")
+        return json(409, { error: "The test pattern is on: turn it off first." })
       const screens = b.screen === undefined ? state.config.screens.map((_, i) => i) : [Number(b.screen)]
       for (const i of screens) {
         const s = state.config.screens[i]
@@ -499,7 +630,10 @@ async function handle(method: string, path: string, body: unknown, headers: Head
         const next = s.roles[(s.roles.indexOf(cur) + 1) % s.roles.length]
         state.jumps.set(i, { role: next, at: now + i * 700 })
       }
-      pushLog("INFO", `transition test: ${b.screen === undefined ? "every screen" : `screen ${Number(b.screen) + 1}`} changes role now`)
+      pushLog(
+        "INFO",
+        `transition test: ${b.screen === undefined ? "every screen" : `screen ${Number(b.screen) + 1}`} changes role now`
+      )
       return json(200, { ok: true })
     }
     case "POST /control/night":
@@ -530,7 +664,10 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       })
     case "POST /spotify/callback": {
       const pasted = String(b.pasted ?? "")
-      if (!/code=/.test(pasted)) return json(400, { error: "That address has no code in it. Copy the whole address bar after logging in." })
+      if (!/code=/.test(pasted))
+        return json(400, {
+          error: "That address has no code in it. Copy the whole address bar after logging in.",
+        })
       state.spotifyLoggedIn = true
       return json(200, { ok: true, status: "Logged in as Silke" })
     }
@@ -542,16 +679,34 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     case "GET /gifs/search":
     case "GET /gifs/trending": {
       const provider = url.searchParams.get("provider") as GifProvider
-      if (provider !== "giphy" && provider !== "tenor") return json(400, { error: "provider must be giphy or tenor" })
+      if (provider !== "giphy" && provider !== "tenor")
+        return json(400, { error: "provider must be giphy or tenor" })
       if (!secretSet(`gif_search.${provider}_key`))
-        return json(400, { error: `No ${provider === "giphy" ? "GIPHY" : "Tenor"} API key: add one under GIF search and save` })
+        return json(400, {
+          error: `No ${provider === "giphy" ? "GIPHY" : "Tenor"} API key: add one under GIF search and save`,
+        })
       const q = (url.searchParams.get("q") ?? "").trim()
-      if (p === "/gifs/search" && (q.length < 1 || q.length > 100)) return json(400, { error: "q must be 1 to 100 characters" })
-      return json(200, fakeGifs(provider, p === "/gifs/search" ? q : "", Number(url.searchParams.get("offset") ?? 0)))
+      if (p === "/gifs/search" && (q.length < 1 || q.length > 100))
+        return json(400, { error: "q must be 1 to 100 characters" })
+      return json(
+        200,
+        fakeGifs(provider, p === "/gifs/search" ? q : "", Number(url.searchParams.get("offset") ?? 0))
+      )
     }
     case "GET /gifs/trending-terms":
       return json(200, {
-        terms: ["happy", "good morning", "dance", "cat", "thank you", "excited", "love", "party", "wow", "monday"],
+        terms: [
+          "happy",
+          "good morning",
+          "dance",
+          "cat",
+          "thank you",
+          "excited",
+          "love",
+          "party",
+          "wow",
+          "monday",
+        ],
       })
     case "GET /update":
       return json(200, state.update)
@@ -565,21 +720,24 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       ]
       state.update.job = { state: "running", log: [] }
       steps.forEach((s, i) =>
-        setTimeout(() => {
-          state.update.job.log.push(s)
-          if (i === steps.length - 1) {
-            state.offline = true
-            setTimeout(() => {
-              state.offline = false
-              state.update = {
-                ...state.update,
-                current: (state.update.latest ?? "v0.13.1").replace(/^v/, ""),
-                newer: false,
-                job: { state: "done", log: state.update.job.log },
-              }
-            }, 3500)
-          }
-        }, 700 * (i + 1)),
+        setTimeout(
+          () => {
+            state.update.job.log.push(s)
+            if (i === steps.length - 1) {
+              state.offline = true
+              setTimeout(() => {
+                state.offline = false
+                state.update = {
+                  ...state.update,
+                  current: (state.update.latest ?? "v0.13.1").replace(/^v/, ""),
+                  newer: false,
+                  job: { state: "done", log: state.update.job.log },
+                }
+              }, 3500)
+            }
+          },
+          700 * (i + 1)
+        )
       )
       return json(200, { ok: true })
     }
@@ -636,7 +794,13 @@ class MockLive implements LiveSocket {
     const now = Date.now()
     for (let i = 0; i < state.config.screens.length; i++) {
       const n = screenNow(i, now)
-      drawFrame(this.ctx, { screen: i, role: n.role, title: titleOf(n.role), t: now / 1000, showing: n.showing })
+      drawFrame(this.ctx, {
+        screen: i,
+        role: n.role,
+        title: titleOf(n.role),
+        t: now / 1000,
+        showing: n.showing,
+      })
       const blob = await this.canvas.convertToBlob({ type: "image/png" })
       const png = new Uint8Array(await blob.arrayBuffer())
       const msg = new Uint8Array(png.length + 1)

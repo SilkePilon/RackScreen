@@ -40,6 +40,12 @@ pub struct Config {
     pub jellyfin: JellyfinCfg,
     #[serde(default)]
     pub spotify: SpotifyCfg,
+    /// A Bambu Lab printer on the LAN for the `printer` role.
+    #[serde(default)]
+    pub bambu: BambuCfg,
+    /// Home Assistant entities a screen can show as `ha:<name>`.
+    #[serde(default)]
+    pub homeassistant: HomeAssistantCfg,
     #[serde(default)]
     pub shows: ShowsCfg,
     /// How one role gives way to the next, and the roles to a show.
@@ -413,6 +419,98 @@ pub struct JellyfinCfg {
     pub poll_secs: u64,
 }
 
+/// A Bambu Lab printer's local MQTT report. The printer needs LAN only mode
+/// with Developer Mode on; the access code and serial are on its screen.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct BambuCfg {
+    pub enabled: bool,
+    /// The printer's IP address or host name.
+    pub host: String,
+    /// The serial number, `01P00A000000000`.
+    pub serial: String,
+    /// The 8-character LAN access code.
+    pub access_code: String,
+}
+
+impl BambuCfg {
+    /// On, with a host, serial and access code.
+    pub fn ready(&self) -> bool {
+        self.enabled
+            && !self.host.trim().is_empty()
+            && !self.serial.trim().is_empty()
+            && !self.access_code.trim().is_empty()
+    }
+}
+
+/// Home Assistant's REST API with a long-lived access token.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct HomeAssistantCfg {
+    pub enabled: bool,
+    /// `http://homeassistant.local:8123`.
+    pub url: String,
+    /// A long-lived access token (profile → Security).
+    pub token: String,
+    pub poll_secs: u64,
+    /// Each shows on a screen as `ha:<name>`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<HaEntityCfg>,
+}
+
+impl HomeAssistantCfg {
+    /// On, with a URL and a token.
+    pub fn ready(&self) -> bool {
+        self.enabled && !self.url.trim().is_empty() && !self.token.trim().is_empty()
+    }
+}
+
+/// One Home Assistant entity, shown by a screen role `ha:<name>`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct HaEntityCfg {
+    /// Lowercase letters, digits and `-`; unique.
+    pub name: String,
+    /// The entity id, `sensor.living_room_temperature`.
+    pub entity: String,
+    /// The pill text; empty uses the entity's friendly name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    /// Show this attribute instead of the state (`current_temperature`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub attribute: String,
+    /// Use this unit instead of the entity's own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
+    /// The ring's range for a number; both or neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f32>,
+}
+
+/// `sensor.living_room_temperature`: a domain and an object id of lowercase
+/// letters, digits and `_`.
+pub fn valid_entity_id(id: &str) -> bool {
+    let ok = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    matches!(id.split_once('.'), Some((d, o)) if ok(d) && ok(o))
+}
+
+impl Default for HomeAssistantCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            token: String::new(),
+            poll_secs: 15,
+            entities: Vec::new(),
+        }
+    }
+}
+
 /// Spotify now playing for the music role. The login itself (tokens) lives
 /// in the service user's state dir, not here; `rackscreen setup` writes it.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -477,26 +575,42 @@ fn default_cycle() -> u64 {
 
 /// The prefix of a GIF role in a roles list: `gif:<name>`.
 pub const GIF_ROLE_PREFIX: &str = "gif:";
+/// The prefix of a Home Assistant role in a roles list: `ha:<name>`.
+pub const HA_ROLE_PREFIX: &str = "ha:";
 
 impl ScreenCfg {
     /// Every configured role, in cycling order. At least one. A `gif:` entry
     /// needs the `gifs:` list and is an error here; use `Config::screen_roles`.
     pub fn roles(&self) -> Result<Vec<Role>> {
-        self.roles_in(&[])
+        self.roles_in(&[], &[])
     }
-    /// Every configured role, `gif:<name>` resolved against `gifs`.
-    pub fn roles_in(&self, gifs: &[GifCfg]) -> Result<Vec<Role>> {
+    /// Every configured role, `gif:<name>` resolved against `gifs` and
+    /// `ha:<name>` against `ha`.
+    pub fn roles_in(&self, gifs: &[GifCfg], ha: &[HaEntityCfg]) -> Result<Vec<Role>> {
         anyhow::ensure!(!self.roles.is_empty(), "screen has no roles");
+        let index = |i: usize| u16::try_from(i).ok();
         self.roles
             .iter()
-            .map(|r| match r.strip_prefix(GIF_ROLE_PREFIX) {
-                Some(name) => gifs
-                    .iter()
-                    .position(|g| g.name == name)
-                    .and_then(|i| u16::try_from(i).ok())
-                    .map(Role::Gif)
-                    .with_context(|| format!("unknown GIF '{r}': add '{name}' under gifs:")),
-                None => Role::parse(r).with_context(|| format!("unknown screen role '{r}'")),
+            .map(|r| {
+                if let Some(name) = r.strip_prefix(GIF_ROLE_PREFIX) {
+                    gifs.iter()
+                        .position(|g| g.name == name)
+                        .and_then(index)
+                        .map(Role::Gif)
+                        .with_context(|| format!("unknown GIF '{r}': add '{name}' under gifs:"))
+                } else if let Some(name) = r.strip_prefix(HA_ROLE_PREFIX) {
+                    ha.iter()
+                        .position(|e| e.name == name)
+                        .and_then(index)
+                        .map(Role::Ha)
+                        .with_context(|| {
+                            format!(
+                                "unknown Home Assistant entity '{r}': add '{name}' under homeassistant.entities:"
+                            )
+                        })
+                } else {
+                    Role::parse(r).with_context(|| format!("unknown screen role '{r}'"))
+                }
             })
             .collect()
     }
@@ -840,7 +954,7 @@ impl Config {
 
     /// A screen's roles, `gif:<name>` resolved against `gifs:`.
     pub fn screen_roles(&self, screen: &ScreenCfg) -> Result<Vec<Role>> {
-        screen.roles_in(&self.gifs)
+        screen.roles_in(&self.gifs, &self.homeassistant.entities)
     }
 
     /// The name a role has in this config: `gif:<name>` for a GIF.
@@ -850,6 +964,13 @@ impl Config {
                 "{GIF_ROLE_PREFIX}{}",
                 self.gifs.get(i as usize).map_or("?", |g| g.name.as_str())
             ),
+            Role::Ha(i) => format!(
+                "{HA_ROLE_PREFIX}{}",
+                self.homeassistant
+                    .entities
+                    .get(i as usize)
+                    .map_or("?", |e| e.name.as_str())
+            ),
             r => r.name().to_string(),
         }
     }
@@ -857,7 +978,43 @@ impl Config {
     /// Every role a screen can show here: the built-in ones, then each GIF.
     pub fn pickable_roles(&self) -> Vec<Role> {
         let gifs = (0..self.gifs.len().min(u16::MAX as usize)).map(|i| Role::Gif(i as u16));
-        Role::ALL.iter().copied().chain(gifs).collect()
+        let ha = (0..self.homeassistant.entities.len().min(u16::MAX as usize))
+            .map(|i| Role::Ha(i as u16));
+        Role::ALL.iter().copied().chain(gifs).chain(ha).collect()
+    }
+
+    /// What the screens need to know about each Home Assistant entity.
+    pub fn ha_slots(&self) -> Vec<rackscreen_core::model::HaSlot> {
+        self.homeassistant
+            .entities
+            .iter()
+            .map(|e| rackscreen_core::model::HaSlot {
+                label: Some(e.label.trim().to_string()).filter(|l| !l.is_empty()),
+                min: e.min,
+                max: e.max,
+            })
+            .collect()
+    }
+
+    /// The Home Assistant entities some screen shows, for the poller.
+    pub fn used_ha(&self) -> Vec<(u16, &HaEntityCfg)> {
+        let used: std::collections::HashSet<u16> = self
+            .screens
+            .iter()
+            .filter_map(|s| self.screen_roles(s).ok())
+            .flatten()
+            .filter_map(|r| match r {
+                Role::Ha(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        self.homeassistant
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| used.contains(&(*i as u16)))
+            .map(|(i, e)| (i as u16, e))
+            .collect()
     }
 
     /// `(index, name, url)` of each GIF some screen shows, in `gifs:` order;
@@ -972,6 +1129,61 @@ impl Config {
                 "{name}.poll_secs must be at least 60 (got {secs})"
             );
         }
+        anyhow::ensure!(
+            self.homeassistant.poll_secs >= 5,
+            "homeassistant.poll_secs must be at least 5 (got {})",
+            self.homeassistant.poll_secs
+        );
+        let url = self.homeassistant.url.trim();
+        anyhow::ensure!(
+            url.is_empty() || url.starts_with("http://") || url.starts_with("https://"),
+            "homeassistant.url must start with http:// or https:// (got {url})"
+        );
+        let ents = &self.homeassistant.entities;
+        for (i, e) in ents.iter().enumerate() {
+            anyhow::ensure!(
+                rackscreen_core::gif::valid_gif_name(&e.name),
+                "homeassistant.entities: '{}' is not a valid name (lowercase letters, digits and -)",
+                e.name
+            );
+            anyhow::ensure!(
+                !ents[..i].iter().any(|o| o.name == e.name),
+                "homeassistant.entities: '{}' is listed twice",
+                e.name
+            );
+            anyhow::ensure!(
+                valid_entity_id(e.entity.trim()),
+                "homeassistant.entities: '{}' needs an entity id like sensor.living_room (got {})",
+                e.name,
+                e.entity.trim()
+            );
+            match (e.min, e.max) {
+                (Some(lo), Some(hi)) => anyhow::ensure!(
+                    lo.is_finite() && hi.is_finite() && hi > lo,
+                    "homeassistant.entities: '{}' needs max above min",
+                    e.name
+                ),
+                (None, None) => {}
+                _ => anyhow::bail!(
+                    "homeassistant.entities: '{}' needs both min and max, or neither",
+                    e.name
+                ),
+            }
+        }
+        let host = self.bambu.host.trim();
+        anyhow::ensure!(
+            !host.contains("://") && !host.contains('/') && !host.contains(' '),
+            "bambu.host is the printer's IP address or host name, without http:// (got {host})"
+        );
+        anyhow::ensure!(
+            self.bambu
+                .serial
+                .trim()
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric()),
+            "bambu.serial must be letters and digits only (got {})",
+            self.bambu.serial.trim()
+        );
         anyhow::ensure!(
             self.jellyfin.poll_secs >= 2,
             "jellyfin.poll_secs must be at least 2 (got {})",
@@ -1493,6 +1705,84 @@ mod tests {
             "never written back"
         );
     }
+    #[test]
+    fn bambu_and_home_assistant_parse_resolve_and_validate() {
+        let yaml = r#"
+bambu: { enabled: true, host: 192.168.1.50, serial: 01P00A000000000, access_code: "12345678" }
+homeassistant:
+  enabled: true
+  url: http://ha.local:8123
+  token: t
+  entities:
+    - { name: living, entity: sensor.living_room_temperature }
+    - { name: door, entity: binary_sensor.front_door, label: Front door }
+    - { name: spare, entity: light.desk, min: 0, max: 255 }
+screens:
+  - { roles: [printer, "ha:door", cpu], spi: 0, cs: 0, dc: 24, rst: 25 }
+"#;
+        let c: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        c.validate().unwrap();
+        assert!(c.bambu.ready() && c.homeassistant.ready());
+        assert_eq!(c.homeassistant.poll_secs, 15);
+        assert_eq!(
+            c.screen_roles(&c.screens[0]).unwrap(),
+            vec![Role::Printer, Role::Ha(1), Role::Cpu]
+        );
+        assert_eq!(c.role_name(Role::Ha(1)), "ha:door");
+        let used: Vec<u16> = c.used_ha().into_iter().map(|(i, _)| i).collect();
+        assert_eq!(used, vec![1], "only shown entities are polled");
+        assert!(c.pickable_roles().contains(&Role::Ha(2)));
+        let slots = c.ha_slots();
+        assert_eq!(slots[1].label.as_deref(), Some("Front door"));
+        assert_eq!((slots[2].min, slots[2].max), (Some(0.0), Some(255.0)));
+
+        let mut bad = c.clone();
+        bad.screens[0].roles = vec!["ha:nope".into()];
+        assert!(
+            format!("{:#}", bad.screen_roles(&bad.screens[0]).unwrap_err())
+                .contains("homeassistant.entities")
+        );
+        for (edit, msg) in [
+            (
+                Box::new(|c: &mut Config| c.homeassistant.entities[0].entity = "Sensor.X".into())
+                    as Box<dyn Fn(&mut Config)>,
+                "entity id",
+            ),
+            (
+                Box::new(|c: &mut Config| c.homeassistant.entities[2].name = "living".into()),
+                "listed twice",
+            ),
+            (
+                Box::new(|c: &mut Config| c.homeassistant.entities[2].max = None),
+                "both min and max",
+            ),
+            (
+                Box::new(|c: &mut Config| c.homeassistant.url = "ha.local".into()),
+                "homeassistant.url",
+            ),
+            (
+                Box::new(|c: &mut Config| c.homeassistant.poll_secs = 2),
+                "poll_secs",
+            ),
+            (
+                Box::new(|c: &mut Config| c.bambu.host = "http://192.168.1.50".into()),
+                "bambu.host",
+            ),
+        ] {
+            let mut b = c.clone();
+            edit(&mut b);
+            let err = format!("{:#}", b.validate().unwrap_err());
+            assert!(err.contains(msg), "{err}");
+        }
+        assert!(
+            valid_entity_id("sensor.a_1") && !valid_entity_id("sensor") && !valid_entity_id(".x")
+        );
+        let mut off = c.clone();
+        off.bambu.access_code.clear();
+        off.homeassistant.token = " ".into();
+        assert!(!off.bambu.ready() && !off.homeassistant.ready());
+    }
+
     #[test]
     fn media_github_ci_and_jellyfin_defaults_and_validation() {
         let c = Config::default();

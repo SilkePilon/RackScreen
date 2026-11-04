@@ -66,6 +66,8 @@ impl crate::model::Model {
             Role::Ci => !(link.github && self.ci().have),
             Role::Jellyfin => !self.jellyfin().have,
             Role::Music => !self.music().have,
+            Role::Printer => !self.printer().have,
+            Role::Ha(i) => !self.ha(i).is_some_and(|h| h.have),
             Role::Gif(i) => !matches!(self.gif(i), GifState::Ready(_)),
         }
     }
@@ -164,6 +166,15 @@ impl crate::model::Model {
             return connecting_scene(role.icon(), ui, now);
         }
         if role == Role::Jellyfin && !self.jellyfin_configured() {
+            ui.for_role(role);
+            return compose(&no_data_screen(role, NoData::Config), ui, now);
+        }
+        let unconfigured = match role {
+            Role::Printer => !self.printer_configured(),
+            Role::Ha(i) => !self.ha_configured() || self.ha(i).is_none(),
+            _ => false,
+        };
+        if unconfigured {
             ui.for_role(role);
             return compose(&no_data_screen(role, NoData::Config), ui, now);
         }

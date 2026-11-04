@@ -58,6 +58,7 @@ export const ROLE_DEFS: R[] = [
   ["media", "MEDIA", "Media", "Library counts and the current download."],
   ["jellyfin", "NOW PLAYING", "Media", "What Jellyfin is playing."],
   ["music", "MUSIC", "Media", "Now playing from Spotify or Jellyfin."],
+  ["printer", "3D PRINTER", "Home", "Bambu Lab print progress, time left and temperatures."],
   ["gh-activity", "CONTRIBUTIONS", "Developer", "Your GitHub contribution graph."],
   ["ci", "CI", "Developer", "Latest GitHub Actions runs."],
 ]
@@ -72,6 +73,12 @@ export function rolesFor(cfg: Config, secretSet: (p: string) => boolean): RoleIn
     if (name === "gh-activity" || name === "ci") return secretSet("github.token") ? null : "GitHub token"
     if (name === "deploys") return cfg.argocd.enabled ? null : "Argo CD"
     if (name === "jellyfin") return cfg.jellyfin.enabled && cfg.jellyfin.url ? null : "Jellyfin address"
+    if (name === "printer")
+      return cfg.bambu.enabled && cfg.bambu.host && secretSet("bambu.access_code") ? null : "Bambu printer"
+    if (name.startsWith("ha:"))
+      return cfg.homeassistant.enabled && cfg.homeassistant.url && secretSet("homeassistant.token")
+        ? null
+        : "Home Assistant token"
     if (name === "music") {
       const j = cfg.jellyfin.enabled && cfg.jellyfin.url
       const s = cfg.spotify.enabled && cfg.spotify.client_id
@@ -93,7 +100,14 @@ export function rolesFor(cfg: Config, secretSet: (p: string) => boolean): RoleIn
     description: g.url,
     needs: null,
   }))
-  return [...builtin, ...gifs]
+  const ha = (cfg.homeassistant.entities ?? []).map((e) => ({
+    name: `ha:${e.name}`,
+    title: e.label || e.name,
+    group: "Home",
+    description: "A Home Assistant entity: a number with its sparkline, or a state such as on, open or home.",
+    needs: needs(`ha:${e.name}`),
+  }))
+  return [...builtin, ...gifs, ...ha]
 }
 
 export function defaultConfig(): Config {
@@ -134,6 +148,14 @@ export function defaultConfig(): Config {
       lidarr: { service: "auto", port: 8686, api_key: null },
     },
     jellyfin: { enabled: false, url: "", api_key: null, poll_secs: 5 },
+    bambu: { enabled: false, host: "", serial: "", access_code: null },
+    homeassistant: {
+      enabled: true,
+      url: "http://homeassistant.local:8123",
+      token: null,
+      poll_secs: 15,
+      entities: [{ name: "living-temp", entity: "sensor.living_room_temperature", label: "Living room" }],
+    },
     spotify: { enabled: true, client_id: "4f1c9a2b7e0d4c3f8a6b5d2e1f0a9c8b" },
     shows: { enabled: true, every_mins: 15, gap_mm: 25 },
     transitions: { style: "fade-black", direction: "", secs: 0.4, random: false },
@@ -143,10 +165,50 @@ export function defaultConfig(): Config {
     ],
     gif_search: { giphy_key: null, tenor_key: null, rating: "g" },
     screens: [
-      { roles: ["cpu", "power-mix"], cycle_secs: 15, spi: 0, cs: 0, dc: 6, rst: 5, rotate: 270, hflip: false, hz },
-      { roles: ["mem", "renewable", "weather"], cycle_secs: 15, spi: 0, cs: 1, dc: 13, rst: 26, rotate: 270, hflip: true, hz },
-      { roles: ["pods", "music"], cycle_secs: 20, spi: 1, cs: 0, dc: 23, rst: 22, rotate: 270, hflip: true, hz },
-      { roles: ["health", "gh-activity", "gif:party"], cycle_secs: 15, spi: 1, cs: 1, dc: 4, rst: 27, rotate: 270, hflip: true, hz },
+      {
+        roles: ["cpu", "power-mix"],
+        cycle_secs: 15,
+        spi: 0,
+        cs: 0,
+        dc: 6,
+        rst: 5,
+        rotate: 270,
+        hflip: false,
+        hz,
+      },
+      {
+        roles: ["mem", "renewable", "weather"],
+        cycle_secs: 15,
+        spi: 0,
+        cs: 1,
+        dc: 13,
+        rst: 26,
+        rotate: 270,
+        hflip: true,
+        hz,
+      },
+      {
+        roles: ["pods", "music"],
+        cycle_secs: 20,
+        spi: 1,
+        cs: 0,
+        dc: 23,
+        rst: 22,
+        rotate: 270,
+        hflip: true,
+        hz,
+      },
+      {
+        roles: ["health", "gh-activity", "gif:party"],
+        cycle_secs: 15,
+        spi: 1,
+        cs: 1,
+        dc: 4,
+        rst: 27,
+        rotate: 270,
+        hflip: true,
+        hz,
+      },
     ],
     web: { enabled: true, bind: "0.0.0.0", port: 8740, password: null },
   }

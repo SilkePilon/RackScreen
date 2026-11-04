@@ -26,6 +26,7 @@ pub fn group(role: Role) -> &'static str {
         Role::GhActivity | Role::Ci => "GitHub",
         Role::Media | Role::Jellyfin | Role::Music => "Media",
         Role::Gif(_) => "GIFs",
+        Role::Printer | Role::Ha(_) => "Home",
         _ => "Cluster",
     }
 }
@@ -82,6 +83,12 @@ pub fn description(role: Role) -> &'static str {
         Role::Jellyfin => "Time left on what is playing on Jellyfin, title and viewer in the card.",
         Role::Music => "The album cover and track progress from Spotify or Jellyfin.",
         Role::Gif(_) => "A GIF over the whole panel, from the gifs list.",
+        Role::Printer => {
+            "A Bambu Lab print: progress on the ring in the filament colour, time left, layer and temperatures."
+        }
+        Role::Ha(_) => {
+            "A Home Assistant entity: a number with its sparkline, or a state such as on, open or home."
+        }
     }
 }
 
@@ -112,6 +119,8 @@ pub fn needs(cfg: &Config, role: Role) -> Option<&'static str> {
         Role::Jellyfin => {
             (!cfg.jellyfin.enabled || cfg.jellyfin.url.trim().is_empty()).then_some("Jellyfin URL")
         }
+        Role::Printer => (!cfg.bambu.ready()).then_some("Bambu printer"),
+        Role::Ha(_) => (!cfg.homeassistant.ready()).then_some("Home Assistant token"),
         Role::Music => {
             let jellyfin = cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty();
             let spotify = cfg.spotify.enabled && !cfg.spotify.client_id.trim().is_empty();
@@ -131,6 +140,18 @@ pub fn role_list(cfg: &Config) -> Vec<RoleInfo> {
                     .gifs
                     .get(i as usize)
                     .map_or("GIF".into(), |g| g.name.clone()),
+                Role::Ha(i) => {
+                    cfg.homeassistant
+                        .entities
+                        .get(i as usize)
+                        .map_or("Home".into(), |e| {
+                            if e.label.trim().is_empty() {
+                                e.name.clone()
+                            } else {
+                                e.label.trim().to_string()
+                            }
+                        })
+                }
                 r => title_case(r.title()),
             },
             group: group(r),
@@ -234,6 +255,9 @@ mod tests {
             .map(|r| r.name())
             .filter(|n| !dir.join(format!("{n}.webp")).is_file())
             .collect();
-        assert!(missing.is_empty(), "no preview for {missing:?}: run scripts/role-previews.sh");
+        assert!(
+            missing.is_empty(),
+            "no preview for {missing:?}: run scripts/role-previews.sh"
+        );
     }
 }

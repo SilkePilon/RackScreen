@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 use crate::{ApiError, ApiResult, AppState};
 
 /// Dotted paths of the fields that never reach the browser.
-pub const SECRET_PATHS: [&str; 10] = [
+pub const SECRET_PATHS: [&str; 12] = [
     "qbittorrent.pass",
     "electricity.token",
     "github.token",
@@ -25,6 +25,8 @@ pub const SECRET_PATHS: [&str; 10] = [
     "media.sonarr.api_key",
     "media.lidarr.api_key",
     "jellyfin.api_key",
+    "bambu.access_code",
+    "homeassistant.token",
     "web.password",
     "gif_search.giphy_key",
     "gif_search.tenor_key",

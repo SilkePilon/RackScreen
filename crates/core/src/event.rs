@@ -250,6 +250,73 @@ pub struct Track {
     pub cover: Option<CoverRef>,
 }
 
+/// Where a 3D print stands, from Bambu's `gcode_state`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrintStage {
+    Idle,
+    /// Heating, levelling, loading filament: the job started, the layers
+    /// have not.
+    Preparing,
+    Printing,
+    Paused,
+    Finished,
+    Failed,
+}
+
+/// Whether the printer's MQTT report can be read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrinterStatus {
+    Ok,
+    Offline,
+    /// The broker refused the access code.
+    Unauthorized,
+}
+
+/// The printer's state, merged from its (partial) MQTT reports.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrinterReport {
+    pub stage: PrintStage,
+    /// 0 to 100.
+    pub percent: f32,
+    pub remaining_mins: Option<u32>,
+    pub layer: Option<u32>,
+    pub total_layers: Option<u32>,
+    pub nozzle_c: Option<f32>,
+    pub bed_c: Option<f32>,
+    /// The job's name (`subtask_name`), empty when unknown.
+    pub job: String,
+    /// The loaded filament's colour and type (`PLA`), when the AMS or the
+    /// external spool says.
+    pub filament: Option<(crate::theme::Color, String)>,
+}
+
+/// Whether a Home Assistant entity can be read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HaStatus {
+    Ok,
+    Offline,
+    /// The token was refused.
+    Unauthorized,
+    /// Home Assistant has no entity by that id.
+    NotFound,
+}
+
+/// One Home Assistant entity state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HaEntity {
+    /// The raw state: `21.4`, `on`, `unavailable`.
+    pub state: String,
+    /// `friendly_name`, or the entity id without one.
+    pub name: String,
+    /// `unit_of_measurement`.
+    pub unit: Option<String>,
+    pub device_class: Option<String>,
+    /// The part of the entity id before the dot: `sensor`, `light`.
+    pub domain: String,
+    /// Unix seconds of `last_changed`.
+    pub last_changed: Option<i64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkTarget {
     K8sApi,
@@ -510,6 +577,18 @@ pub enum Event {
     Music {
         source: MusicSource,
         track: Option<Track>,
+    },
+    /// The printer's merged report; `None` while it is unreachable.
+    Printer {
+        status: PrinterStatus,
+        report: Option<PrinterReport>,
+    },
+    /// One poll of the Home Assistant entity at `index` of the config's
+    /// `homeassistant.entities` list.
+    HomeAssistant {
+        index: u16,
+        status: HaStatus,
+        entity: Option<HaEntity>,
     },
     /// Prometheus answered but has no series for the role (exporter not
     /// installed); the next data event for the role clears it.

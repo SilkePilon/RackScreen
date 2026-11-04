@@ -29,6 +29,7 @@ const router = createBrowserRouter([
       { path: "integrations/cluster", element: lazy(() => import("@/pages/integrations/cluster")) },
       { path: "integrations/energy", element: lazy(() => import("@/pages/integrations/energy")) },
       { path: "integrations/sky", element: lazy(() => import("@/pages/integrations/sky")) },
+      { path: "integrations/home", element: lazy(() => import("@/pages/integrations/home")) },
       { path: "integrations/media", element: lazy(() => import("@/pages/integrations/media")) },
       { path: "integrations/spotify", element: lazy(() => import("@/pages/integrations/spotify")) },
       { path: "integrations/github", element: lazy(() => import("@/pages/integrations/github")) },
@@ -44,10 +45,7 @@ const router = createBrowserRouter([
 function Gate() {
   const auth = useAuth()
   const qc = useQueryClient()
-  React.useEffect(
-    () => onUnauthorized(() => void qc.invalidateQueries({ queryKey: keys.auth })),
-    [qc],
-  )
+  React.useEffect(() => onUnauthorized(() => void qc.invalidateQueries({ queryKey: keys.auth })), [qc])
   if (auth.isPending) {
     return (
       <div className="flex h-svh items-center justify-center bg-canvas">

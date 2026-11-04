@@ -19,6 +19,7 @@ const M = "/integrations/media"
 const SP = "/integrations/spotify"
 const G = "/integrations/github"
 const GF = "/integrations/gifs"
+const H = "/integrations/home"
 const D = "/display"
 const SH = "/shows"
 const SYS = "/system"
@@ -259,6 +260,63 @@ export const SETTINGS: Record<string, SettingMeta> = {
     def: 5,
   },
 
+  "bambu.enabled": {
+    title: "Bambu Lab printer",
+    description: "Print progress over the printer's local MQTT (LAN only mode with Developer Mode).",
+    page: H,
+    section: "Bambu Lab",
+    def: false,
+    keywords: "3d printer mqtt p1s x1c a1",
+  },
+  "bambu.host": {
+    title: "Printer address",
+    description: "The printer's IP address, from its network settings.",
+    page: H,
+    section: "Bambu Lab",
+    def: "",
+  },
+  "bambu.serial": {
+    title: "Serial number",
+    description: "Settings → Device on the printer's screen.",
+    page: H,
+    section: "Bambu Lab",
+    def: "",
+  },
+  "bambu.access_code": {
+    title: "Access code",
+    description: "The 8-character LAN access code, next to LAN only mode.",
+    page: H,
+    section: "Bambu Lab",
+  },
+  "homeassistant.enabled": {
+    title: "Home Assistant",
+    description: "Entity states for the ha:<name> roles.",
+    page: H,
+    section: "Home Assistant",
+    def: false,
+    keywords: "hass sensor entity smart home",
+  },
+  "homeassistant.url": {
+    title: "Server address",
+    description: "http://homeassistant.local:8123, as you open it in a browser.",
+    page: H,
+    section: "Home Assistant",
+    def: "",
+  },
+  "homeassistant.token": {
+    title: "Access token",
+    description: "Profile → Security → Long-lived access tokens.",
+    page: H,
+    section: "Home Assistant",
+  },
+  "homeassistant.poll_secs": {
+    title: "Poll interval",
+    description: "Seconds between polls of each entity, at least 5.",
+    page: H,
+    section: "Home Assistant",
+    def: 15,
+  },
+
   "spotify.enabled": {
     title: "Spotify",
     description: "Now playing from Spotify on the music screen.",
@@ -363,7 +421,8 @@ export const SETTINGS: Record<string, SettingMeta> = {
   },
   "transitions.shows": {
     title: "Shows use",
-    description: "The transition into a show and back out. Directional styles sweep across the panels from left to right.",
+    description:
+      "The transition into a show and back out. Directional styles sweep across the panels from left to right.",
     page: D,
     section: "Transitions",
     def: null,

@@ -264,6 +264,72 @@ impl Default for JellyfinState {
     }
 }
 
+/// The Bambu printer: its last merged report and when the job ended.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrinterState {
+    pub status: crate::event::PrinterStatus,
+    /// The last report; kept while the printer is unreachable.
+    pub report: Option<crate::event::PrinterReport>,
+    pub have: bool,
+    /// Unix seconds the printer entered `Finished` or `Failed` while
+    /// watched; `None` when it already was at the first report.
+    pub ended_at: Option<i64>,
+    /// The last job seen running: name, how it ended (or `Printing`) and
+    /// when it was last seen (unix seconds).
+    pub last_job: Option<(String, crate::event::PrintStage, i64)>,
+}
+
+impl Default for PrinterState {
+    fn default() -> Self {
+        Self {
+            status: crate::event::PrinterStatus::Offline,
+            report: None,
+            have: false,
+            ended_at: None,
+            last_job: None,
+        }
+    }
+}
+
+/// How often a numeric Home Assistant state joins its sparkline.
+pub const HA_SAMPLE_SECS: Secs = 60.0;
+
+/// What the config says about one Home Assistant entity screen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HaSlot {
+    /// Shown in the pill instead of the entity's friendly name.
+    pub label: Option<String>,
+    /// The ring's range for a numeric state; without both, the device class
+    /// picks one, else the sparkline's own range.
+    pub min: Option<f32>,
+    pub max: Option<f32>,
+}
+
+/// One Home Assistant entity screen: its config, last poll and sparkline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HaState {
+    pub slot: HaSlot,
+    pub status: crate::event::HaStatus,
+    pub entity: Option<crate::event::HaEntity>,
+    pub have: bool,
+    /// Numeric states, one per `HA_SAMPLE_SECS`, 30 minutes.
+    pub hist: History,
+    sampled_at: Option<Secs>,
+}
+
+impl HaState {
+    pub fn new(slot: HaSlot) -> Self {
+        Self {
+            slot,
+            status: crate::event::HaStatus::Offline,
+            entity: None,
+            have: false,
+            hist: History::new(31, HA_SAMPLE_SECS),
+            sampled_at: None,
+        }
+    }
+}
+
 /// The music sources' latest polls.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MusicState {
@@ -348,6 +414,9 @@ pub struct Model {
     ci: CiState,
     jellyfin: JellyfinState,
     music: MusicState,
+    printer: PrinterState,
+    /// One per `homeassistant.entities` entry, by index.
+    ha: Vec<HaState>,
     /// Entrypoint req/s every 3 s, 90 s.
     traffic_hist: History,
     /// Restarts and mean input voltage per unix hour, 24 h.
@@ -395,6 +464,10 @@ pub struct Model {
     /// A Spotify login or a Jellyfin URL exists; without either the music
     /// role says "Check config".
     music_configured: bool,
+    /// `bambu.host`, `serial` and `access_code` are set.
+    printer_configured: bool,
+    /// `homeassistant.url` and `token` are set.
+    ha_configured: bool,
     /// When the four-screen shows play; off until `set_shows`.
     shows: ShowScheduler,
     show_layout: Layout,
@@ -458,6 +531,8 @@ impl Model {
             ci: CiState::default(),
             jellyfin: JellyfinState::default(),
             music: MusicState::default(),
+            printer: PrinterState::default(),
+            ha: Vec::new(),
             traffic_hist: History::new(31, 3.0),
             restarts_hist: Hourly::new(),
             mains_hist: Hourly::new(),
@@ -484,6 +559,8 @@ impl Model {
             arr_configured: false,
             jellyfin_configured: false,
             music_configured: false,
+            printer_configured: false,
+            ha_configured: false,
             shows: ShowScheduler::new(false, 15, Vec::new()),
             show_layout: Layout { panels: 4, gap: 46 },
             show_order: Vec::new(),
@@ -627,6 +704,38 @@ impl Model {
     }
     pub fn music(&self) -> &MusicState {
         &self.music
+    }
+    pub fn printer(&self) -> &PrinterState {
+        &self.printer
+    }
+    pub fn set_printer_configured(&mut self, on: bool) {
+        self.printer_configured = on;
+    }
+    pub fn printer_configured(&self) -> bool {
+        self.printer_configured
+    }
+    /// The Home Assistant entity screen at `index`, if the config has it.
+    pub fn ha(&self, index: u16) -> Option<&HaState> {
+        self.ha.get(index as usize)
+    }
+    /// One slot per `homeassistant.entities` entry; a slot whose config is
+    /// unchanged keeps its state and sparkline.
+    pub fn set_ha_slots(&mut self, slots: Vec<HaSlot>) {
+        let old = std::mem::take(&mut self.ha);
+        self.ha = slots
+            .into_iter()
+            .enumerate()
+            .map(|(i, slot)| match old.get(i) {
+                Some(st) if st.slot == slot => st.clone(),
+                _ => HaState::new(slot),
+            })
+            .collect();
+    }
+    pub fn set_ha_configured(&mut self, on: bool) {
+        self.ha_configured = on;
+    }
+    pub fn ha_configured(&self) -> bool {
+        self.ha_configured
     }
     pub fn set_music_configured(&mut self, on: bool) {
         self.music_configured = on;
@@ -1190,6 +1299,46 @@ impl Model {
                         _ => self.unix_now,
                     };
                     self.music.last = Some((t, at));
+                }
+            }
+            Event::Printer { status, report } => {
+                use crate::event::PrintStage;
+                if let Some(r) = &report {
+                    let ended = matches!(r.stage, PrintStage::Finished | PrintStage::Failed);
+                    let was = self.printer.report.as_ref().map(|p| p.stage);
+                    if !ended {
+                        self.printer.ended_at = None;
+                    } else if was.is_some_and(|w| w != r.stage) {
+                        self.printer.ended_at = Some(self.unix_now);
+                    }
+                    if !r.job.is_empty() && r.stage != PrintStage::Idle {
+                        self.printer.last_job = Some((r.job.clone(), r.stage, self.unix_now));
+                    }
+                    self.printer.report = report;
+                }
+                self.printer.status = status;
+                self.printer.have = true;
+            }
+            Event::HomeAssistant {
+                index,
+                status,
+                entity,
+            } => {
+                if let Some(st) = self.ha.get_mut(index as usize) {
+                    if let Some(v) = entity.as_ref().and_then(|e| e.state.parse::<f32>().ok()) {
+                        if st
+                            .sampled_at
+                            .is_none_or(|t| now - t >= HA_SAMPLE_SECS - 0.5)
+                        {
+                            st.hist.push(v, now);
+                            st.sampled_at = Some(now);
+                        }
+                    }
+                    if entity.is_some() || status != crate::event::HaStatus::Offline {
+                        st.entity = entity;
+                    }
+                    st.status = status;
+                    st.have = true;
                 }
             }
             Event::NoExporter { role } => {

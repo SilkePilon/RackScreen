@@ -15,12 +15,16 @@ export function usePreviewSrc(name: string): string | null {
       const link = classifyLink(g.url)
       return link.ok ? link.preview : null
     }
+    if (name.startsWith("ha:")) return `${import.meta.env.BASE_URL}roles/ha.webp`
     return /^[a-z0-9-]+$/.test(name) ? `${import.meta.env.BASE_URL}roles/${name}.webp` : null
   }, [name, gifs])
 }
 
 function initials(label: string) {
-  const words = label.replace(/^GIF · /, "").split(/[\s-]+/).filter(Boolean)
+  const words = label
+    .replace(/^GIF · /, "")
+    .split(/[\s-]+/)
+    .filter(Boolean)
   return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2)).toUpperCase()
 }
 
@@ -48,10 +52,10 @@ export function RolePreview({
       className={cn(
         "relative aspect-square shrink-0 rounded-full p-[6%]",
         "bg-[radial-gradient(circle_at_30%_20%,#2a2a2e,#0c0c0e_60%)] shadow-[inset_0_1px_0_rgba(255,255,255,.08)]",
-        className,
+        className
       )}
     >
-      <div className="relative size-full overflow-hidden rounded-full bg-black ring-1 ring-black [container-type:inline-size]">
+      <div className="[container-type:inline-size] relative size-full overflow-hidden rounded-full bg-black ring-1 ring-black">
         {show ? (
           <img
             src={src}

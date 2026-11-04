@@ -74,6 +74,21 @@ jellyfin:
   api_key: ""              # Jellyfin Dashboard → API Keys
   poll_secs: 5             # >= 2
 
+bambu:
+  enabled: false           # a Bambu Lab printer for the printer role (LAN only + Developer Mode)
+  host: ""                 # the printer's IP address
+  serial: ""               # Settings → Device on the printer
+  access_code: ""          # the LAN access code
+
+homeassistant:
+  enabled: false           # entities for the ha:<name> roles
+  url: ""                  # e.g. http://homeassistant.local:8123
+  token: ""                # profile → Security → long-lived access token
+  poll_secs: 15            # >= 5
+  # entities:
+  #   - { name: living, entity: sensor.living_room_temperature }
+  #   - { name: door, entity: binary_sensor.front_door, label: Front door }
+
 spotify:
   enabled: false           # now playing from Spotify on the music role
   client_id: ""            # your own app at developer.spotify.com; log in from the web UI
@@ -124,7 +139,8 @@ transitions:
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,
-#        gif:<name> (a GIF from the gifs: list)
+#        printer, gif:<name> (a GIF from the gifs: list),
+#        ha:<name> (an entity from homeassistant.entities)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:

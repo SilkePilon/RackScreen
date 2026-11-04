@@ -83,13 +83,18 @@ pub enum Role {
     Ci,
     Jellyfin,
     Music,
+    /// A Bambu Lab 3D printer over its local MQTT report.
+    Printer,
     /// `gif:<name>`: the GIF at this index of the config's `gifs:` list. Not
     /// in `ALL`; the config knows which exist and what they are called.
     Gif(u16),
+    /// `ha:<name>`: the Home Assistant entity at this index of the config's
+    /// `homeassistant.entities` list. Not in `ALL`, like `Gif`.
+    Ha(u16),
 }
 
 impl Role {
-    pub const ALL: [Role; 29] = [
+    pub const ALL: [Role; 30] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -119,12 +124,16 @@ impl Role {
         Role::Ci,
         Role::Jellyfin,
         Role::Music,
+        Role::Printer,
     ];
 
-    /// Position in `ALL`; `Gif(i)` counts on after it, so indices stay unique.
+    /// Position in `ALL`; `Gif(i)` and `Ha(i)` count on after it, taking
+    /// turns, so indices stay unique.
     pub fn index(self) -> usize {
-        if let Role::Gif(i) = self {
-            return Role::ALL.len() + i as usize;
+        match self {
+            Role::Gif(i) => return Role::ALL.len() + 2 * i as usize,
+            Role::Ha(i) => return Role::ALL.len() + 2 * i as usize + 1,
+            _ => {}
         }
         Role::ALL
             .iter()
@@ -167,7 +176,9 @@ impl Role {
             Role::Ci => "CI",
             Role::Jellyfin => "NOW PLAYING",
             Role::Music => "MUSIC",
+            Role::Printer => "3D PRINTER",
             Role::Gif(_) => "GIF",
+            Role::Ha(_) => "HOME",
         }
     }
 
@@ -204,7 +215,10 @@ impl Role {
             Role::Ci => "ms-build",
             Role::Jellyfin => "ms-movie",
             Role::Music => "ms-music_note",
+            Role::Printer => "ms-view_in_ar",
             Role::Gif(_) => "ms-gif_box",
+            // the screen picks one by the entity's domain and device class
+            Role::Ha(_) => "ms-home",
         }
     }
 
@@ -239,8 +253,10 @@ impl Role {
             Role::Ci => "ci",
             Role::Jellyfin => "jellyfin",
             Role::Music => "music",
-            // `gif:<name>` comes from the config (`Config::role_name`).
+            Role::Printer => "printer",
+            // `gif:<name>` and `ha:<name>` come from the config (`Config::role_name`).
             Role::Gif(_) => "gif",
+            Role::Ha(_) => "ha",
         }
     }
     /// A built-in role by name; `gif:<name>` is resolved by the config.
@@ -342,7 +358,12 @@ mod tests {
         assert!(!g.is_cluster() && !g.is_sky());
         assert_eq!(Role::parse("gif"), None);
         assert_eq!(Role::Gif(0).index(), Role::ALL.len());
-        assert_eq!(g.index(), Role::ALL.len() + 3);
+        assert_eq!(g.index(), Role::ALL.len() + 6);
+        assert_eq!(Role::Ha(0).index(), Role::ALL.len() + 1);
+        assert_eq!(Role::Ha(3).index(), Role::ALL.len() + 7);
+        assert_eq!(Role::Ha(0).name(), "ha");
+        assert_eq!(Role::Ha(0).icon(), "ms-home");
+        assert!(!Role::Ha(0).is_cluster() && !Role::ALL.contains(&Role::Ha(0)));
         assert_ne!(Role::Gif(0), Role::Gif(1));
         assert_eq!(
             Role::from_index(g.index()),
@@ -406,10 +427,13 @@ mod tests {
     }
 
     #[test]
-    fn twenty_nine_roles_with_unique_names() {
-        assert_eq!(Role::ALL.len(), 29);
+    fn thirty_roles_with_unique_names() {
+        assert_eq!(Role::ALL.len(), 30);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 29);
+        assert_eq!(names.len(), 30);
+        assert_eq!(Role::parse("printer"), Some(Role::Printer));
+        assert_eq!(Role::Printer.icon(), "ms-view_in_ar");
+        assert!(!Role::Printer.is_cluster() && !Role::Printer.is_sky());
         for gone in ["face", "price", "carbon"] {
             assert_eq!(Role::parse(gone), None);
         }

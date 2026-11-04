@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, CiRun, CiStatus, CoverRef, Download, Event, IssPass, JfKind,
-    JfSession, JfStatus, LinkTarget, MoonPhase, MusicSource, NodeLoad, Robustness, Torrent, Track,
+    App, AppHealth, AppSync, CiRun, CiStatus, CoverRef, Download, Event, HaEntity, HaStatus,
+    IssPass, JfKind, JfSession, JfStatus, LinkTarget, MoonPhase, MusicSource, NodeLoad, PrintStage,
+    PrinterReport, PrinterStatus, Robustness, Torrent, Track,
 };
-use rackscreen_core::model::{Model, Thresholds};
+use rackscreen_core::model::{HaSlot, Model, Thresholds};
 use rackscreen_core::p2::ui::ScreenUi;
 use rackscreen_core::theme::Role;
 use rackscreen_render::frame::new_pixmap;
@@ -526,8 +527,106 @@ fn full_model() -> Model {
         },
         0.0,
     );
+    m.set_printer_configured(true);
+    m.apply(
+        Event::Printer {
+            status: PrinterStatus::Ok,
+            report: Some(print_job(PrintStage::Printing)),
+        },
+        0.0,
+    );
+    m.set_ha_configured(true);
+    m.set_ha_slots(vec![HaSlot::default(), HaSlot::default()]);
+    for (i, v) in [20.1, 20.4, 20.3, 20.8, 21.2, 21.0, 21.4]
+        .iter()
+        .enumerate()
+    {
+        m.apply(
+            Event::HomeAssistant {
+                index: 0,
+                status: HaStatus::Ok,
+                entity: Some(ha_temp(*v)),
+            },
+            i as f64 * 60.0 - 400.0,
+        );
+    }
+    m.apply(
+        Event::HomeAssistant {
+            index: 1,
+            status: HaStatus::Ok,
+            entity: Some(HaEntity {
+                state: "on".into(),
+                name: "Front door".into(),
+                unit: None,
+                device_class: Some("door".into()),
+                domain: "binary_sensor".into(),
+                last_changed: Some(UNIX - 25 * 60),
+            }),
+        },
+        0.0,
+    );
     m.tick(0.0);
     m
+}
+
+fn print_job(stage: PrintStage) -> PrinterReport {
+    PrinterReport {
+        stage,
+        percent: 42.0,
+        remaining_mins: Some(65),
+        layer: Some(120),
+        total_layers: Some(300),
+        nozzle_c: Some(220.0),
+        bed_c: Some(60.0),
+        job: "Articulated dragon".into(),
+        filament: Some((rackscreen_core::theme::Color::hex(0xFF6A13), "PLA".into())),
+    }
+}
+
+fn ha_temp(v: f32) -> HaEntity {
+    HaEntity {
+        state: format!("{v}"),
+        name: "Living room".into(),
+        unit: Some("°C".into()),
+        device_class: Some("temperature".into()),
+        domain: "sensor".into(),
+        last_changed: Some(UNIX - 600),
+    }
+}
+
+/// The printer's other states, and the two Home Assistant entity kinds.
+#[test]
+fn printer_and_home_assistant() {
+    let m = full_model();
+    check("p2_ha_temperature", &render(&m, Role::Ha(0), 120.0));
+    check("p2_ha_door", &render(&m, Role::Ha(1), 120.0));
+    for (name, stage) in [
+        ("paused", PrintStage::Paused),
+        ("finished", PrintStage::Finished),
+        ("idle", PrintStage::Idle),
+    ] {
+        let mut p = full_model();
+        p.apply(
+            Event::Printer {
+                status: PrinterStatus::Ok,
+                report: Some(print_job(stage)),
+            },
+            1.0,
+        );
+        check(
+            &format!("p2_printer_{name}"),
+            &render(&p, Role::Printer, 120.0),
+        );
+    }
+    let mut off = full_model();
+    off.apply(
+        Event::Printer {
+            status: PrinterStatus::Offline,
+            report: None,
+        },
+        1.0,
+    );
+    check("p2_printer_off", &render(&off, Role::Printer, 120.0));
 }
 
 /// A track with a made-up cover: Spotify's is dusk blue to amber, Jellyfin's

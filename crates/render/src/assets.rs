@@ -60,6 +60,13 @@ icons!(
     "ms-sync",
     "ms-bedtime",
     "ms-gif_box",
+    "ms-view_in_ar",
+    "ms-home",
+    "ms-humidity_percentage",
+    "ms-water_drop",
+    "ms-sensor_door",
+    "ms-lightbulb",
+    "ms-toggle_on",
 );
 
 #[cfg(test)]

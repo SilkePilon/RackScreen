@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 /** The name a person reads: "Air quality", or the GIF's own name. */
 export function roleTitle(name: string, info?: RoleInfo): string {
   if (name.startsWith("gif:")) return name.slice(4)
+  if (name.startsWith("ha:")) return info?.title ?? name.slice(3)
   return info ? prettyTitle(info.title) : name
 }
 
@@ -26,6 +27,7 @@ const NEEDS_PAGE: [RegExp, string][] = [
   [/argo/i, "/integrations/cluster"],
   [/jellyfin/i, "/integrations/media"],
   [/spotify/i, "/integrations/spotify"],
+  [/bambu|home assistant/i, "/integrations/home"],
 ]
 
 export function needsPage(needs: string): string | undefined {
@@ -41,7 +43,10 @@ export function NeedsBadge({ needs }: { needs: string }) {
     </Badge>
   )
   return to ? (
-    <Link to={to} className="rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+    <Link
+      to={to}
+      className="rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    >
       {badge}
     </Link>
   ) : (
@@ -90,7 +95,7 @@ export function RoleGallery({
     return (roles.data ?? []).filter(
       (r) =>
         (!group || r.group === group) &&
-        (!q || `${r.name} ${r.title} ${r.group} ${r.description}`.toLowerCase().includes(q)),
+        (!q || `${r.name} ${r.title} ${r.group} ${r.description}`.toLowerCase().includes(q))
     )
   }, [roles.data, query, group])
 
@@ -109,7 +114,9 @@ export function RoleGallery({
       <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <DialogHeader className="gap-1 border-b border-hairline px-5 pt-5 pb-4">
           <DialogTitle>Add a role to Screen {screen + 1}</DialogTitle>
-          <DialogDescription>Pick what the panel shows. Every preview is the real panel design.</DialogDescription>
+          <DialogDescription>
+            Pick what the panel shows. Every preview is the real panel design.
+          </DialogDescription>
           <div className="relative mt-3">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -121,7 +128,11 @@ export function RoleGallery({
               autoFocus
             />
           </div>
-          <div className="scrollbar-none -mx-5 mt-3 flex gap-1.5 overflow-x-auto px-5" role="group" aria-label="Group">
+          <div
+            className="-mx-5 mt-3 flex scrollbar-none gap-1.5 overflow-x-auto px-5"
+            role="group"
+            aria-label="Group"
+          >
             {[null, ...groups].map((g) => (
               <button
                 key={g ?? "all"}
@@ -132,7 +143,7 @@ export function RoleGallery({
                   "h-7 shrink-0 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                   group === g
                     ? "border-foreground bg-foreground text-background"
-                    : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                    : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
                 {g ?? "All"}
@@ -142,7 +153,7 @@ export function RoleGallery({
         </DialogHeader>
 
         <div className="grid min-h-0 md:grid-cols-[minmax(0,1fr)_15rem]">
-          <div className="scrollbar-thin max-h-[42vh] overflow-y-auto p-3 md:max-h-[26rem]">
+          <div className="max-h-[42vh] scrollbar-thin overflow-y-auto p-3 md:max-h-[26rem]">
             {roles.isPending ? (
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {Array.from({ length: 8 }, (_, i) => (
@@ -174,7 +185,7 @@ export function RoleGallery({
                         onFocus={() => setSelected(r.name)}
                         className={cn(
                           "group/tile flex w-full flex-col items-center gap-2 rounded-xl px-1.5 pt-2.5 pb-2 transition-colors focus-visible:outline-none",
-                          active ? "bg-accent" : "hover:bg-accent/60",
+                          active ? "bg-accent" : "hover:bg-accent/60"
                         )}
                       >
                         <span className="relative w-full max-w-[84px]">
@@ -184,7 +195,7 @@ export function RoleGallery({
                             dim={added}
                             className={cn(
                               "w-full ring-offset-2 ring-offset-popover transition-shadow duration-150",
-                              active && "ring-2 ring-primary",
+                              active && "ring-2 ring-primary"
                             )}
                           />
                           {added && (
@@ -210,7 +221,12 @@ export function RoleGallery({
             aria-live="polite"
           >
             {current ? (
-              <Detail info={current} added={taken.includes(current.name)} screen={screen} onAdd={() => add(current)} />
+              <Detail
+                info={current}
+                added={taken.includes(current.name)}
+                screen={screen}
+                onAdd={() => add(current)}
+              />
             ) : (
               <Skeleton className="h-40 w-full rounded-xl" />
             )}

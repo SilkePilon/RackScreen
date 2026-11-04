@@ -7,10 +7,12 @@ cd "$(dirname "$0")/.."
 src=crates/render/tests/goldens
 out=web/public/roles
 mkdir -p "$out"
-roles=(cpu mem pods health thermal storage power-mix renewable gh-activity weather wind aqi rain sun moon iss ups net deploys media traffic restarts uptime fans mains load ci jellyfin music)
+roles=(cpu mem pods health thermal storage power-mix renewable gh-activity weather wind aqi rain sun moon iss ups net deploys media traffic restarts uptime fans mains load ci jellyfin music printer)
 for r in "${roles[@]}"; do
   png="$src/p2_$r.png"
   [[ -f $png ]] || { echo "no golden for $r: $png" >&2; exit 1; }
   magick "$png" -resize 160x160 -quality 82 -define webp:method=6 "$out/$r.webp"
 done
+# every ha:<name> role shares one preview
+magick "$src/p2_ha_temperature.png" -resize 160x160 -quality 82 -define webp:method=6 "$out/ha.webp"
 du -ch "$out"/*.webp | tail -1

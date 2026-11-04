@@ -2,6 +2,7 @@
 
 pub mod cluster;
 pub mod github;
+pub mod home;
 pub mod media;
 pub mod music;
 pub mod power_mix;
@@ -45,6 +46,9 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Media => media::media(model, now),
         Role::Ci => github::ci(model, now),
         Role::Jellyfin => media::jellyfin(model, now),
+        Role::Printer => home::printer(model, now),
+        // the icon follows the entity's device class
+        Role::Ha(i) => return Some(home::ha(model, i, now)),
         Role::PowerMix | Role::Music | Role::Gif(_) => return None,
     };
     screen.icon = role.icon();

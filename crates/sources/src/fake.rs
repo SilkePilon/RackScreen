@@ -874,10 +874,56 @@ impl FakeState {
             self.load(),
             self.ci_runs(),
             self.jellyfin(),
+            self.printer(),
+            self.home_assistant(),
         ]
         .into_iter()
         .chain(self.music())
         .collect()
+    }
+
+    /// A print that runs for ten minutes, finishes and starts again. Built
+    /// from the tick count alone: no draws, so the seeded stream stays put.
+    fn printer(&self) -> Event {
+        use rackscreen_core::event::{PrintStage, PrinterReport, PrinterStatus};
+        let t = self.ticks % 660;
+        let pct = (t as f32 / 6.0).min(100.0);
+        let stage = match t {
+            0..=14 => PrintStage::Preparing,
+            600.. => PrintStage::Finished,
+            _ => PrintStage::Printing,
+        };
+        Event::Printer {
+            status: PrinterStatus::Ok,
+            report: Some(PrinterReport {
+                stage,
+                percent: pct,
+                remaining_mins: Some(((600u64.saturating_sub(t)) / 60 * 7) as u32),
+                layer: Some((pct * 3.0) as u32),
+                total_layers: Some(300),
+                nozzle_c: Some(220.0),
+                bed_c: Some(60.0),
+                job: "Articulated dragon".into(),
+                filament: Some((rackscreen_core::theme::Color::hex(0xFF6A13), "PLA".into())),
+            }),
+        }
+    }
+
+    /// `ha:<first entity>`: a living-room temperature drifting slowly.
+    fn home_assistant(&self) -> Event {
+        let v = 21.0 + (self.ticks as f32 / 90.0).sin() * 1.2;
+        Event::HomeAssistant {
+            index: 0,
+            status: rackscreen_core::event::HaStatus::Ok,
+            entity: Some(rackscreen_core::event::HaEntity {
+                state: format!("{v:.1}"),
+                name: "Living room".into(),
+                unit: Some("°C".into()),
+                device_class: Some("temperature".into()),
+                domain: "sensor".into(),
+                last_changed: Some(self.unix_start + self.ticks as i64),
+            }),
+        }
     }
 
     /// One second of simulated time.
@@ -928,6 +974,10 @@ impl FakeState {
         }
         if matches!(self.music_state, 0 | 2) {
             self.music_pos = (self.music_pos + 1.0) % 337.0;
+        }
+        if self.ticks.is_multiple_of(10) {
+            out.push(self.printer());
+            out.push(self.home_assistant());
         }
         if self.ticks.is_multiple_of(2) {
             out.push(self.jellyfin());

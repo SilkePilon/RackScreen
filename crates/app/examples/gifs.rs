@@ -271,6 +271,7 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     model.set_location_present(true);
     model.set_github_token_present(true);
     model.set_jellyfin_configured(true);
+    model.set_printer_configured(true);
     model.set_music_configured(true);
     model.set_arr_configured(true);
     model.set_utc_offset_secs(UTC_OFFSET);

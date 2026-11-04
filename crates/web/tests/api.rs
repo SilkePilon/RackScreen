@@ -221,7 +221,7 @@ async fn status_has_the_documented_shape() {
     assert!(body["addresses"].is_array());
     let (st, _, body) = send(&f.app, get("/api/roles")).await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(body.as_array().unwrap().len(), 29);
+    assert_eq!(body.as_array().unwrap().len(), 30);
     let (_, _, body) = send(&f.app, get("/api/shows")).await;
     assert_eq!(body[0]["id"], "freight");
 }

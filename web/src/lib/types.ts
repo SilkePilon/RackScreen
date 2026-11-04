@@ -90,6 +90,29 @@ export interface JellyfinCfg {
   api_key: Secret
   poll_secs: number
 }
+export interface BambuCfg {
+  enabled: boolean
+  host: string
+  serial: string
+  access_code: Secret
+}
+export interface HaEntityCfg {
+  name: string
+  entity: string
+  label?: string
+  attribute?: string
+  unit?: string
+  min?: number | null
+  max?: number | null
+}
+export interface HomeAssistantCfg {
+  enabled: boolean
+  url: string
+  token: Secret
+  poll_secs: number
+  /** Left out when empty. */
+  entities?: HaEntityCfg[]
+}
 export interface SpotifyCfg {
   enabled: boolean
   client_id: string
@@ -163,6 +186,8 @@ export interface Config {
   media: MediaCfg
   jellyfin: JellyfinCfg
   spotify: SpotifyCfg
+  bambu: BambuCfg
+  homeassistant: HomeAssistantCfg
   shows: ShowsCfg
   transitions: TransitionsCfg
   /** Left out when empty. */
@@ -181,6 +206,8 @@ export const SECRET_PATHS = [
   "media.sonarr.api_key",
   "media.lidarr.api_key",
   "jellyfin.api_key",
+  "bambu.access_code",
+  "homeassistant.token",
   "web.password",
   "gif_search.giphy_key",
   "gif_search.tenor_key",
@@ -379,13 +406,7 @@ export interface GifMemory {
 
 /** The states the page knows; a newer Tailscale may report others. */
 export type TailscaleBackendState =
-  | "NoState"
-  | "NeedsLogin"
-  | "NeedsMachineAuth"
-  | "Starting"
-  | "Running"
-  | "Stopped"
-  | (string & {})
+  "NoState" | "NeedsLogin" | "NeedsMachineAuth" | "Starting" | "Running" | "Stopped" | (string & {})
 
 export interface TailscaleDevice {
   hostname: string

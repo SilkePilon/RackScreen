@@ -184,6 +184,9 @@ impl Monitor {
                 || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
             music_configured: matches!(source, SourceKind::Fake)
                 || (cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty()),
+            printer_configured: matches!(source, SourceKind::Fake) || cfg.bambu.ready(),
+            ha_configured: matches!(source, SourceKind::Fake) || cfg.homeassistant.ready(),
+            ha_slots: cfg.ha_slots(),
             spotify_token: (!matches!(source, SourceKind::Fake)
                 && cfg.spotify.enabled
                 && !cfg.spotify.client_id.trim().is_empty())
@@ -211,6 +214,12 @@ impl Monitor {
                 simulated: matches!(source, SourceKind::Fake),
             },
             gif_names: cfg.gifs.iter().map(|g| g.name.clone()).collect(),
+            ha_names: cfg
+                .homeassistant
+                .entities
+                .iter()
+                .map(|e| e.name.clone())
+                .collect(),
             cycle_secs_cfg: cfg.screens.iter().map(|s| s.cycle_secs).collect(),
         };
         if let Some(h) = &hub {
@@ -359,6 +368,46 @@ fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: 
         ));
     } else if cfg.jellyfin.enabled {
         tracing::warn!("jellyfin enabled but no url set; the role says Check config");
+    }
+    if cfg.bambu.ready() {
+        runtime.spawn(rackscreen_sources::bambu::run_bambu(
+            rackscreen_sources::bambu::BambuConfig {
+                host: cfg.bambu.host.trim().to_string(),
+                port: rackscreen_sources::bambu::PORT,
+                user: rackscreen_sources::bambu::USER.to_string(),
+                serial: cfg.bambu.serial.trim().to_string(),
+                access_code: cfg.bambu.access_code.trim().to_string(),
+            },
+            ctx.clone(),
+        ));
+    } else if cfg.bambu.enabled {
+        tracing::warn!(
+            "bambu enabled but host, serial or access code missing; the role says Check config"
+        );
+    }
+    let ha = cfg.used_ha();
+    if cfg.homeassistant.ready() && !ha.is_empty() {
+        runtime.spawn(rackscreen_sources::homeassistant::run_homeassistant(
+            rackscreen_sources::homeassistant::HaConfig {
+                url: cfg.homeassistant.url.trim().to_string(),
+                token: cfg.homeassistant.token.trim().to_string(),
+                poll_secs: cfg.homeassistant.poll_secs,
+                entities: ha
+                    .into_iter()
+                    .map(|(index, e)| rackscreen_sources::homeassistant::HaQuery {
+                        index,
+                        entity: e.entity.trim().to_string(),
+                        attribute: Some(e.attribute.trim().to_string()).filter(|a| !a.is_empty()),
+                        unit: Some(e.unit.trim().to_string()).filter(|u| !u.is_empty()),
+                    })
+                    .collect(),
+            },
+            ctx.clone(),
+        ));
+    } else if cfg.homeassistant.enabled && !cfg.homeassistant.ready() {
+        tracing::warn!(
+            "homeassistant enabled but url or token missing; its roles say Check config"
+        );
     }
     if let Some(token_path) = spotify_token_path(cfg) {
         runtime.spawn(rackscreen_sources::spotify::run_spotify(

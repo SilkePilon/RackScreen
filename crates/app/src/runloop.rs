@@ -313,6 +313,12 @@ pub struct RenderLoop {
     pub music_configured: bool,
     /// The Spotify token file while Spotify is on with a client id.
     pub spotify_token: Option<PathBuf>,
+    /// `bambu` is on with a host, serial and access code.
+    pub printer_configured: bool,
+    /// `homeassistant` is on with a URL and token.
+    pub ha_configured: bool,
+    /// One per `homeassistant.entities` entry.
+    pub ha_slots: Vec<rackscreen_core::model::HaSlot>,
     /// Only one screen may transition at a time: four at once stall the SPI bus.
     pub one_at_a_time: bool,
     /// The transition styles for role changes and shows.
@@ -331,6 +337,8 @@ pub struct RenderLoop {
     pub links: LinkCfg,
     /// Names of the config's `gifs:`, so `Role::Gif(i)` can be named.
     pub gif_names: Vec<String>,
+    /// Names of the config's `homeassistant.entities`, for `Role::Ha(i)`.
+    pub ha_names: Vec<String>,
     /// Each screen's configured dwell, for the status.
     pub cycle_secs_cfg: Vec<u64>,
 }
@@ -420,6 +428,9 @@ impl RenderLoop {
         model.set_github_token_present(self.github_token_present);
         model.set_arr_configured(self.arr_configured);
         model.set_jellyfin_configured(self.jellyfin_configured);
+        model.set_printer_configured(self.printer_configured);
+        model.set_ha_configured(self.ha_configured);
+        model.set_ha_slots(std::mem::take(&mut self.ha_slots));
         model.set_music_configured(music_ready(
             self.music_configured,
             self.spotify_token.as_deref(),
@@ -693,6 +704,11 @@ impl RenderLoop {
                 "{}{}",
                 crate::config::GIF_ROLE_PREFIX,
                 self.gif_names.get(i as usize).map_or("?", |n| n.as_str())
+            ),
+            Role::Ha(i) => format!(
+                "{}{}",
+                crate::config::HA_ROLE_PREFIX,
+                self.ha_names.get(i as usize).map_or("?", |n| n.as_str())
             ),
             r => r.name().to_string(),
         }

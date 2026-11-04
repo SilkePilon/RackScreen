@@ -61,8 +61,8 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`mains`** — UPS input voltage on six bands over 200–260 V, the last 24 h as a sparkline | **`load`** — the highest 1-minute load, a segment per node by load per core, cluster means in the card |
 | <img src=".github/media/screens/ci.gif" alt="CI role" width="200"> | <img src=".github/media/screens/jellyfin.gif" alt="NOW PLAYING role" width="200"> |
 | **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill | **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card |
-| <img src=".github/media/screens/music.gif" alt="MUSIC role" width="200"> |  |
-| **`music`** — the album cover, the track's progress on the ring (green Spotify, violet Jellyfin), time left in the pill, song, artist and device in the card |  |
+| <img src=".github/media/screens/music.gif" alt="MUSIC role" width="200"> | <img src=".github/media/screens/printer.gif" alt="3D PRINTER role" width="200"> |
+| **`music`** — the album cover, the track's progress on the ring (green Spotify, violet Jellyfin), time left in the pill, song, artist and device in the card | **`printer`** — a Bambu Lab print: progress on the ring in the filament's colour, time left in the pill, job, layer and temperatures in the card |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -325,6 +325,8 @@ Every screen shows one or more **roles** and cycles through them. Twenty-nine ro
 | `load` | Prometheus (node-exporter) | highest 1-minute load, a segment per node by load per core, card the cluster means |
 | `ci` | GitHub Actions | passes over the last twelve runs, a segment per run, pill the newest run, card average run time and failures |
 | `jellyfin` | Jellyfin | time left, ring the position (amber movie, cyan episode, dim when paused), pill direct play / transcoding / paused, card title, episode or year and viewer |
+| `printer` | Bambu Lab (local MQTT) | print progress in %, ring in the filament colour (green when done, red when failed), pill time left / paused / done N ago, card job, layer and nozzle/bed temperatures |
+| `ha:<name>` | Home Assistant | a number with its unit and a 30-minute sparkline, or a state as a word (On, Open, Away); the icon follows the device class |
 | `music` | Spotify + Jellyfin | album cover, ring the track's progress (green Spotify, violet Jellyfin, dim when paused), pill time left / paused / played N ago, card song, artist and device |
 
 The **Screens** page of the web UI edits them: drag roles to reorder, add from the picker, set the cycle interval, or apply a preset: cluster (`cpu`, `mem`, `pods`, `health`), electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
@@ -395,6 +397,35 @@ Jellyfin needs nothing extra: the `jellyfin` settings above also feed the music 
 3. Press **Log in**: open the address it shows (or scan the QR code with your phone) and log in. The browser then fails to load `127.0.0.1`, which is expected; copy the whole address from its address bar and paste it into the field.
 
 The login (Authorization Code with PKCE, no client secret) is written to `~/.local/state/rackscreen/spotify.json` of the service user, mode 0600; the config only holds the client ID. The access token is refreshed on its own. If Spotify ever refuses the login, the page says "Token expired, log in again". Spotify is polled every 3 s while playing and every 15 s otherwise.
+
+## Printer role
+
+`printer` shows a Bambu Lab printer (X1, P1, A1 series) over its own MQTT broker on the LAN, no cloud: the progress as the number and the ring, in the colour of the loaded filament (from the AMS or the external spool; very dark filament is lightened so it shows on black), time left in the pill, and the job, layer and nozzle/bed temperatures in the card. Paused dims it, a finished print turns the ring green with "Done · 12 m ago", a failed one red. While the printer is idle or switched off the card shows the last job seen.
+
+On the printer, turn on **LAN only mode** and then **Developer Mode** (Settings → WLAN on the screen; recent firmware only allows local access this way). Note the **access code** shown there and the **serial number** (Settings → Device), then fill in `bambu` on the **Home & printer** page or in the config with the printer's IP address. RackScreen connects to port 8883 as `bblp`, asks for a full report once, and merges the partial updates after it. A printer that is off is retried quietly (5 s up to every minute); a wrong access code says "Check access code" and is retried every 5 minutes. The printer's certificate is self-signed by Bambu and is accepted as is, so keep the printer on a network you trust.
+
+## Home Assistant role
+
+`ha:<name>` shows one Home Assistant entity; add as many as you like, each is a role of its own. A number shows big with its unit, the ring filled over the range you give (`min`/`max`), or 0–100 for percentages and −10–35 °C for temperatures, and the last 30 minutes as a sparkline (one sample a minute). Anything else reads as a word: `on`/`off`, `Open`/`Closed` for doors and windows, `Motion`/`Clear`, `Home`/`Away`, with when it last changed in the card. The icon and colour follow the device class (thermostat, humidity, power, battery, door, light, switch).
+
+Turn on `homeassistant` on the **Home & printer** page, set the address the Pi can reach (`http://homeassistant.local:8123`) and a **long-lived access token** (your profile → Security in Home Assistant), then add entities there or in the config:
+
+```yaml
+homeassistant:
+  enabled: true
+  url: http://homeassistant.local:8123
+  token: "eyJ..."
+  poll_secs: 15
+  entities:
+    - { name: living, entity: sensor.living_room_temperature }
+    - { name: door,   entity: binary_sensor.front_door, label: Front door }
+    - { name: hall,   entity: climate.hall, attribute: current_temperature, unit: "°C" }
+    - { name: solar,  entity: sensor.solar_power, min: 0, max: 4000 }
+screens:
+  - { roles: [cpu, "ha:living", "ha:door"], cycle_secs: 10, ... }
+```
+
+`label` replaces the entity's friendly name in the pill, `attribute` shows an attribute instead of the state, and `unit` replaces the entity's unit. Only entities a screen shows are polled. A refused token says "Check token", a wrong id "Entity not found".
 
 ## GIF role
 
@@ -494,6 +525,20 @@ jellyfin:
   api_key: ""              # Jellyfin Dashboard → API Keys
   poll_secs: 5             # >= 2
 
+bambu:
+  enabled: false           # a Bambu Lab printer for the printer role (LAN only + Developer Mode)
+  host: ""                 # the printer's IP address
+  serial: ""               # Settings → Device on the printer
+  access_code: ""          # the LAN access code
+
+homeassistant:
+  enabled: false           # entities for the ha:<name> roles
+  url: ""                  # e.g. http://homeassistant.local:8123
+  token: ""                # profile → Security → long-lived access token
+  poll_secs: 15            # >= 5
+  # entities:
+  #   - { name: living, entity: sensor.living_room_temperature }
+
 spotify:
   enabled: false           # now playing from Spotify on the music role
   client_id: ""            # your own app at developer.spotify.com; log in from the web UI
@@ -544,7 +589,8 @@ transitions:
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,
-#        gif:<name> (a GIF from the gifs: list)
+#        printer, gif:<name> (a GIF from the gifs: list),
+#        ha:<name> (an entity from homeassistant.entities)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.
 screens:
@@ -567,6 +613,8 @@ screens:
 - **`argocd`** — the namespace whose Argo CD applications feed `deploys`; off, and the role shows no data.
 - **`media`** — see [Media role](#media-role).
 - **`jellyfin`** — see [Jellyfin role](#jellyfin-role).
+- **`bambu`** — see [Printer role](#printer-role).
+- **`homeassistant`** — see [Home Assistant role](#home-assistant-role).
 - **`shows`** — see [Shows](#shows).
 - **`gifs`** — see [GIF role](#gif-role).
 - **`display`** — global brightness, frame rate, the SPI write chunk and whether screens change one at a time.
