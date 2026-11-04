@@ -15,6 +15,11 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   alpine: ["#2b3a67", "#8a86b8", "#e6ecff", "#1f2c4c"],
   caravan: ["#8fcdf0", "#f4e2a8", "#6b4a2a", "#d8a85a"],
   "desert-night": ["#1d1638", "#3b2d63", "#f2ecd0", "#231a3a"],
+  boulder: ["#2a2018", "#4a3b30", "#f2c040", "#3e3026"],
+  "time-car": ["#10153a", "#1e2152", "#8ae0ff", "#1c1c2a"],
+  kaiju: ["#5a2a5e", "#f08a5a", "#4a9060", "#22204a"],
+  heist: ["#10142a", "#1a1e3a", "#ff4050", "#1e2238"],
+  shark: ["#7cc4f2", "#2a86c0", "#f0c020", "#f0d898"],
 }
 
 function still(id: string, frame: number): string {

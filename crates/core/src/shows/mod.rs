@@ -16,6 +16,13 @@ mod space;
 mod storm;
 pub mod world;
 
+mod boulder;
+mod fx;
+mod heist;
+mod kaiju;
+mod shark;
+mod time_car;
+
 use world::{Layout, World, WorldFrame};
 
 /// Frames per second every show is drawn at ("on twos").
@@ -98,6 +105,36 @@ pub const SHOWS: &[ShowDef] = &[
         secs: desert_night::SECS,
         draw: desert_night::draw,
     },
+    ShowDef {
+        id: "boulder",
+        name: "Temple run",
+        secs: boulder::SECS,
+        draw: boulder::draw,
+    },
+    ShowDef {
+        id: "time-car",
+        name: "Time machine",
+        secs: time_car::SECS,
+        draw: time_car::draw,
+    },
+    ShowDef {
+        id: "kaiju",
+        name: "Monster in the harbour",
+        secs: kaiju::SECS,
+        draw: kaiju::draw,
+    },
+    ShowDef {
+        id: "heist",
+        name: "The heist",
+        secs: heist::SECS,
+        draw: heist::draw,
+    },
+    ShowDef {
+        id: "shark",
+        name: "Beach day",
+        secs: shark::SECS,
+        draw: shark::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -152,6 +189,11 @@ mod tests {
                 ("alpine", "Mountains: alpine dawn", 10.0),
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
+                ("boulder", "Temple run", 10.0),
+                ("time-car", "Time machine", 10.0),
+                ("kaiju", "Monster in the harbour", 11.0),
+                ("heist", "The heist", 10.0),
+                ("shark", "Beach day", 10.0),
             ]
         );
     }
