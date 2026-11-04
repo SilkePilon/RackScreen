@@ -1532,10 +1532,8 @@ fn show_round_two() {
         ("fireworks", 11.6, "show_fireworks_heart"),
         ("alpine", 9.4, "show_alpine_summit"),
         ("alpine", 11.3, "show_alpine_goat"),
-        // At 25 mm gaps the camels are behind the bezel at t 5 and the
-        // shooting star at t 5.2; the extra frames show them on screen 3.
-        ("caravan", 5.0, "show_caravan"),
-        ("caravan", 6.0, "show_caravan_camels"),
+        ("caravan", 4.4, "show_caravan_mirage"),
+        ("caravan", 11.0, "show_caravan_drink"),
         ("desert-night", 5.2, "show_desert_night"),
         ("desert-night", 5.5, "show_desert_night_star"),
     ] {

@@ -149,7 +149,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/caravan.gif" alt="Desert: caravan show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Desert: caravan</b> (<code>caravan</code>) — three camels walk in line over the dunes, leaving footprints.
+  <b>Desert: caravan</b> (<code>caravan</code>) — three roped camels with riders and a loaded pack camel cross blazing dunes in the heat shimmer and blowing sand; a lake ahead turns out to be a mirage, so the lead rider waves off the real oasis too, until the pack camel digs its heels in at the water, jerks the whole line to a halt and kneels down to drink.
 </p>
 
 <p align="center">
