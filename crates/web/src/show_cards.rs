@@ -29,7 +29,7 @@ fn moments(id: &str) -> [f64; FRAMES] {
     match id {
         "storm" => [0.5, 0.3, 0.55, 0.8],
         "day" => [0.45, 0.15, 0.7, 0.9],
-        "paper-plane" => [0.65, 0.45, 0.7, 0.9],
+        "paper-plane" => [0.6, 0.3, 0.2, 0.9],
         "space" => [0.65, 0.35, 0.5, 0.8],
         "fireworks" => [0.85, 0.65, 0.75, 0.35],
         _ => [0.5, 0.35, 0.65, 0.8],
@@ -60,7 +60,12 @@ fn score(a: &WorldFrame, b: &WorldFrame, x0: u32) -> u64 {
 
 /// The still of `def` number `k`: the busiest window of its world.
 pub fn card_rgb(def: &ShowDef, k: usize) -> Vec<u8> {
-    let t = def.secs * moments(def.id)[k];
+    card_rgb_at(def, moments(def.id)[k])
+}
+
+/// The still of `def` at `frac` of its length.
+fn card_rgb_at(def: &ShowDef, frac: f64) -> Vec<u8> {
+    let t = def.secs * frac;
     let a = shows::render(def, LAYOUT, t);
     let b = shows::render(def, LAYOUT, t + 0.25);
     let max_x = a.width - CARD_W;
