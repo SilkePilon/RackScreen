@@ -1,0 +1,15 @@
+{
+	"ControlURL": "https://controlplane.tailscale.com",
+	"RouteAll": false,
+	"ExitNodeID": "",
+	"CorpDNS": true,
+	"RunSSH": true,
+	"RunWebClient": false,
+	"WantRunning": true,
+	"LoggedOut": false,
+	"ShieldsUp": false,
+	"Hostname": "rackscreen",
+	"OperatorUser": "silke",
+	"NetfilterMode": 2,
+	"AutoUpdate": { "Check": true, "Apply": false }
+}

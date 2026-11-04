@@ -17,6 +17,7 @@ pub mod state;
 pub mod static_files;
 pub mod status;
 pub mod system;
+pub mod tailscale;
 pub mod update;
 
 use std::net::SocketAddr;
@@ -106,6 +107,17 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/spotify/callback", post(spotify::callback))
         .route("/spotify/logout", post(spotify::logout))
         .route("/update", get(update::get_update).post(update::post_update))
+        .route("/tailscale", get(tailscale::get_tailscale))
+        .route(
+            "/tailscale/setup",
+            get(tailscale::get_setup).post(tailscale::post_setup),
+        )
+        .route("/tailscale/login", post(tailscale::login))
+        .route("/tailscale/up", post(tailscale::up))
+        .route("/tailscale/down", post(tailscale::down))
+        .route("/tailscale/logout", post(tailscale::logout))
+        .route("/tailscale/ssh", post(tailscale::ssh))
+        .route("/tailscale/serve", post(tailscale::serve))
         .fallback(api_not_found)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -144,7 +156,9 @@ pub fn serve(hub: Arc<Hub>, bind: &str, port: u16, password: String) -> Result<W
     let std_listener = std::net::TcpListener::bind(addr).with_context(|| format!("bind {addr}"))?;
     std_listener.set_nonblocking(true)?;
     let addr = std_listener.local_addr()?;
-    let state = Arc::new(AppState::new(hub, password, addr.port()));
+    let state = AppState::new(hub, password, addr.port());
+    *state.tailscale.bind.lock().unwrap() = bind.to_string();
+    let state = Arc::new(state);
     let thread = std::thread::Builder::new()
         .name("web".into())
         .spawn(move || {

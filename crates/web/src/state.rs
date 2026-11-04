@@ -48,6 +48,8 @@ pub struct AppState {
     pub gif_cache: crate::gif_search::SearchCache,
     /// The previous CPU reading, for the usage on the System page.
     pub cpu_sampler: Mutex<crate::system::CpuSampler>,
+    /// Tailscale: how its CLI is run, the setup job and a pending login.
+    pub tailscale: crate::tailscale::TsState,
 }
 
 impl AppState {
@@ -80,7 +82,18 @@ impl AppState {
             port,
             gif_cache: Default::default(),
             cpu_sampler: Mutex::new(cpu),
+            tailscale: crate::tailscale::TsState::real(),
         }
+    }
+
+    /// Run Tailscale commands through `runner` as `user` (tests use a fake).
+    pub fn with_tailscale(
+        mut self,
+        runner: Arc<dyn crate::tailscale::Runner>,
+        user: &str,
+    ) -> AppState {
+        self.tailscale = crate::tailscale::TsState::new(runner, user.to_string());
+        self
     }
 
     /// Forget the encoded PNGs of screens at or past `active`.

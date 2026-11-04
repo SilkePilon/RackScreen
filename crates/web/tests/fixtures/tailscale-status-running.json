@@ -1,0 +1,89 @@
+{
+  "Version": "1.90.6-t2d0c4a7b1-g8c1e2f3a4",
+  "TUN": true,
+  "BackendState": "Running",
+  "HaveNodeKey": true,
+  "AuthURL": "",
+  "TailscaleIPs": ["100.101.102.103", "fd7a:115c:a1e0::1a01:6667"],
+  "Self": {
+    "ID": "nAbCdEf11CNTRL",
+    "PublicKey": "nodekey:1111111111111111111111111111111111111111111111111111111111111111",
+    "HostName": "rackscreen",
+    "DNSName": "rackscreen.tail1234.ts.net.",
+    "OS": "linux",
+    "UserID": 1001,
+    "TailscaleIPs": ["100.101.102.103", "fd7a:115c:a1e0::1a01:6667"],
+    "Addrs": ["192.168.1.172:41641"],
+    "CurAddr": "",
+    "Relay": "ams",
+    "Created": "2026-11-01T10:00:00Z",
+    "LastSeen": "0001-01-01T00:00:00Z",
+    "Online": true,
+    "ExitNode": false,
+    "ExitNodeOption": false,
+    "Active": false,
+    "InNetworkMap": true,
+    "KeyExpiry": "2027-05-01T10:00:00Z"
+  },
+  "Health": ["Tailscale could not connect to the 'ams' relay server."],
+  "MagicDNSSuffix": "tail1234.ts.net",
+  "CurrentTailnet": {
+    "Name": "silke@example.com",
+    "MagicDNSSuffix": "tail1234.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": ["rackscreen.tail1234.ts.net"],
+  "Peer": {
+    "nodekey:2222222222222222222222222222222222222222222222222222222222222222": {
+      "ID": "nPhone11CNTRL",
+      "HostName": "Silke's Pixel",
+      "DNSName": "silkes-pixel.tail1234.ts.net.",
+      "OS": "android",
+      "UserID": 1001,
+      "TailscaleIPs": ["100.89.250.1", "fd7a:115c:a1e0::8b30:fa02"],
+      "Online": false,
+      "LastSeen": "2026-11-03T21:14:00Z",
+      "ExitNode": false,
+      "ExitNodeOption": false,
+      "Active": false
+    },
+    "nodekey:3333333333333333333333333333333333333333333333333333333333333333": {
+      "ID": "nLaptop11CNTRL",
+      "HostName": "laptop",
+      "DNSName": "laptop.tail1234.ts.net.",
+      "OS": "linux",
+      "UserID": 1001,
+      "TailscaleIPs": ["100.109.7.90", "fd7a:115c:a1e0::9a3a:75a"],
+      "Online": true,
+      "LastSeen": "0001-01-01T00:00:00Z",
+      "ExitNode": false,
+      "ExitNodeOption": false,
+      "Active": true
+    },
+    "nodekey:4444444444444444444444444444444444444444444444444444444444444444": {
+      "ID": "nRouter11CNTRL",
+      "HostName": "home-router",
+      "DNSName": "home-router.tail1234.ts.net.",
+      "OS": "linux",
+      "UserID": 2002,
+      "TailscaleIPs": ["100.64.0.9"],
+      "Online": true,
+      "ExitNode": false,
+      "ExitNodeOption": true
+    }
+  },
+  "User": {
+    "1001": {
+      "ID": 1001,
+      "LoginName": "silke@example.com",
+      "DisplayName": "Silke",
+      "ProfilePicURL": ""
+    },
+    "2002": {
+      "ID": 2002,
+      "LoginName": "tagged-devices",
+      "DisplayName": "Tagged Devices"
+    }
+  },
+  "ClientVersion": null
+}

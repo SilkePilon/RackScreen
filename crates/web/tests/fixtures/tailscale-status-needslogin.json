@@ -1,0 +1,26 @@
+{
+  "Version": "1.90.6-t2d0c4a7b1-g8c1e2f3a4",
+  "TUN": true,
+  "BackendState": "NeedsLogin",
+  "HaveNodeKey": false,
+  "AuthURL": "https://login.tailscale.com/a/1a2b3c4d5e6f",
+  "TailscaleIPs": null,
+  "Self": {
+    "ID": "",
+    "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+    "HostName": "rackscreen",
+    "DNSName": "",
+    "OS": "linux",
+    "UserID": 0,
+    "TailscaleIPs": null,
+    "Online": false,
+    "ExitNode": false,
+    "ExitNodeOption": false
+  },
+  "Health": ["You are logged out. The last login error was: none"],
+  "MagicDNSSuffix": "",
+  "CurrentTailnet": null,
+  "Peer": null,
+  "User": null,
+  "ClientVersion": null
+}
