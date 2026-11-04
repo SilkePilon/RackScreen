@@ -19,6 +19,9 @@ use crate::{ApiError, ApiResult, AppState};
 
 /// How long a login waiting for its code is kept.
 pub const PENDING_TTL: Duration = Duration::from_secs(600);
+/// Wrong codes allowed before the login starts over (Bambu Lab locks
+/// accounts that keep guessing).
+pub const MAX_CODE_TRIES: u32 = 5;
 
 /// A login that needs a code next.
 pub struct Pending {
@@ -27,6 +30,7 @@ pub struct Pending {
     /// `None`: an emailed code; `Some`: an authenticator code.
     tfa_key: Option<String>,
     created: Instant,
+    tries: u32,
 }
 
 pub struct BambuState {
@@ -171,6 +175,7 @@ pub async fn login(
         region,
         tfa_key,
         created: Instant::now(),
+        tries: 0,
     });
     Ok(Json(json!({ "needs": needs })))
 }
@@ -207,8 +212,26 @@ pub async fn code(
     let token = match &tfa_key {
         None => cloud::submit_code(&http, &ep, &account, &code).await,
         Some(key) => cloud::submit_tfa(&http, &ep, key, &code).await,
-    }
-    .map_err(api_error)?;
+    };
+    let token = match token {
+        Ok(t) => t,
+        Err(e) => {
+            if e.downcast_ref::<CloudError>() == Some(&CloudError::CodeWrong) {
+                let mut p = state.bambu.pending.lock().unwrap();
+                let over = p.as_mut().is_some_and(|p| {
+                    p.tries += 1;
+                    p.tries >= MAX_CODE_TRIES
+                });
+                if over {
+                    *p = None;
+                    return Err(ApiError::bad_request(
+                        "too many wrong codes; log in with the password again",
+                    ));
+                }
+            }
+            return Err(api_error(e));
+        }
+    };
     Ok(Json(save(&state, region, &account, token).await?))
 }
 

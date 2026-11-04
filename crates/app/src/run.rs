@@ -367,7 +367,7 @@ fn bambu_config(cfg: &Config) -> Option<rackscreen_sources::bambu::BambuConfig> 
     match b.mode {
         BambuMode::Lan => Some(BambuConfig::lan(&b.host, &b.serial, &b.access_code)),
         BambuMode::Cloud => match crate::bambu::token_path() {
-            Some(path) => Some(BambuConfig::cloud(b.region, &b.serial, path)),
+            Some(path) => Some(BambuConfig::cloud(&b.serial, path)),
             None => {
                 tracing::warn!("bambu: no home directory for the login's token file");
                 None

@@ -39,7 +39,9 @@ ha-bambulab, openHAB, Bambu-Lab-Cloud-API)
 ### Config (`bambu`)
 
 - `mode: lan | cloud`, default `lan`.
-- `region: global | china`, default `global`, cloud only.
+- `region: global | china`, default `global`, cloud only: where the login
+  goes. The broker follows the region stored with the login, so a login
+  made before the config is saved still connects to the right one.
 - `serial` is used by both modes; in cloud mode the web UI picks it from the
   account's printer list.
 - `host` and `access_code` only matter in LAN mode.
@@ -61,11 +63,13 @@ broker refuses the token, so the UI says "log in again".
   `cloud: Option<PathBuf>` token path. In cloud mode each session reads the
   token file first: none, or one marked refused, gives
   `PrinterStatus::LoggedOut` and a re-check every 10 s. A good one sets
-  user/password for that session.
+  broker/user/password for that session; every 5 s a connected session
+  checks the file is unchanged and reconnects when it is not.
 - Verified TLS uses `rustls-platform-verifier` (already in the tree through
   reqwest) with the ring provider.
-- CONNACK refused (4/5) in cloud mode marks the token file refused and emits
-  `LoggedOut`; the source then waits for a new login.
+- CONNACK refused (4/5) in cloud mode marks the token file refused (only if
+  it still holds the refused token) and the source waits for a new login.
+- Five wrong codes clear the pending login.
 - `bambu_cloud.rs` holds the HTTP side as plain functions over a base URL so
   tests can point it at a local server: `login`, `submit_code`,
   `submit_tfa`, `printers`, `username_from_token`, token file read/write.

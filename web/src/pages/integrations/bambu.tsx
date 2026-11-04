@@ -239,13 +239,19 @@ function CodeForm({ kind, onDone }: { kind: "code" | "tfa"; onDone: () => void }
       void qc.invalidateQueries({ queryKey: keys.bambuPrinters })
       onDone()
     },
+    // an expired or cleared login drops back to the password form
+    onError: () => onDone(),
   })
   const resend = useMutation({
     mutationFn: api.bambuResend,
     onSuccess: () => toast("A new code is on its way"),
     onError: (e) => toast.error(errorMessage(e)),
   })
-  const logout = useMutation({ mutationFn: api.bambuLogout, onSuccess: onDone })
+  const logout = useMutation({
+    mutationFn: api.bambuLogout,
+    onSuccess: onDone,
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   return (
     <form
       className="flex animate-in flex-col gap-3 px-5 py-4 fade-in-0 slide-in-from-top-1"

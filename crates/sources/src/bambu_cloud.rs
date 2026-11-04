@@ -296,13 +296,14 @@ pub fn write_token(path: &Path, tok: &TokenFile, owner: Option<(u32, u32)>) -> R
     )
 }
 
-/// The broker refused the token: keep the file (the UI still knows who was
-/// logged in) but say so.
-pub fn mark_refused(path: &Path) -> Result<()> {
+/// The broker refused `token`: keep the file (the UI still knows who was
+/// logged in) but say so. A file that holds another token by now (a new
+/// login) is left alone.
+pub fn mark_refused(path: &Path, token: &str) -> Result<()> {
     let Some(mut tok) = read_token(path) else {
         return Ok(());
     };
-    if tok.error.is_none() {
+    if tok.token == token && tok.error.is_none() {
         tok.error = Some("refused by Bambu Lab".into());
         write_token(path, &tok, None)?;
     }
@@ -450,11 +451,22 @@ pub async fn submit_tfa(
         return Ok(t);
     }
     let body = resp.text().await.unwrap_or_default();
-    let v = parse_json(status, &body)?;
-    if (400..500).contains(&status) {
-        return Err(CloudError::CodeWrong.into());
+    Err(tfa_failure(status, &body).into())
+}
+
+/// Why the authenticator step gave no token: a 400 or 401 is a wrong code
+/// whatever its body says; a challenge page is a block.
+pub fn tfa_failure(status: u16, body: &str) -> CloudError {
+    match status {
+        400 | 401 => CloudError::CodeWrong,
+        _ => match parse_json(status, body) {
+            Err(e) => e,
+            Ok(_) if (400..500).contains(&status) => CloudError::CodeWrong,
+            Ok(v) => {
+                CloudError::Unexpected(message(&v).unwrap_or_else(|| format!("HTTP {status}")))
+            }
+        },
     }
-    Err(CloudError::Unexpected(message(&v).unwrap_or_else(|| format!("HTTP {status}"))).into())
 }
 
 /// The MQTT user: from the JWT, else the account's `uid`.
@@ -507,9 +519,16 @@ pub async fn finish(
     now: i64,
 ) -> Result<TokenFile> {
     let username = username(http, ep, &token).await?;
-    let expires_at = expiry_from_token(&token)
-        .filter(|e| *e > now)
-        .unwrap_or(now + DEFAULT_LIFETIME_SECS);
+    let expires_at = match expiry_from_token(&token) {
+        Some(e) if e <= now => {
+            return Err(CloudError::Refused(
+                "Bambu Lab sent a login that has already expired".into(),
+            )
+            .into())
+        }
+        Some(e) => e,
+        None => now + DEFAULT_LIFETIME_SECS,
+    };
     Ok(TokenFile {
         token,
         username,
@@ -597,6 +616,21 @@ mod tests {
     }
 
     #[test]
+    fn tfa_failures() {
+        assert_eq!(tfa_failure(400, ""), CloudError::CodeWrong);
+        assert_eq!(tfa_failure(401, "<html>"), CloudError::CodeWrong);
+        assert_eq!(
+            tfa_failure(403, "<html>challenge</html>"),
+            CloudError::Blocked
+        );
+        assert_eq!(
+            tfa_failure(422, r#"{"error":"bad"}"#),
+            CloudError::CodeWrong
+        );
+        assert!(matches!(tfa_failure(500, "{}"), CloudError::Unexpected(_)));
+    }
+
+    #[test]
     fn cookies_from_set_cookie() {
         let set = [
             "a=1; Path=/",
@@ -663,7 +697,9 @@ mod tests {
             login_status(Some(&tok), 3_000),
             "the login expired, log in again"
         );
-        mark_refused(&path).unwrap();
+        mark_refused(&path, "other").unwrap();
+        assert!(read_token(&path).unwrap().error.is_none(), "another token");
+        mark_refused(&path, "t").unwrap();
         let t = read_token(&path).unwrap();
         assert!(t.error.is_some() && !t.usable(1_000));
         assert_eq!(

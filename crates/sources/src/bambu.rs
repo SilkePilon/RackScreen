@@ -64,10 +64,11 @@ impl BambuConfig {
         }
     }
 
-    /// Bambu's broker for `region`, with the login in `token_file`.
-    pub fn cloud(region: crate::bambu_cloud::Region, serial: &str, token_file: PathBuf) -> Self {
+    /// Bambu's broker, with the login in `token_file`; the login's region
+    /// picks the broker.
+    pub fn cloud(serial: &str, token_file: PathBuf) -> Self {
         Self {
-            host: region.mqtt_host().to_string(),
+            host: String::new(),
             port: PORT,
             user: String::new(),
             serial: serial.trim().to_string(),
@@ -87,8 +88,17 @@ pub enum Tls {
     Verified,
 }
 
-/// How often a cloud source without a usable login looks for one.
-const LOGIN_RECHECK: Duration = Duration::from_secs(10);
+/// How often a cloud source without a usable login looks for one, and a
+/// connected one checks that its login is still the current one.
+const LOGIN_RECHECK: Duration = Duration::from_secs(5);
+
+/// Where and as whom one connection logs in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Creds {
+    pub host: String,
+    pub user: String,
+    pub pass: String,
+}
 
 // ---- MQTT 3.1.1, the four packets this needs -------------------------------
 
@@ -377,14 +387,8 @@ fn pushall() -> Vec<u8> {
     br#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#.to_vec()
 }
 
-async fn session(
-    cfg: &BambuConfig,
-    user: &str,
-    pass: &str,
-    ctx: &SourceCtx,
-    connected: &mut bool,
-) -> Ended {
-    match session_inner(cfg, user, pass, ctx, connected).await {
+async fn session(cfg: &BambuConfig, creds: &Creds, ctx: &SourceCtx, connected: &mut bool) -> Ended {
+    match session_inner(cfg, creds, ctx, connected).await {
         Ok(e) => e,
         Err(e) => Ended::Lost(e),
     }
@@ -392,12 +396,11 @@ async fn session(
 
 async fn session_inner(
     cfg: &BambuConfig,
-    user: &str,
-    pass: &str,
+    creds: &Creds,
     ctx: &SourceCtx,
     connected: &mut bool,
 ) -> Result<Ended> {
-    let host = cfg.host.trim();
+    let host = creds.host.trim();
     let tcp = tokio::time::timeout(
         Duration::from_secs(5),
         tokio::net::TcpStream::connect((host, cfg.port)),
@@ -420,7 +423,11 @@ async fn session_inner(
     .context("TLS handshake")?;
     let (mut rd, mut wr) = tokio::io::split(tls);
     let id = format!("rackscreen-{:08x}", fastrand::u32(..));
-    send(&mut wr, &connect_packet(&id, user, pass, KEEPALIVE_SECS)).await?;
+    send(
+        &mut wr,
+        &connect_packet(&id, &creds.user, &creds.pass, KEEPALIVE_SECS),
+    )
+    .await?;
     let (first, body) = tokio::time::timeout(Duration::from_secs(10), read_packet(&mut rd))
         .await
         .context("no CONNACK")??;
@@ -463,17 +470,16 @@ async fn session_inner(
     ping.tick().await;
     let mut resync = tokio::time::interval(PUSHALL_EVERY);
     resync.tick().await;
+    let mut recheck = tokio::time::interval(LOGIN_RECHECK);
+    recheck.tick().await;
     loop {
         tokio::select! {
             _ = ctx.shutdown.cancelled() => return Ok(Ended::Shutdown),
-            _ = ping.tick() => {
-                if cfg.token_file.is_some()
-                    && credentials(cfg, unix_now()).as_ref().map(|(u, p)| (u.as_str(), p.as_str()))
-                        != Some((user, pass))
-                {
+            _ = ping.tick() => send(&mut wr, &PINGREQ).await?,
+            _ = recheck.tick(), if cfg.token_file.is_some() => {
+                if credentials(cfg, unix_now()).as_ref() != Some(creds) {
                     return Ok(Ended::LoginChanged);
                 }
-                send(&mut wr, &PINGREQ).await?
             }
             _ = resync.tick() => send(&mut wr, &publish_packet(&request, &pushall())).await?,
             p = tokio::time::timeout(SILENT_LIMIT, prx.recv()) => {
@@ -509,14 +515,23 @@ impl Drop for AbortOnDrop {
     }
 }
 
-/// The user and password for the next connection: the config's on the LAN,
-/// the token file's in cloud mode (`None` while there is no usable login).
-pub fn credentials(cfg: &BambuConfig, now: i64) -> Option<(String, String)> {
+/// The broker, user and password for the next connection: the config's on
+/// the LAN; in cloud mode the token file's, with the broker of the region
+/// the login was made in (`None` while there is no usable login).
+pub fn credentials(cfg: &BambuConfig, now: i64) -> Option<Creds> {
     match &cfg.token_file {
-        None => Some((cfg.user.clone(), cfg.access_code.clone())),
+        None => Some(Creds {
+            host: cfg.host.clone(),
+            user: cfg.user.clone(),
+            pass: cfg.access_code.clone(),
+        }),
         Some(path) => crate::bambu_cloud::read_token(path)
             .filter(|t| t.usable(now))
-            .map(|t| (t.username, t.token)),
+            .map(|t| Creds {
+                host: t.region.mqtt_host().to_string(),
+                user: t.username,
+                pass: t.token,
+            }),
     }
 }
 
@@ -537,7 +552,7 @@ pub async fn run_bambu(cfg: BambuConfig, ctx: SourceCtx) {
         if ctx.shutdown.is_cancelled() {
             return;
         }
-        let Some((user, pass)) = credentials(&cfg, unix_now()) else {
+        let Some(creds) = credentials(&cfg, unix_now()) else {
             // cloud mode before a login (or after a refused one): look
             // again soon, so a login in the web UI needs no restart
             if !said_logged_out {
@@ -556,7 +571,7 @@ pub async fn run_bambu(cfg: BambuConfig, ctx: SourceCtx) {
         };
         said_logged_out = false;
         let mut connected = false;
-        let ended = session(&cfg, &user, &pass, &ctx, &mut connected).await;
+        let ended = session(&cfg, &creds, &ctx, &mut connected).await;
         if connected {
             backoff = 5;
             said = false;
@@ -569,13 +584,23 @@ pub async fn run_bambu(cfg: BambuConfig, ctx: SourceCtx) {
             }
             Ended::Refused if cloud => {
                 tracing::warn!("bambu: Bambu Lab refused the login; log in again");
-                if let Some(path) = &cfg.token_file {
-                    if let Err(e) = crate::bambu_cloud::mark_refused(path) {
+                let marked = cfg
+                    .token_file
+                    .as_deref()
+                    .map(|path| crate::bambu_cloud::mark_refused(path, &creds.pass));
+                match marked {
+                    Some(Err(e)) => {
+                        // the file still looks usable: do not hammer the broker
                         tracing::warn!("bambu: {e:#}");
+                        ctx.emit(Event::Printer {
+                            status: PrinterStatus::LoggedOut,
+                            report: None,
+                        });
+                        300
                     }
+                    // the next turn finds no usable login and waits for one
+                    _ => 0,
                 }
-                // the next turn finds no usable login and waits for one
-                0
             }
             Ended::Refused => {
                 tracing::warn!("bambu: access code refused; check it on the printer's screen");
@@ -793,31 +818,42 @@ mod tests {
     fn credentials_by_mode() {
         let lan = BambuConfig::lan(" 192.168.1.5 ", "S1", "12345678");
         assert_eq!((lan.host.as_str(), lan.tls), ("192.168.1.5", Tls::AnyCert));
+        let c = credentials(&lan, 0).unwrap();
         assert_eq!(
-            credentials(&lan, 0),
-            Some(("bblp".into(), "12345678".into()))
+            (c.host.as_str(), c.user.as_str(), c.pass.as_str()),
+            ("192.168.1.5", "bblp", "12345678")
         );
 
         let dir = tempfile::tempdir().unwrap();
         let path = crate::bambu_cloud::token_path_in(dir.path());
-        let cloud = BambuConfig::cloud(crate::bambu_cloud::Region::Global, "S1", path.clone());
-        assert_eq!(
-            (cloud.host.as_str(), cloud.tls),
-            ("us.mqtt.bambulab.com", Tls::Verified)
-        );
+        let cloud = BambuConfig::cloud("S1", path.clone());
+        assert_eq!(cloud.tls, Tls::Verified);
         assert_eq!(credentials(&cloud, 0), None, "no login yet");
         let tok = crate::bambu_cloud::TokenFile {
             token: "tok".into(),
             username: "u_9".into(),
             account: "a@b".into(),
-            region: crate::bambu_cloud::Region::Global,
+            region: crate::bambu_cloud::Region::China,
             expires_at: 100,
             error: None,
         };
         crate::bambu_cloud::write_token(&path, &tok, None).unwrap();
-        assert_eq!(credentials(&cloud, 50), Some(("u_9".into(), "tok".into())));
+        assert_eq!(
+            credentials(&cloud, 50),
+            Some(Creds {
+                host: "cn.mqtt.bambulab.com".into(),
+                user: "u_9".into(),
+                pass: "tok".into()
+            }),
+            "the login's region picks the broker"
+        );
         assert_eq!(credentials(&cloud, 100), None, "expired");
-        crate::bambu_cloud::mark_refused(&path).unwrap();
+        crate::bambu_cloud::mark_refused(&path, "an older token").unwrap();
+        assert!(
+            credentials(&cloud, 50).is_some(),
+            "a newer login is left alone"
+        );
+        crate::bambu_cloud::mark_refused(&path, "tok").unwrap();
         assert_eq!(credentials(&cloud, 50), None, "refused");
     }
 
