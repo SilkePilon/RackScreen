@@ -487,7 +487,11 @@ pub fn draw(g: &mut World, f: u32, t: f64) {
     hills(g);
     farmhouse(g, f, t);
     barn(g, f);
-    windmill(g, t);
+    // The last screen's windmill and cow need a fourth screen of their own.
+    let wide = g.layout.panels >= 4;
+    if wide {
+        windmill(g, t);
+    }
     fence(g);
     fireflies(g, f, t);
 
@@ -533,7 +537,9 @@ pub fn draw(g: &mut World, f: u32, t: f64) {
 
     // The witness cow on the last screen, the other one on the third.
     let witness = (t / 2.3).floor() as i32 % 2 == 0;
-    cow(g, (g.panel(3) + 8) as f64, 44.0, witness, None, false);
+    if wide {
+        cow(g, (g.panel(3) + 8) as f64, 44.0, witness, None, false);
+    }
     if t < T_LIFT {
         let grazing = t < T_ARRIVE + 1.4 && (t / 1.7).floor() as i32 % 2 == 0;
         cow(g, home.0, home.1, grazing, None, false);

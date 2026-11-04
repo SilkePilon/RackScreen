@@ -20,10 +20,14 @@ const R_OUT: f64 = 80.0;
 /// How flat the disk looks: its vertical squash.
 const FLAT: f64 = 0.17;
 
-/// The hole sits in the middle of the third screen (the last on a narrower
-/// layout).
+/// The screen the hole sits on: the third, or the one before the last on a
+/// narrower layout so the companion star keeps a screen of its own.
+fn hole_panel(g: &World) -> u32 {
+    g.layout.panels.saturating_sub(2).min(2)
+}
+
 fn centre(g: &World) -> (f64, f64) {
-    ((g.panel(2) + 30) as f64, 30.0)
+    ((g.panel(hole_panel(g)) + 30) as f64, 30.0)
 }
 
 fn disk_colour(r: f64) -> u32 {
@@ -122,7 +126,7 @@ fn galaxy(g: &mut World, t: f64) {
 /// towards the disk.
 fn companion(g: &mut World, f: u32, t: f64) {
     let (cx, cy) = centre(g);
-    let (sx, sy) = ((g.panel(3) + 34) as f64, 20.0);
+    let (sx, sy) = ((g.panel(hole_panel(g) + 1) + 34) as f64, 20.0);
     glow(g, sx, sy, 14.0, 0xff9a5a, 0.45);
     g.disc(0xff8a3a, sx, sy, 7);
     g.disc(0xffb060, sx - 1.0, sy - 1.0, 5);
