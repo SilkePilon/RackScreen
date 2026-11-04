@@ -1513,8 +1513,8 @@ fn show_round_one() {
         ("paper-plane", 9.9, "show_paper_plane_delivered"),
         ("storm", 5.75, "show_storm_strike"),
         ("storm", 11.0, "show_storm_rainbow"),
-        ("day", 3.0, "show_day"),
-        ("day", 11.0, "show_day_night"),
+        ("day", 1.0, "show_day_sunrise"),
+        ("day", 11.35, "show_day_pillow"),
         ("space", 4.0, "show_space"),
         ("space", 1.0, "show_space_ship"),
     ] {

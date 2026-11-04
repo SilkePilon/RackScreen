@@ -114,7 +114,7 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <img src=".github/media/shows/day.gif" alt="Day in a minute show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Day in a minute</b> (<code>day</code>) — the sun rises on the left, arcs over every screen and sets on the right; then stars and a moon.
+  <b>Day in a minute</b> (<code>day</code>) — a farm, a windmill, a village and a duck pond from dawn to past midnight: the rooster crows the sun up, shadows swing, the tractor and a cyclist pass, lights come on at dusk; then the full moon rises, the rooster crows at it and a pillow from the farmhouse window knocks him off his post.
 </p>
 
 <p align="center">
