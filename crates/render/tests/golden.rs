@@ -1314,3 +1314,14 @@ fn show_round_two() {
         check(name, &show_strip(def, t));
     }
 }
+
+#[test]
+fn show_batch_c() {
+    for (id, t, name) in [
+        ("dino-chase", 5.2, "show_dino_chase_mirror"),
+        ("dino-chase", 8.6, "show_dino_chase_roar"),
+    ] {
+        let def = rackscreen_core::shows::by_id(id).unwrap();
+        check(name, &show_strip(def, t));
+    }
+}

@@ -8,6 +8,7 @@ mod caravan;
 mod day;
 mod deep_sea;
 mod desert_night;
+mod dino_chase;
 mod fireworks;
 mod freight;
 mod paper_plane;
@@ -98,6 +99,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: desert_night::SECS,
         draw: desert_night::draw,
     },
+    ShowDef {
+        id: "dino-chase",
+        name: "Dinosaur chase",
+        secs: dino_chase::SECS,
+        draw: dino_chase::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -152,6 +159,7 @@ mod tests {
                 ("alpine", "Mountains: alpine dawn", 10.0),
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
+                ("dino-chase", "Dinosaur chase", 10.0),
             ]
         );
     }

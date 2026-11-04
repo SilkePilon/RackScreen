@@ -159,6 +159,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Desert: night tumbleweed</b> (<code>desert-night</code>) — a tumbleweed rolls past cactus silhouettes under a big moon; a shooting star streaks over.
 </p>
 
+<p align="center">
+  <b>Dinosaur chase</b> (<code>dino-chase</code>) — a puddle ripples to heavy footsteps, then a jeep races a big dinosaur through a prehistoric valley; its grin fills the side mirror, the jeep jumps a ridge and the dinosaur roars, wearing the driver's hat.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
