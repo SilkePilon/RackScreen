@@ -255,6 +255,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Rooftop cat</b> (<code>rooftop-cat</code>) — night over the city roofs, windows winking on and off and a neon fish buzzing; a ginger cat chases a moth roof to roof across the screens, nearly falls and hangs from a ledge, then leaps past the moon onto the water tower, whose hatch drops it in with a splash; a soggy head pops out and the moth settles on it.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/sledding.gif" alt="Snow day show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Snow day</b> (<code>sledding</code>) — a bright winter noon over a hillside village, snow drifting down; a kid on a red sled pushes off from the log cabin and rushes down the slope across the screens, the dog bounding after, flies off a kicker straight through the snowman, skids across the frozen pond under a leaping skater and ends up wearing the snowman's top hat with its head riding pillion, until the dog arrives and steals the carrot nose.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

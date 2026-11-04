@@ -24,6 +24,7 @@ mod pirates;
 mod rooftop_cat;
 pub mod schedule;
 mod scifi;
+mod sledding;
 mod space;
 mod storm;
 mod ufo;
@@ -227,6 +228,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: rooftop_cat::SECS,
         draw: rooftop_cat::draw,
     },
+    ShowDef {
+        id: "sledding",
+        name: "Snow day",
+        secs: sledding::SECS,
+        draw: sledding::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -299,6 +306,7 @@ mod tests {
                 ("lighthouse", "Lighthouse keeper", 12.0),
                 ("balloons", "Balloon festival", 12.0),
                 ("rooftop-cat", "Rooftop cat", 12.0),
+                ("sledding", "Snow day", 12.0),
             ]
         );
     }

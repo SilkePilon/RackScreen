@@ -33,6 +33,7 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   lighthouse: ["#141a2e", "#1e4656", "#fff4c8", "#30364a"],
   balloons: ["#93a8d8", "#f0cdb4", "#d83a3a", "#7ab450"],
   "rooftop-cat": ["#141034", "#231a48", "#e8903a", "#2a2a40"],
+  sledding: ["#6c9ee0", "#c8d6ee", "#d83838", "#f4f8ff"],
 }
 
 function still(id: string, frame: number): string {
