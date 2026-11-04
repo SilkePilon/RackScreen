@@ -786,3 +786,86 @@ async fn show_cards_are_cached_pngs_and_unknown_shows_404() {
     let (st, _, _) = send(&f.app, get("/api/shows/nope/card.png")).await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn system_answers_every_section_with_nulls_where_unreadable() {
+    let f = fixture("");
+    let (st, _, body) = send(&f.app, get("/api/system")).await;
+    assert_eq!(st, StatusCode::OK);
+    for key in [
+        "model",
+        "os",
+        "kernel",
+        "arch",
+        "hostname",
+        "uptime_secs",
+        "cpu",
+        "memory",
+        "disk",
+        "process",
+        "throttled",
+        "network",
+    ] {
+        assert!(body.get(key).is_some(), "{key} missing: {body}");
+    }
+    for key in ["cores", "usage_pct", "temp_c", "freq_mhz", "load"] {
+        assert!(body["cpu"].get(key).is_some(), "cpu.{key} missing");
+    }
+    assert!(body["network"].is_array());
+    assert_eq!(body["disk"]["path"], "/");
+    assert!(body["process"]["uptime_secs"].is_u64());
+    // the second poll right away reuses the window
+    let (_, _, again) = send(&f.app, get("/api/system")).await;
+    assert_eq!(again["cpu"]["usage_pct"], body["cpu"]["usage_pct"]);
+}
+
+#[tokio::test]
+async fn gif_memory_joins_the_config_with_the_render_loop() {
+    use rackscreen_app::config::GifCfg;
+    use rackscreen_app::hub::{GifStatus, StatusSnapshot};
+    use rackscreen_core::gif::{FRAME_BYTES, MAX_FRAMES};
+    let f = fixture("");
+    let mut cfg = Config::load_or_default(&f.hub.config_path).unwrap();
+    cfg.gifs = ["cat", "dog", "spare"]
+        .iter()
+        .map(|n| GifCfg {
+            name: n.to_string(),
+            url: format!("https://example.com/{n}.gif"),
+        })
+        .collect();
+    cfg.screens[0].roles.push("gif:cat".into());
+    cfg.screens[1].roles.push("gif:dog".into());
+    cfg.save(&f.hub.config_path).unwrap();
+    f.hub.publish_status(StatusSnapshot {
+        gifs: vec![GifStatus {
+            name: "cat".into(),
+            used: true,
+            state: "ready",
+            frames: Some(MAX_FRAMES),
+            bytes: Some(MAX_FRAMES * FRAME_BYTES),
+            error: None,
+        }],
+        ..Default::default()
+    });
+    let (st, _, body) = send(&f.app, get("/api/gifs/memory")).await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert_eq!(body["frame_bytes"], FRAME_BYTES);
+    assert_eq!(body["max_frames"], MAX_FRAMES);
+    assert_eq!(body["max_gif_mb"], 33.0);
+    let gifs = body["gifs"].as_array().unwrap();
+    assert_eq!(gifs.len(), 3);
+    assert_eq!(gifs[0]["state"], "ready");
+    assert_eq!(gifs[0]["frames"], MAX_FRAMES);
+    assert_eq!(gifs[0]["mb"], 33.0);
+    assert_eq!(gifs[1]["state"], "loading", "on a screen, not decoded yet");
+    assert_eq!(gifs[1]["mb"], Value::Null);
+    assert_eq!(gifs[2]["state"], "off");
+    assert_eq!(gifs[2]["used"], false);
+    assert_eq!(body["decoded_mb"], 33.0);
+    assert_eq!(body["pending_mb"], 33.0);
+    if let Some(avail) = body["memory"]["available_mb"].as_f64() {
+        let budget = body["budget_mb"].as_f64().unwrap();
+        assert!((budget - (avail + 32.96 - 150.0).max(0.0)).abs() < 0.1);
+        assert!(body["fits_more"].is_u64());
+    }
+}

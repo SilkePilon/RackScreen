@@ -5,6 +5,7 @@
 pub mod auth;
 pub mod config_api;
 pub mod control;
+pub mod gif_memory;
 pub mod gif_search;
 pub mod host;
 pub mod live;
@@ -92,6 +93,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/control/night", post(control::night))
         .route("/control/restart", post(control::restart))
         .route("/system", get(system::system))
+        .route("/gifs/memory", get(gif_memory::memory))
         .route("/gifs/providers", get(gif_search::providers))
         .route("/gifs/search", get(gif_search::search))
         .route("/gifs/trending", get(gif_search::trending))

@@ -94,6 +94,9 @@ pub struct Hit {
     /// The preview's size, for a box that does not jump while it loads.
     pub width: u32,
     pub height: u32,
+    /// Frames of the full GIF when the provider says (GIPHY does, Tenor
+    /// not), for a memory estimate.
+    pub frames: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -379,6 +382,10 @@ pub fn parse_giphy(v: &Value, max_offset: u32) -> Result<Page, String> {
             preview: str_at(img, &["url"]).unwrap_or_default().to_string(),
             width: dim(img.get("width")).unwrap_or(100),
             height: dim(img.get("height")).unwrap_or(100),
+            frames: dim(images
+                .and_then(|i| i.get("original"))
+                .and_then(|o| o.get("frames")))
+            .filter(|f| *f > 0),
         });
     }
     let pg = v.get("pagination");
@@ -435,6 +442,7 @@ pub fn parse_tenor(v: &Value) -> Result<Page, String> {
             preview: str_at(small, &["url"]).unwrap_or_default().to_string(),
             width: dim(dims.and_then(|d| d.first())).unwrap_or(100),
             height: dim(dims.and_then(|d| d.get(1))).unwrap_or(100),
+            frames: None,
         });
     }
     let next = v
@@ -621,7 +629,9 @@ mod tests {
         );
         assert_eq!((h.width, h.height), (100, 56), "string dims parse");
         assert_eq!(h.title, "Happy Cat GIF by Cheezburger");
+        assert_eq!(h.frames, Some(38), "original.frames, a string");
         assert_eq!(page.results[1].title, "", "a missing title is empty");
+        assert_eq!(page.results[1].frames, None, "no original rendition");
         assert_eq!(page.next.as_deref(), Some("28"), "offset 3 + count 25");
     }
 
@@ -657,6 +667,10 @@ mod tests {
         assert_eq!((h.width, h.height), (220, 124));
         assert_eq!(h.title, "Excited Happy GIF", "empty title: the description");
         assert_eq!(page.results[1].title, "Party");
+        assert!(
+            page.results.iter().all(|h| h.frames.is_none()),
+            "Tenor has no count"
+        );
         assert_eq!(page.next.as_deref(), Some("CAgQ7gEaHgoKAD-_xTqJ4oQdEhD"));
         let mut v = fixture("tenor-search.json");
         v["next"] = json!("");
