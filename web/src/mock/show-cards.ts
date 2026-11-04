@@ -20,6 +20,11 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   kaiju: ["#5a2a5e", "#f08a5a", "#4a9060", "#22204a"],
   heist: ["#10142a", "#1a1e3a", "#ff4050", "#1e2238"],
   shark: ["#7cc4f2", "#2a86c0", "#f0c020", "#f0d898"],
+  "dino-chase": ["#4a6a72", "#e8b878", "#56683a", "#8a6a44"],
+  dragon: ["#3e2462", "#d86a5e", "#c0403a", "#4a3050"],
+  pirates: ["#5aa6e4", "#b8e0f4", "#f8f0dc", "#2a66a8"],
+  aurora: ["#0c1430", "#1a5a6a", "#5af09a", "#d8e4f8"],
+  launch: ["#4a5a9a", "#d89a8a", "#f4f4f4", "#3a4a3a"],
 }
 
 function still(id: string, frame: number): string {

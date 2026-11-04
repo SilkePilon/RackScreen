@@ -179,6 +179,26 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Beach day</b> (<code>shark</code>) — a fin cuts towards the swimmers, who flee up the sand, until it surfaces: a kid in a duck ring with a toy fin, which a gull then steals.
 </p>
 
+<p align="center">
+  <b>Dinosaur chase</b> (<code>dino-chase</code>) — a puddle ripples to heavy footsteps, then a jeep races a big dinosaur through a prehistoric valley; its grin fills the side mirror, the jeep jumps a ridge and the dinosaur roars, wearing the driver's hat.
+</p>
+
+<p align="center">
+  <b>Dragon over the castle</b> (<code>dragon</code>) — at sunset a dragon flaps in over a village (windmill turning, villagers running) and breathes fire at the knight on the castle wall; behind his shield he was only toasting a marshmallow.
+</p>
+
+<p align="center">
+  <b>Broadside</b> (<code>pirates</code>) — two sailing ships trade cannon fire on rolling waves off a palm island; a ball brings down the dark ship's mainmast and the captain's parrot flies off wearing his hat.
+</p>
+
+<p align="center">
+  <b>Northern lights</b> (<code>aurora</code>) — green and violet curtains ripple over snowy peaks and a log cabin, mirrored in a frozen lake; a fox trots across the ice, sits down to watch, and a shooting star goes by.
+</p>
+
+<p align="center">
+  <b>Lift-off</b> (<code>launch</code>) — countdown lamps light up on a floodlit coastal pad at dawn, the engines ignite in billowing smoke, and the rocket climbs across the screens into space, drops its first stage and releases a tiny satellite that unfolds its solar panels.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

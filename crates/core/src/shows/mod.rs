@@ -3,14 +3,19 @@
 //! frame index `f` and the quantised local time `t`.
 
 mod alpine;
+mod aurora;
 mod birds;
 mod caravan;
 mod day;
 mod deep_sea;
 mod desert_night;
+mod dino_chase;
+mod dragon;
 mod fireworks;
 mod freight;
+mod launch;
 mod paper_plane;
+mod pirates;
 pub mod schedule;
 mod space;
 mod storm;
@@ -135,6 +140,36 @@ pub const SHOWS: &[ShowDef] = &[
         secs: shark::SECS,
         draw: shark::draw,
     },
+    ShowDef {
+        id: "dino-chase",
+        name: "Dinosaur chase",
+        secs: dino_chase::SECS,
+        draw: dino_chase::draw,
+    },
+    ShowDef {
+        id: "dragon",
+        name: "Dragon over the castle",
+        secs: dragon::SECS,
+        draw: dragon::draw,
+    },
+    ShowDef {
+        id: "pirates",
+        name: "Broadside",
+        secs: pirates::SECS,
+        draw: pirates::draw,
+    },
+    ShowDef {
+        id: "aurora",
+        name: "Northern lights",
+        secs: aurora::SECS,
+        draw: aurora::draw,
+    },
+    ShowDef {
+        id: "launch",
+        name: "Lift-off",
+        secs: launch::SECS,
+        draw: launch::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -194,6 +229,11 @@ mod tests {
                 ("kaiju", "Monster in the harbour", 11.0),
                 ("heist", "The heist", 10.0),
                 ("shark", "Beach day", 10.0),
+                ("dino-chase", "Dinosaur chase", 10.0),
+                ("dragon", "Dragon over the castle", 10.0),
+                ("pirates", "Broadside", 11.0),
+                ("aurora", "Northern lights", 10.0),
+                ("launch", "Lift-off", 12.0),
             ]
         );
     }
