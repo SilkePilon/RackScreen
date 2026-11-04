@@ -142,7 +142,11 @@ function Body({
         </Alert>
       )}
       {/* A disabled fieldset turns off every input, switch and button inside. */}
-      <fieldset disabled={locked} aria-disabled={locked || undefined} className="contents">
+      <fieldset
+        disabled={locked}
+        aria-disabled={locked || undefined}
+        className="contents [&_[role=switch]:disabled]:cursor-not-allowed [&_[role=switch]:disabled]:opacity-50"
+      >
         {phase === "setup" && <Setup t={t} />}
         {phase === "login" && <Login t={t} waiting={waiting} setWaiting={setWaiting} />}
         {phase === "approve" && <Approve />}
@@ -163,7 +167,7 @@ function NeedsPassword() {
           Tailscale can give remote access to this Pi, so RackScreen only manages it once this page asks for a
           password. Set one under System → Web access, then come back here.
         </p>
-        <Button asChild size="sm" className="mt-2">
+        <Button asChild size="sm" className="mt-2 no-underline!">
           <Link to="/system#web.password">Set a password</Link>
         </Button>
       </AlertDescription>
