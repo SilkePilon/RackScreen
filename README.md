@@ -163,6 +163,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Dinosaur chase</b> (<code>dino-chase</code>) — a puddle ripples to heavy footsteps, then a jeep races a big dinosaur through a prehistoric valley; its grin fills the side mirror, the jeep jumps a ridge and the dinosaur roars, wearing the driver's hat.
 </p>
 
+<p align="center">
+  <b>Dragon over the castle</b> (<code>dragon</code>) — at sunset a dragon flaps in over a village (windmill turning, villagers running) and breathes fire at the knight on the castle wall; behind his shield he was only toasting a marshmallow.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene

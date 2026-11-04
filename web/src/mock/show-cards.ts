@@ -16,6 +16,7 @@ const SCENES: Record<string, [sky: string, mid: string, glow: string, ground: st
   caravan: ["#8fcdf0", "#f4e2a8", "#6b4a2a", "#d8a85a"],
   "desert-night": ["#1d1638", "#3b2d63", "#f2ecd0", "#231a3a"],
   "dino-chase": ["#4a6a72", "#e8b878", "#56683a", "#8a6a44"],
+  dragon: ["#3e2462", "#d86a5e", "#c0403a", "#4a3050"],
 }
 
 function still(id: string, frame: number): string {
