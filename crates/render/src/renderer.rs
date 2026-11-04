@@ -88,8 +88,10 @@ impl Painter {
             }
             for (dst, src) in pm
                 .data_mut()
-                .chunks_exact_mut(4)
-                .zip(c.rgba.chunks_exact(4))
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(c.rgba.as_chunks::<4>().0)
             {
                 let a = src[3] as u32;
                 let pre = |v: u8| ((v as u32 * a + 127) / 255) as u8;
@@ -268,7 +270,7 @@ fn blit_world(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
     for wy in 0..h.div_ceil(SCALE).min(WORLD_H) {
         // Scale one world row once...
         let src = &world.rgba[(wy * world.width) as usize * 4..];
-        for (pxx, out) in row.chunks_exact_mut(4).enumerate() {
+        for (pxx, out) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let s = (x0 as usize + pxx / SCALE as usize) * 4;
             out.copy_from_slice(&src[s..s + 4]);
         }
@@ -362,14 +364,25 @@ mod tests {
         s.fade = 0.5;
         let mut half = new_pixmap();
         r.render(&s, &mut half);
-        for (a, b) in full.data().chunks_exact(4).zip(half.data().chunks_exact(4)) {
+        for (a, b) in full
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(half.data().as_chunks::<4>().0)
+        {
             for c in 0..3 {
                 assert_eq!(b[c], (a[c] as f32 * 0.5) as u8);
             }
         }
         s.fade = 0.0;
         r.render(&s, &mut half);
-        assert!(half.data().chunks_exact(4).all(|p| p[..3] == [0, 0, 0]));
+        assert!(half
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| p[..3] == [0, 0, 0]));
         // the cached base raster was not darkened
         s.fade = 1.0;
         let mut again = new_pixmap();

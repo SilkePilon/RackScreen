@@ -149,7 +149,7 @@ mod tests {
                 let mut buf = vec![0; dec.output_buffer_size().unwrap()];
                 let info = dec.next_frame(&mut buf).unwrap();
                 assert_eq!((info.width, info.height), (CARD_W, CARD_H));
-                let px: std::collections::HashSet<_> = buf.chunks_exact(3).collect();
+                let px: std::collections::HashSet<_> = buf.as_chunks::<3>().0.iter().collect();
                 assert!(px.len() > 2, "{} still {k} is flat", def.id);
             }
         }

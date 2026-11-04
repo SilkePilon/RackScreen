@@ -179,7 +179,7 @@ impl SimPanel {
         let c = PANEL as f32 / 2.0 - 0.5;
         let mut buf = self.buf.lock().unwrap();
         for (r, bytes) in frame.slices() {
-            for (k, px) in bytes.chunks_exact(2).enumerate() {
+            for (k, px) in bytes.as_chunks::<2>().0.iter().enumerate() {
                 let x = r.x + k as u32 % r.w;
                 let y = r.y + k as u32 / r.w;
                 let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();

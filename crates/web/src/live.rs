@@ -16,7 +16,7 @@ use crate::AppState;
 pub fn encode_png(rgba: &[u8]) -> Vec<u8> {
     let n = (SIZE * SIZE) as usize;
     let mut rgb = Vec::with_capacity(n * 3);
-    for px in rgba.chunks_exact(4).take(n) {
+    for px in rgba.as_chunks::<4>().0.iter().take(n) {
         rgb.extend_from_slice(&px[..3]);
     }
     let mut out = Vec::with_capacity(32 * 1024);
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn png_is_small_and_decodes_to_the_frame() {
         let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
-        for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+        for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let x = (i as u32 % SIZE) as u8;
             px[0] = x;
             px[1] = 40;

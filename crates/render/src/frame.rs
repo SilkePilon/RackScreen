@@ -299,7 +299,7 @@ pub fn darken(px: &mut Pixmap, k: f32) {
         return;
     }
     let lut = brightness_lut(k);
-    for p in px.data_mut().chunks_exact_mut(4) {
+    for p in px.data_mut().as_chunks_mut::<4>().0 {
         p[0] = lut[p[0] as usize];
         p[1] = lut[p[1] as usize];
         p[2] = lut[p[2] as usize];
@@ -494,7 +494,7 @@ mod tests {
     fn noise(size: u32, seed: u32) -> Pixmap {
         let mut p = Pixmap::new(size, size).unwrap();
         let mut s = seed;
-        for b in p.data_mut().chunks_exact_mut(4) {
+        for b in p.data_mut().as_chunks_mut::<4>().0 {
             for c in &mut b[..3] {
                 s = s.wrapping_mul(1664525).wrapping_add(1013904223);
                 *c = (s >> 24) as u8;
