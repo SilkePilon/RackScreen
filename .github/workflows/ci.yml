@@ -97,9 +97,6 @@ jobs:
       - run: chmod +x rackscreen-aarch64
       # `rackscreen update` verifies the download against this file.
       - run: sha256sum rackscreen-aarch64 > rackscreen-aarch64.sha256
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            rackscreen-aarch64
-            rackscreen-aarch64.sha256
-            install.sh
+      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes rackscreen-aarch64 rackscreen-aarch64.sha256 install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
