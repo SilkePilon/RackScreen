@@ -200,7 +200,7 @@ async fn status_has_the_documented_shape() {
     let (st, _, body) = send(&f.app, get("/api/status")).await;
     assert_eq!(st, StatusCode::OK);
     for key in [
-        "monitor", "night", "screens", "links", "stats", "tiles", "host",
+        "monitor", "night", "screens", "links", "stats", "tiles", "host", "age_ms",
     ] {
         assert!(body.get(key).is_some(), "{key} missing: {body}");
     }

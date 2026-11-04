@@ -257,6 +257,10 @@ export interface Status {
   links: LinkStatus[]
   stats: FrameStats[]
   tiles: Tile[]
+  /** How old `screens[].cycle_progress` was when this answer left the Pi. */
+  age_ms?: number
+  /** Client only: `performance.now()` when this answer arrived. */
+  received?: number
   host: {
     cpu_temp_c: number | null
     load1: number | null

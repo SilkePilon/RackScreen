@@ -35,7 +35,7 @@ export const useInfo = () => useQuery({ queryKey: keys.info, queryFn: api.info, 
 export const useStatus = () =>
   useQuery({
     queryKey: keys.status,
-    queryFn: api.status,
+    queryFn: async () => ({ ...(await api.status()), received: performance.now() }),
     refetchInterval: 1500,
     refetchIntervalInBackground: false,
     retry: false,
