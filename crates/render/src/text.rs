@@ -3,32 +3,26 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use fontdue::{Font, FontSettings, Metrics};
-use rackscreen_core::p2::font::{bytes, FontId};
+use fontdue::Metrics;
+use rackscreen_core::p2::font::{font, FontId};
 use rackscreen_core::scene::ClipRect;
 use rackscreen_core::theme::Color;
 use tiny_skia::Pixmap;
 
+/// The faces are core's parsed Outfit (`p2::font::font`), one copy shared by
+/// every render thread (2.6 MB a set).
 pub struct TextRenderer {
-    /// Outfit Medium, SemiBold, Bold in `FontId` order.
-    fonts: [Font; 3],
     /// Glyphs keyed by face, character and size in half pixels.
     run_cache: HashMap<(FontId, char, u32), (Metrics, Vec<u8>)>,
 }
 
+/// Glyphs kept per renderer before the cache starts over: far more than the
+/// screens draw, a bound in case some animation sweeps sizes.
+const GLYPH_CACHE: usize = 4096;
+
 impl TextRenderer {
     pub fn new() -> Result<Self> {
-        let load = |id: FontId| {
-            Font::from_bytes(bytes(id), FontSettings::default())
-                .map_err(|e| anyhow::anyhow!("font {id:?}: {e}"))
-        };
-        let fonts = [
-            load(FontId::Medium)?,
-            load(FontId::SemiBold)?,
-            load(FontId::Bold)?,
-        ];
         Ok(Self {
-            fonts,
             run_cache: HashMap::new(),
         })
     }
@@ -43,7 +37,10 @@ impl TextRenderer {
         if let Some(g) = self.run_cache.get(&key) {
             return g.clone();
         }
-        let g = self.fonts[id.index()].rasterize(ch, key.2 as f32 / 2.0);
+        let g = font(id).rasterize(ch, key.2 as f32 / 2.0);
+        if self.run_cache.len() >= GLYPH_CACHE {
+            self.run_cache.clear();
+        }
         self.run_cache.insert(key, g.clone());
         g
     }
