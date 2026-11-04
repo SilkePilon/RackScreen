@@ -82,7 +82,7 @@ pub const SHOWS: &[ShowDef] = &[
     },
     ShowDef {
         id: "space",
-        name: "Space cruise",
+        name: "Space hitchhiker",
         secs: space::SECS,
         draw: space::draw,
     },
@@ -254,7 +254,7 @@ mod tests {
                 ("paper-plane", "Air mail", 11.0),
                 ("storm", "Thunderstorm", 11.5),
                 ("day", "Day in a minute", 12.0),
-                ("space", "Space cruise", 8.0),
+                ("space", "Space hitchhiker", 12.0),
                 ("birds", "Birds at sunset", 9.0),
                 ("fireworks", "Fireworks", 8.0),
                 ("alpine", "Mountains: alpine dawn", 10.0),

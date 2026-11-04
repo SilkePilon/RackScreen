@@ -1515,8 +1515,8 @@ fn show_round_one() {
         ("storm", 11.0, "show_storm_rainbow"),
         ("day", 1.0, "show_day_sunrise"),
         ("day", 11.35, "show_day_pillow"),
-        ("space", 4.0, "show_space"),
-        ("space", 1.0, "show_space_ship"),
+        ("space", 6.75, "show_space_comet"),
+        ("space", 11.0, "show_space_thanks"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));

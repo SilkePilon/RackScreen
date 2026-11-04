@@ -118,10 +118,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
 </p>
 
 <p align="center">
-  <img src=".github/media/shows/space.gif" alt="Space cruise show across four screens" width="720">
+  <img src=".github/media/shows/space.gif" alt="Space hitchhiker show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Space cruise</b> (<code>space</code>) — a small ship flies past a ringed planet over three layers of stars.
+  <b>Space hitchhiker</b> (<code>space</code>) — a little space liner cruises past a ringed gas giant, an asteroid belt, a nebula and an icy planet; it picks up a thumbing one-eyed alien, ducks a comet (the alien snaps off a chip of ice to lick) and drops it at its pocket-sized home, whose window blinks a thank-you.
 </p>
 
 <p align="center">
