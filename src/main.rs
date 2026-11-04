@@ -13,7 +13,7 @@ use rackscreen_app::logs::LogSink;
 use rackscreen_app::run::{RunOptions, SourceKind};
 use rackscreen_app::supervisor::{supervise, Exit};
 use rackscreen_ops::install::{self, Installer};
-use rackscreen_ops::paths::{service_user, Paths};
+use rackscreen_ops::paths::{running_service_user, service_user, Paths};
 use rackscreen_ops::shell::RealShell;
 use rackscreen_ops::uninstall::{UEvent, Uninstaller};
 use tracing_subscriber::layer::SubscriberExt;
@@ -324,9 +324,12 @@ fn main() -> Result<()> {
         }
         Some(Cmd::TailscaleSetup) => {
             ensure_root()?;
+            // The user the installed service runs as; whoever ran sudo
+            // when there is none (yet).
+            let user = running_service_user(&RealShell).unwrap_or_else(service_user);
             let setup = rackscreen_ops::tailscale::Setup {
                 sh: &RealShell,
-                user: service_user(),
+                user,
                 retry_wait: std::time::Duration::from_secs(1),
             };
             setup.run(&mut |l| {

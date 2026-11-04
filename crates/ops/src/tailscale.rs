@@ -74,6 +74,7 @@ impl Setup<'_> {
         say("Starting tailscaled");
         self.sh
             .check("systemctl", &["enable", "--now", "tailscaled"])?;
+        say(&format!("Making {} the Tailscale operator", self.user));
         let operator = format!("--operator={}", self.user);
         let mut last = String::new();
         for attempt in 0..15 {
@@ -156,6 +157,7 @@ mod tests {
         assert!(sh.called("systemctl enable --now tailscaled"));
         assert!(sh.called("tailscale set --operator=silke"));
         assert_eq!(log[0], "Tailscale 1.90.0 is installed");
+        assert!(log.contains(&"Making silke the Tailscale operator".to_string()));
     }
 
     #[test]

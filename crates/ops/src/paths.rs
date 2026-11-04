@@ -64,6 +64,37 @@ pub fn service_user() -> String {
     }
 }
 
+/// The user of a `rackscreen@<user>.service` in `systemctl list-units
+/// 'rackscreen@*' --plain --no-legend` output, an active one first; never root.
+pub fn unit_user(list_units: &str) -> Option<String> {
+    let units: Vec<(&str, bool)> = list_units
+        .lines()
+        .filter_map(|l| {
+            let mut cols = l.split_whitespace();
+            let unit = cols.next()?;
+            let active = cols.nth(1) == Some("active");
+            let user = unit.strip_prefix("rackscreen@")?.strip_suffix(".service")?;
+            (!user.is_empty() && user != "root").then_some((user, active))
+        })
+        .collect();
+    units
+        .iter()
+        .find(|(_, active)| *active)
+        .or(units.first())
+        .map(|(u, _)| u.to_string())
+}
+
+/// The user the installed service runs as, read from systemd.
+pub fn running_service_user(sh: &dyn crate::shell::Shell) -> Option<String> {
+    let out = sh
+        .run(
+            "systemctl",
+            &["list-units", "rackscreen@*", "--plain", "--no-legend"],
+        )
+        .ok()?;
+    out.success().then(|| unit_user(&out.stdout)).flatten()
+}
+
 pub fn is_root() -> bool {
     nix::unistd::geteuid().is_root()
 }
@@ -89,6 +120,33 @@ mod tests {
             .config_txt()
             .unwrap()
             .ends_with("boot/firmware/config.txt"));
+    }
+
+    #[test]
+    fn the_unit_names_its_user() {
+        let out = "rackscreen@old.service   loaded failed failed  RackScreen for old\n\
+                   rackscreen@silke.service loaded active running RackScreen for silke\n";
+        assert_eq!(unit_user(out).as_deref(), Some("silke"));
+        assert_eq!(
+            unit_user("rackscreen@pi.service loaded inactive dead x\n").as_deref(),
+            Some("pi")
+        );
+        assert_eq!(
+            unit_user("rackscreen@root.service loaded active running x"),
+            None
+        );
+        assert_eq!(
+            unit_user("other@silke.service loaded active running x"),
+            None
+        );
+        assert_eq!(unit_user(""), None);
+        let sh = crate::shell::FakeShell::new();
+        sh.respond(
+            "systemctl list-units",
+            crate::shell::Output::ok("rackscreen@silke.service loaded active running RackScreen\n"),
+        );
+        assert_eq!(running_service_user(&sh).as_deref(), Some("silke"));
+        assert!(sh.called("systemctl list-units rackscreen@* --plain --no-legend"));
     }
 
     #[test]
