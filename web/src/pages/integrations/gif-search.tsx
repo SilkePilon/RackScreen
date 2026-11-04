@@ -364,22 +364,12 @@ function Results({ provider, q, onPick }: { provider: GifProvider; q: string; on
           more={query.hasNextPage && !query.isFetchNextPageError ? () => void query.fetchNextPage() : undefined}
           busy={query.isFetchingNextPage}
         >
-          <ul className="columns-2 gap-2 sm:columns-3 md:columns-4">
-            {hits.map((h) => (
-              <li key={h.id} className="mb-2 break-inside-avoid">
-                <Tile hit={h} onClick={() => onPick(h)} />
-              </li>
-            ))}
-            {query.isFetchingNextPage &&
-              Array.from({ length: 4 }, (_, i) => (
-                <li key={`s${i}`} className="mb-2 break-inside-avoid" aria-hidden>
-                  <Skeleton
-                    className="w-full rounded-lg"
-                    style={{ aspectRatio: `1 / ${SKELETON_RATIOS[i]}` }}
-                  />
-                </li>
-              ))}
-          </ul>
+          <Masonry
+            items={hits}
+            ratio={(h) => (h.height || 1) / (h.width || 1)}
+            render={(h) => <Tile hit={h} onClick={() => onPick(h)} />}
+            placeholders={query.isFetchingNextPage ? SKELETON_RATIOS.slice(0, 4) : []}
+          />
           {query.hasNextPage && (
             <div className="flex justify-center py-2">
               <Button
@@ -591,4 +581,78 @@ function ResultsScroll({
       <div ref={end} className="h-px" aria-hidden />
     </div>
   )
+}
+
+/** Columns for a results box this wide: 2 on phones, up to 4. */
+function columnsFor(width: number) {
+  return width < 420 ? 2 : width < 600 ? 3 : 4
+}
+
+/**
+ * Append-only masonry. Each item goes into the column that is shortest at
+ * the moment it arrives (heights from its known aspect ratio), so a new
+ * page only ever adds to the bottom: tiles already shown never move, unlike
+ * CSS columns, which re-balance everything on each append.
+ */
+function Masonry<T extends { id: string }>({
+  items,
+  ratio,
+  render,
+  placeholders,
+}: {
+  items: T[]
+  ratio: (item: T) => number
+  render: (item: T) => React.ReactNode
+  placeholders: number[]
+}) {
+  const box = React.useRef<HTMLDivElement>(null)
+  const [cols, setCols] = React.useState(4)
+  React.useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setCols(columnsFor(e.contentRect.width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const columns = React.useMemo(
+    () => layoutColumns(items, ratio, render, placeholders, cols),
+    [items, ratio, render, placeholders, cols],
+  )
+  return (
+    <div ref={box} className="flex items-start gap-2">
+      {columns.map((c, i) => (
+        <ul key={i} className="flex min-w-0 flex-1 flex-col gap-2">
+          {c}
+        </ul>
+      ))}
+    </div>
+  )
+}
+
+function layoutColumns<T extends { id: string }>(
+  items: T[],
+  ratio: (item: T) => number,
+  render: (item: T) => React.ReactNode,
+  placeholders: number[],
+  cols: number,
+): React.ReactNode[][] {
+  const heights: number[] = new Array(cols).fill(0)
+  const out: React.ReactNode[][] = Array.from({ length: cols }, () => [])
+  const place = (r: number, node: React.ReactNode) => {
+    let c = 0
+    for (let i = 1; i < cols; i++) if (heights[i] < heights[c]) c = i
+    out[c].push(node)
+    // a fixed gap per tile, in the same units as the ratios
+    heights[c] += Math.min(Math.max(r, 0.3), 3) + 0.04
+  }
+  for (const it of items) place(ratio(it), <li key={it.id}>{render(it)}</li>)
+  placeholders.forEach((r, i) =>
+    place(
+      r,
+      <li key={`skeleton-${i}`} aria-hidden>
+        <Skeleton className="w-full rounded-lg" style={{ aspectRatio: `1 / ${r}` }} />
+      </li>,
+    ),
+  )
+  return out
 }
