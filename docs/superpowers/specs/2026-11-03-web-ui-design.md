@@ -73,13 +73,21 @@ Secret fields (never sent to the browser in `/api/config`): `qbittorrent.pass`,
   binary, SPI boot lines (asks y/N on a TTY unless `--yes`, prints "reboot
   needed"), default config, `/etc/rackscreen` owned by the service user (so the
   service can save), sudoers drop-in `/etc/sudoers.d/rackscreen` allowing only
-  `<user> ALL=(root) NOPASSWD: /usr/local/bin/rackscreen update` (written to a
-  temp file, checked with `visudo -cf`, then moved, mode 0440), unit, enable +
-  start, then prints `Open http://<ip>:8740`.
+  `<user> ALL=(root) NOPASSWD: /usr/local/bin/rackscreen update` and
+  `<user> ALL=(root) NOPASSWD: /usr/local/bin/rackscreen tailscale-setup`
+  (exact commands, no wildcards; written to a temp file, checked with
+  `visudo -cf`, then moved, mode 0440), unit, enable + start, then prints
+  `Open http://<ip>:8740`.
 * `rackscreen uninstall [--yes] [--purge]`: removes unit, binary, sudoers drop-in;
   `--purge` also the config.
 * `rackscreen update [--check]`: as today.
 * `rackscreen play <show|random>`: as today.
+* `rackscreen tailscale-setup` (root; re-runs itself through sudo): installs
+  Tailscale with the official installer when `tailscale` is missing
+  (`curl -fsSL https://tailscale.com/install.sh | sh` under `bash -o pipefail`,
+  so an offline Pi fails cleanly), `systemctl enable --now tailscaled`, then
+  `tailscale set --operator=<service user>` (retried while tailscaled starts).
+  Idempotent. The service user comes from `SUDO_USER` like `install`.
 * `setup` and `calibrate` subcommands are removed; running with no subcommand
   prints help plus the web address hint. The whole `crates/setup` TUI layer
   (screens, widgets, anim, theme, ratatui) is deleted; the non-interactive
@@ -180,6 +188,47 @@ in-memory, 30 days).
   service user, so after the restart `GET /api/update` reports `done` when the
   new process runs a newer version than the job started from, else `failed`.
 
+### Tailscale
+
+Everything runs as the service user through the `tailscale` CLI (tokio
+process, 10 s timeout, 30 s for `up`/`down`/`logout`/`serve`, never a shell,
+fixed argument lists; the device name must match `^[a-z0-9-]{1,63}$`, an auth
+key `^tskey-[A-Za-z0-9_-]+$`; the key is never logged). Commands go through a
+`Runner` trait so the API tests use a scripted fake. CLI failures become
+`{ "error": "..." }` with short messages (not installed, needs setup when the
+CLI says access denied, tailscaled not running, offline, rejected key).
+
+* `GET /api/tailscale` → `{ installed, version, operator_ok, can_setup,
+  backend_state: "NoState"|"NeedsLogin"|"NeedsMachineAuth"|"Starting"|"Running"|"Stopped"|null,
+  auth_url, self: { hostname, dns_name, ips, os, online, last_seen, exit_node } | null,
+  tailnet, user: { login, display_name } | null, peers: [device...] (online first),
+  ssh, serve: { on, url }, health: [..], hostname, error }`, from
+  `tailscale version`, `tailscale status --json`, `tailscale debug prefs`
+  (`OperatorUser` = this user → `operator_ok`; `RunSSH` → `ssh`) and
+  `tailscale serve status --json` (`on` when 443 proxies to this port).
+  `can_setup` = `sudo -n -l /usr/local/bin/rackscreen tailscale-setup`
+  succeeds (cached 60 s); when it does not, the UI shows the command
+  `sudo rackscreen tailscale-setup` to run once and mentions
+  `sudo rackscreen install` to allow the one-click setup.
+* `POST /api/tailscale/setup` starts `sudo -n /usr/local/bin/rackscreen tailscale-setup`
+  as a background job; `GET /api/tailscale/setup` → `{ state, log }` (in memory).
+* `POST /api/tailscale/login` `{ hostname?, auth_key?, ssh? }`: first
+  `tailscale set --hostname=… --ssh=…` for what was given. With a key:
+  `tailscale up --auth-key=… --hostname=… --ssh=…` (current values filled in,
+  since `up` with flags must mention every non-default one) → `{ running: true }`.
+  Without: a bare `tailscale up` kept running in the background (a new login
+  or a logout kills it); the auth URL comes from its output or the status's
+  `AuthURL` within ~10 s → `{ auth_url }`. The UI then polls every 2 s until Running.
+* `POST /api/tailscale/up`, `/down`, `/logout`.
+* `POST /api/tailscale/ssh` `{ on }` → `tailscale set --ssh=true`, or
+  `--ssh=false --accept-risk=lose-ssh`.
+* `POST /api/tailscale/serve` `{ on }` → `tailscale serve --bg --yes --https=443 http://127.0.0.1:<port>`
+  / `tailscale serve --https=443 off` → `{ on, url }`; when HTTPS is not
+  enabled on the tailnet the CLI prints a consent link, returned as
+  `{ on: false, enable_url }`. Refused when `web.bind` is a LAN address
+  (serve only proxies to 127.0.0.1). Serve keeps the `Host` header, so the
+  same-origin check passes, and https makes geolocation ("use my location") work.
+
 ## Frontend
 
 `web/` at repo root: Vite, React 19, TypeScript strict, Tailwind v4, shadcn/ui
@@ -204,6 +253,18 @@ Pages (left sidebar like the reference, grouped):
   ISS), Media & Jellyfin (arr keys), Spotify (client ID, login flow with link +
   QR + paste field, status), GitHub (token, CI repos), GIFs (list, add, rename,
   delete, link validation, preview via the link itself).
+* **Connections** group: **Tailscale**. Not installed: explanation and
+  "Install Tailscale" (setup job with a collapsible live log) or the command to
+  run by hand; installed but not operator: "Finish setup"; NeedsLogin: device
+  name, "Allow Tailscale SSH", "Log in with browser" (new tab + QR code,
+  pulsing wait, success toast) or an auth key; NeedsMachineAuth: link to the
+  admin console; Running: device card (name, connected switch, MagicDNS and
+  IPs with copy, tailnet, account, version), HTTPS sharing switch with the
+  URL, Tailscale SSH switch, devices list (OS icon, online dot, IP, last
+  seen), log out with confirmation. Polls every 5 s on this page only (2 s
+  while waiting for a login). The Overview shows a "Tailscale · <name>" chip
+  on "This Pi"; System lists `tailscale0` and the MagicDNS name. Mock:
+  `?ts=missing|nosudo|setup|login|approve|running` (`&nohttps`).
 * **Display**: brightness, fps, SPI chunk, one at a time, night window, thresholds.
 * **Shows**: card grid, enable, every N min, gap, panel order, play now.
 * **Logs**: live stream, level filter, search, pause, auto-scroll, copy.

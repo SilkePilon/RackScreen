@@ -255,7 +255,7 @@ One line on the Pi, no clone:
 
     curl -fsSL https://github.com/silkepilon/RackScreen/releases/latest/download/install.sh | bash
 
-It downloads the latest `aarch64` release and runs `sudo rackscreen install`: the binary goes to `/usr/local/bin`, a default `/etc/rackscreen/config.yaml` is written and handed to your user (so the web UI can save it), the `rackscreen@<user>` service is installed and started, a sudoers drop-in lets that user run `rackscreen update` (and nothing else) so the web UI can update itself, and SPI is enabled in the boot files (it asks `y/N` on a terminal; piped from `curl` it just does it). At the end it prints the address of the web UI: open **http://&lt;pi&gt;:8740** and everything else happens there. `rackscreen install` is idempotent; `--yes` skips the boot question and `--no-boot` leaves the boot files alone. `sudo rackscreen uninstall` removes the service, drop-in and binary and keeps the config unless you add `--purge`.
+It downloads the latest `aarch64` release and runs `sudo rackscreen install`: the binary goes to `/usr/local/bin`, a default `/etc/rackscreen/config.yaml` is written and handed to your user (so the web UI can save it), the `rackscreen@<user>` service is installed and started, a sudoers drop-in lets that user run `rackscreen update` and `rackscreen tailscale-setup` (and nothing else) so the web UI can update itself and set up Tailscale, and SPI is enabled in the boot files (it asks `y/N` on a terminal; piped from `curl` it just does it). At the end it prints the address of the web UI: open **http://&lt;pi&gt;:8740** and everything else happens there. `rackscreen install` is idempotent; `--yes` skips the boot question and `--no-boot` leaves the boot files alone. `sudo rackscreen uninstall` removes the service, drop-in and binary and keeps the config unless you add `--purge`.
 
 > [!NOTE]
 > Enabling SPI edits the boot files, so reboot the Pi afterwards before the panels light up.
@@ -272,11 +272,24 @@ The running service serves a website on port 8740 (`web:` in the config; `bind: 
 - **Screens** — per screen the role list (drag to reorder, add from a picker grouped by category with a hint when a role needs a setting), the cycle interval and presets.
 - **Calibrate** — rotate 0/90/180/270 and mirror per screen with the test pattern on the glass; the advanced section has the SPI bus, CS, DC, RST and clock.
 - **Integrations** — Cluster (kubeconfig, Prometheus, Argo CD, qBittorrent), Energy, Sky (location, weather, rain, ISS), Media & Jellyfin, Spotify (client ID and the login flow with a link, a QR code and the paste field), GitHub and GIFs (search GIPHY and Tenor, or paste a link).
+- **Tailscale** (under Connections) — install Tailscale, log in and manage it; see [Tailscale](#tailscale).
 - **Display**, **Shows**, **Logs** (live stream with level filter and search) and **System** (version and one-click update, web password, the raw YAML with validation, config backup and restore, restart).
 
 Saving validates the config, writes it atomically and restarts the monitor in-process (about a second; the panels go dark briefly) while the website stays up. A change to the `web:` block restarts the whole process; systemd brings it back and the page reconnects. Secrets (tokens, API keys, passwords) are never sent to the browser; a field shows whether one is set and can be replaced or cleared.
 
 Everything the UI does is a JSON API under `/api` (`/api/status`, `/api/config`, `/api/control/...`, `/api/live` for frames, `/api/logs/stream` for logs). Non-GET requests need the header `X-RackScreen: 1`; with a password set, a session cookie.
+
+## Tailscale
+
+Reach the web UI (and SSH) from anywhere over your own [Tailscale](https://tailscale.com) network, set up from the **Tailscale** page under Connections:
+
+1. **Install Tailscale** runs `sudo rackscreen tailscale-setup` for you: Tailscale's official installer when it is missing, `systemctl enable --now tailscaled`, and `tailscale set --operator=<service user>` so the service can run `tailscale up/down/login/logout/set/serve` without root from then on. Installs from before this feature need `sudo rackscreen install` once more to allow the one-click button (it adds the command to the sudoers drop-in); until then the page shows `sudo rackscreen tailscale-setup` to run once over SSH.
+2. **Log in** with your browser (a new tab plus a QR code for your phone; the page notices when you approve the Pi) or with an auth key from the admin console. Optionally pick the device name and turn on Tailscale SSH.
+3. Once connected the page shows the Pi's MagicDNS name and Tailscale IPs, a connect switch, the other devices on your tailnet, **Share this page over Tailscale (HTTPS)** and **Tailscale SSH**.
+
+Sharing over HTTPS runs `tailscale serve --bg --https=443 http://127.0.0.1:<web port>`: the UI opens at `https://<pi>.<tailnet>.ts.net` with a real certificate, for your tailnet only. That also makes **Use my location** on the Sky page work, which browsers only allow over https. The first time, Tailscale may ask you to allow HTTPS certificates for the tailnet; the page links there. It needs `web.bind` to be `0.0.0.0` (the default) or `127.0.0.1`.
+
+Everything else is plain Tailscale: `tailscale status` over SSH shows the same state, and logging out on the page is `tailscale logout`.
 
 ## Screens and roles
 
