@@ -17,6 +17,7 @@ mod fireworks;
 mod freight;
 mod hyperspace;
 mod launch;
+mod meadow;
 mod mech;
 mod moon_landing;
 mod paper_plane;
@@ -234,6 +235,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: sledding::SECS,
         draw: sledding::draw,
     },
+    ShowDef {
+        id: "meadow",
+        name: "Bee's day",
+        secs: meadow::SECS,
+        draw: meadow::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -307,6 +314,7 @@ mod tests {
                 ("balloons", "Balloon festival", 12.0),
                 ("rooftop-cat", "Rooftop cat", 12.0),
                 ("sledding", "Snow day", 12.0),
+                ("meadow", "Bee's day", 12.0),
             ]
         );
     }

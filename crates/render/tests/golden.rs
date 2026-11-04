@@ -1591,6 +1591,8 @@ fn show_batch_d() {
         ("rooftop-cat", 11.5, "show_rooftop_cat_soggy"),
         ("sledding", 6.6, "show_sledding_air"),
         ("sledding", 11.5, "show_sledding_carrot"),
+        ("meadow", 6.4, "show_meadow_tongue"),
+        ("meadow", 9.95, "show_meadow_stuck"),
     ] {
         let def = rackscreen_core::shows::by_id(id).unwrap();
         check(name, &show_strip(def, t));

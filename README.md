@@ -262,6 +262,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Snow day</b> (<code>sledding</code>) — a bright winter noon over a hillside village, snow drifting down; a kid on a red sled pushes off from the log cabin and rushes down the slope across the screens, the dog bounding after, flies off a kicker straight through the snowman, skids across the frozen pond under a leaping skater and ends up wearing the snowman's top hat with its head riding pillion, until the dog arrives and steals the carrot nose.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/meadow.gif" alt="Bee's day show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Bee's day</b> (<code>meadow</code>) — a bright summer meadow of swaying grass and wildflowers, butterflies, a far windmill and a stream; a chubby bee works its way across the screens flower to flower, getting yellower and rounder, dodges a frog's tongue (the frog gets a mouthful of dandelion clock instead) and lumbers home to its hive in the oak, where it is far too round for the door until a slim friend headbutts it in.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
