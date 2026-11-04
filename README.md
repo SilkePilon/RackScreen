@@ -97,10 +97,10 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
 </p>
 
 <p align="center">
-  <img src=".github/media/shows/paper-plane.gif" alt="Paper plane show across four screens" width="720">
+  <img src=".github/media/shows/paper-plane.gif" alt="Air mail show across four screens" width="720">
 </p>
 <p align="center">
-  <b>Paper plane</b> (<code>paper-plane</code>) — a paper plane glides through drifting clouds and loops the loop on the third screen.
+  <b>Air mail</b> (<code>paper-plane</code>) — a kid launches a paper plane from an attic window; it dodges a swiping cat over the rooftops, loops the loop so a chasing pigeon flies into a tree, and glides down the street straight into the slot of a post box.
 </p>
 
 <p align="center">

@@ -3,7 +3,7 @@ import type { Config, LogLevel, RoleInfo, ShowInfo } from "@/lib/types"
 export const SHOWS: ShowInfo[] = [
   { id: "freight", title: "Dusk freight" },
   { id: "deep-sea", title: "Deep sea lantern" },
-  { id: "paper-plane", title: "Paper plane" },
+  { id: "paper-plane", title: "Air mail" },
   { id: "storm", title: "Thunderstorm" },
   { id: "day", title: "Day in a minute" },
   { id: "space", title: "Space cruise" },

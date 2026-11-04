@@ -1509,7 +1509,8 @@ fn show_round_one() {
     for (id, t, name) in [
         ("deep-sea", 7.6, "show_deep_sea_jaws"),
         ("deep-sea", 11.4, "show_deep_sea_lamp"),
-        ("paper-plane", 5.2, "show_paper_plane"),
+        ("paper-plane", 5.6, "show_paper_plane_loop"),
+        ("paper-plane", 9.9, "show_paper_plane_delivered"),
         ("storm", 3.95, "show_storm"),
         ("day", 3.0, "show_day"),
         ("day", 11.0, "show_day_night"),

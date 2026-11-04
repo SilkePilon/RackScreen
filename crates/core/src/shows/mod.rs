@@ -64,7 +64,7 @@ pub const SHOWS: &[ShowDef] = &[
     },
     ShowDef {
         id: "paper-plane",
-        name: "Paper plane",
+        name: "Air mail",
         secs: paper_plane::SECS,
         draw: paper_plane::draw,
     },
@@ -251,7 +251,7 @@ mod tests {
             got,
             [
                 ("deep-sea", "Deep sea lantern", 12.0),
-                ("paper-plane", "Paper plane", 8.0),
+                ("paper-plane", "Air mail", 11.0),
                 ("storm", "Thunderstorm", 8.0),
                 ("day", "Day in a minute", 12.0),
                 ("space", "Space cruise", 8.0),
