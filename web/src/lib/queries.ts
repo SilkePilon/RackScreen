@@ -28,6 +28,8 @@ export const keys = {
   yaml: ["config", "yaml"] as const,
   spotify: ["spotify"] as const,
   update: ["update"] as const,
+  system: ["system"] as const,
+  gifMemory: ["gifs", "memory"] as const,
 }
 
 export const useAuth = () => useQuery({ queryKey: keys.auth, queryFn: api.auth, retry: false })
@@ -39,6 +41,36 @@ export const useStatus = () =>
     refetchInterval: 1500,
     refetchIntervalInBackground: false,
     retry: false,
+    staleTime: 0,
+  })
+// CPU usage of the last ~2 minutes, kept across visits to the System page.
+const CPU_HISTORY = 25
+const cpuHistory: { at: number; pct: number }[] = []
+export const getCpuHistory = () => cpuHistory.slice()
+async function fetchSystem() {
+  const s = await api.system()
+  if (s.cpu.usage_pct !== null) {
+    cpuHistory.push({ at: Date.now(), pct: s.cpu.usage_pct })
+    while (cpuHistory.length > CPU_HISTORY || (cpuHistory.length && Date.now() - cpuHistory[0].at > 130_000))
+      cpuHistory.shift()
+  }
+  return s
+}
+
+export const useSystem = () =>
+  useQuery({
+    queryKey: keys.system,
+    queryFn: fetchSystem,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+    staleTime: 0,
+  })
+export const useGifMemory = () =>
+  useQuery({
+    queryKey: keys.gifMemory,
+    queryFn: api.gifMemory,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: false,
     staleTime: 0,
   })
 export const useRoles = () => useQuery({ queryKey: keys.roles, queryFn: api.roles, staleTime: 30_000 })

@@ -38,9 +38,9 @@ export const PAGES: Page[] = [
   { path: "/integrations/media", title: "Media & Jellyfin", group: "Integrations", icon: FilmIcon, keywords: "radarr sonarr lidarr arr jellyfin" },
   { path: "/integrations/spotify", title: "Spotify", group: "Integrations", icon: MusicIcon, keywords: "music login now playing" },
   { path: "/integrations/github", title: "GitHub", group: "Integrations", icon: GitBranchIcon, keywords: "token ci contributions" },
-  { path: "/integrations/gifs", title: "GIFs", group: "Integrations", icon: ImagePlayIcon, keywords: "giphy tenor animation" },
+  { path: "/integrations/gifs", title: "GIFs", group: "Integrations", icon: ImagePlayIcon, keywords: "giphy tenor animation memory ram" },
   { path: "/logs", title: "Logs", group: "Maintenance", icon: ScrollTextIcon, keywords: "journal stream errors" },
-  { path: "/system", title: "System", group: "Maintenance", icon: WrenchIcon, keywords: "update version password yaml backup restart" },
+  { path: "/system", title: "System", group: "Maintenance", icon: WrenchIcon, keywords: "update version password yaml backup restart cpu memory disk temperature voltage" },
 ]
 
 export function pageFor(pathname: string): Page | undefined {

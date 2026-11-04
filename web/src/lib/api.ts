@@ -2,6 +2,7 @@ import type {
   AuthState,
   Config,
   ConfigResponse,
+  GifMemory,
   GifPage,
   GifProvider,
   GifProviders,
@@ -13,6 +14,7 @@ import type {
   ShowInfo,
   SpotifyState,
   Status,
+  SystemInfo,
   UpdateState,
 } from "@/lib/types"
 
@@ -89,6 +91,8 @@ export const api = {
   status: () => get<Status>("/status"),
   roles: () => get<RoleInfo[]>("/roles"),
   shows: () => get<ShowInfo[]>("/shows"),
+  system: () => get<SystemInfo>("/system"),
+  gifMemory: () => get<GifMemory>("/gifs/memory"),
 
   config: () => get<ConfigResponse>("/config"),
   saveConfig: (config: Config) => put<SaveResponse>("/config", { config }),

@@ -190,6 +190,8 @@ export interface GifHit {
   preview: string
   width: number
   height: number
+  /** Frames of the full GIF when the provider says (GIPHY), else null. */
+  frames: number | null
 }
 export interface GifPage {
   results: GifHit[]
@@ -303,4 +305,54 @@ export interface UpdateState {
   newer: boolean
   can_self_update: boolean
   job: { state: "idle" | "running" | "done" | "failed"; log: string[] }
+}
+
+export interface SystemInfo {
+  model: string | null
+  os: string | null
+  kernel: string | null
+  arch: string
+  hostname: string
+  uptime_secs: number | null
+  cpu: {
+    cores: number | null
+    usage_pct: number | null
+    temp_c: number | null
+    freq_mhz: number | null
+    load: [number, number, number] | null
+  }
+  memory: {
+    total_mb: number
+    available_mb: number
+    used_mb: number
+    swap_total_mb: number
+    swap_used_mb: number
+  } | null
+  disk: { path: string; total_gb: number; used_gb: number } | null
+  process: { rss_mb: number | null; cpu_pct: number | null; threads: number | null; uptime_secs: number }
+  throttled: { now: boolean; since_boot: boolean; flags: string[]; raw: number } | null
+  network: { iface: string; ipv4: string }[]
+}
+
+export type GifLoadState = "off" | "loading" | "ready" | "error"
+export interface GifMemoryRow {
+  name: string
+  used: boolean
+  state: GifLoadState
+  frames: number | null
+  mb: number | null
+  error: string | null
+}
+export interface GifMemory {
+  memory: { total_mb: number | null; available_mb: number | null; process_rss_mb: number | null }
+  frame_bytes: number
+  max_frames: number
+  max_gif_mb: number
+  reserve_mb: number
+  gifs: GifMemoryRow[]
+  decoded_mb: number
+  pending_mb: number
+  budget_mb: number | null
+  left_mb: number | null
+  fits_more: number | null
 }

@@ -1,7 +1,8 @@
 // A fake RackScreen API for `npm run dev:mock`. Patches fetch for /api/*,
 // and swaps the live-frame socket and log stream for local generators.
 // Handy toggles from the browser console: __mock.offline(true), __mock.login(true).
-// URL flags: ?login (password "rackscreen"), ?offline, ?update, ?nogifkeys (no GIF search keys).
+// URL flags: ?login (password "rackscreen"), ?offline, ?update, ?nogifkeys (no GIF search keys),
+// ?undervolt (the Pi reports under-voltage).
 
 import { parse, stringify } from "yaml"
 
@@ -258,9 +259,109 @@ function fakeGifs(provider: GifProvider, q: string, offset: number): GifPage {
       preview: fakePreview(seed, w, h),
       width: w,
       height: h,
+      frames: provider === "giphy" ? 12 + (seed % 230) : null,
     })
   }
   return { results, next: offset + 25 < total ? String(offset + 25) : null }
+}
+
+// ---------------------------------------------------------------- system
+
+const MIB = 1024 * 1024
+const FRAME_BYTES = 240 * 240 * 4
+const MAX_FRAMES = 150
+/** When each GIF a screen shows started loading (it is ready ~4 s later). */
+const gifSince = new Map<string, number>()
+const sysStart = Date.now()
+
+function usedGifNames() {
+  return new Set(state.config.screens.flatMap((s) => s.roles.filter((r) => r.startsWith("gif:")).map((r) => r.slice(4))))
+}
+
+function mockGifRows() {
+  const now = Date.now()
+  const used = usedGifNames()
+  return (state.config.gifs ?? []).map((g) => {
+    if (!used.has(g.name)) {
+      gifSince.delete(g.name)
+      return { name: g.name, used: false, state: "off" as const, frames: null, mb: null, error: null }
+    }
+    if (!gifSince.has(g.name)) gifSince.set(g.name, now)
+    if (g.url.includes("tenor.com/view/nod")) {
+      return { name: g.name, used: true, state: "error" as const, frames: null, mb: null, error: "HTTP 404 from media.tenor.com" }
+    }
+    if (now - gifSince.get(g.name)! < 4000) {
+      return { name: g.name, used: true, state: "loading" as const, frames: null, mb: null, error: null }
+    }
+    const raw = 20 + (hash(g.url) % 200)
+    const frames = raw <= MAX_FRAMES ? raw : Math.ceil(raw / Math.ceil(raw / MAX_FRAMES))
+    return { name: g.name, used: true, state: "ready" as const, frames, mb: +((frames * FRAME_BYTES) / MIB).toFixed(1), error: null }
+  })
+}
+
+function mockMemory() {
+  const t = (Date.now() - sysStart) / 1000
+  const gifs = mockGifRows()
+  const decoded = gifs.reduce((a, g) => a + (g.mb ?? 0), 0)
+  const total = 906
+  const rss = 46 + Math.sin(t / 30) * 2 + decoded
+  const others = 248 + Math.sin(t / 47) * 6
+  const available = Math.round(total - others - rss)
+  return { gifs, decoded, total, rss: +rss.toFixed(1), available }
+}
+
+function gifMemory() {
+  const m = mockMemory()
+  const maxMb = (MAX_FRAMES * FRAME_BYTES) / MIB
+  const pending = m.gifs.filter((g) => g.state === "loading").length * maxMb
+  const budget = Math.max(0, m.available + m.decoded - 150)
+  const left = Math.max(0, budget - m.decoded - pending)
+  return {
+    memory: { total_mb: m.total, available_mb: m.available, process_rss_mb: m.rss },
+    frame_bytes: FRAME_BYTES,
+    max_frames: MAX_FRAMES,
+    max_gif_mb: +maxMb.toFixed(1),
+    reserve_mb: 150,
+    gifs: m.gifs,
+    decoded_mb: +m.decoded.toFixed(1),
+    pending_mb: +pending.toFixed(1),
+    budget_mb: +budget.toFixed(1),
+    left_mb: +left.toFixed(1),
+    fits_more: Math.floor(left / maxMb),
+  }
+}
+
+function system() {
+  const t = (Date.now() - sysStart) / 1000
+  const m = mockMemory()
+  const wave = (p: number, k = 0) => (Math.sin(t / p + k) + 1) / 2
+  const usage = 22 + wave(9) * 18 + Math.random() * 6
+  const proc = 14 + wave(9, 0.4) * 9 + Math.random() * 3
+  return {
+    model: "Raspberry Pi 3 Model B Plus Rev 1.3",
+    os: "Raspbian GNU/Linux 12 (bookworm)",
+    kernel: "6.6.51+rpt-rpi-v7",
+    arch: "arm",
+    hostname: "raspberrypi",
+    uptime_secs: Math.floor(12 * 86400 + 5 * 3600 + t),
+    cpu: {
+      cores: 4,
+      usage_pct: +usage.toFixed(1),
+      temp_c: +(51 + wave(23) * 6).toFixed(1),
+      freq_mhz: usage > 30 ? 1400 : 600,
+      load: [+(0.9 + wave(11) * 0.8).toFixed(2), +(1.1 + wave(40) * 0.3).toFixed(2), +(1.05 + wave(90) * 0.1).toFixed(2)],
+    },
+    memory: { total_mb: m.total, available_mb: m.available, used_mb: m.total - m.available, swap_total_mb: 99, swap_used_mb: 12 },
+    disk: { path: "/", total_gb: 29.1, used_gb: 6.4 },
+    process: { rss_mb: m.rss, cpu_pct: +proc.toFixed(1), threads: 11, uptime_secs: Math.floor(Date.now() / 1000) - state.started },
+    throttled: params.has("undervolt")
+      ? { now: true, since_boot: true, flags: ["under_voltage", "throttled", "under_voltage_since_boot", "throttled_since_boot"], raw: 0x50005 }
+      : { now: false, since_boot: false, flags: [], raw: 0 },
+    network: [
+      { iface: "eth0", ipv4: "192.168.1.172" },
+      { iface: "wlan0", ipv4: "192.168.1.173" },
+    ],
+  }
 }
 
 function pushLog(level: LogLine["level"], msg: string) {
@@ -314,6 +415,10 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       })
     case "GET /status":
       return json(200, status())
+    case "GET /system":
+      return json(200, system())
+    case "GET /gifs/memory":
+      return json(200, gifMemory())
     case "GET /roles":
       return json(200, rolesFor(state.config, secretSet))
     case "GET /shows":
