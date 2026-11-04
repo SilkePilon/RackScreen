@@ -281,13 +281,13 @@ Everything the UI does is a JSON API under `/api` (`/api/status`, `/api/config`,
 
 ## Tailscale
 
-Reach the web UI (and SSH) from anywhere over your own [Tailscale](https://tailscale.com) network, set up from the **Tailscale** page under Connections:
+Reach the web UI (and SSH) from anywhere over your own [Tailscale](https://tailscale.com) network, set up from the **Tailscale** page under Connections. The page only acts once a web password is set (System → Web access), since Tailscale can give remote access to the Pi.
 
 1. **Install Tailscale** runs `sudo rackscreen tailscale-setup` for you: Tailscale's official installer when it is missing, `systemctl enable --now tailscaled`, and `tailscale set --operator=<service user>` so the service can run `tailscale up/down/login/logout/set/serve` without root from then on. Installs from before this feature need `sudo rackscreen install` once more to allow the one-click button (it adds the command to the sudoers drop-in); until then the page shows `sudo rackscreen tailscale-setup` to run once over SSH.
-2. **Log in** with your browser (a new tab plus a QR code for your phone; the page notices when you approve the Pi) or with an auth key from the admin console. Optionally pick the device name and turn on Tailscale SSH.
+2. **Log in** with your browser (a new tab plus a QR code for your phone; the page notices when you approve the Pi) or with an auth key from the admin console (handed to `tailscale up` in a private temporary file, never on the command line). Optionally pick the device name and turn on Tailscale SSH (off by default; your tailnet's access rules decide who may log in, possibly as root).
 3. Once connected the page shows the Pi's MagicDNS name and Tailscale IPs, a connect switch, the other devices on your tailnet, **Share this page over Tailscale (HTTPS)** and **Tailscale SSH**.
 
-Sharing over HTTPS runs `tailscale serve --bg --https=443 http://127.0.0.1:<web port>`: the UI opens at `https://<pi>.<tailnet>.ts.net` with a real certificate, for your tailnet only. That also makes **Use my location** on the Sky page work, which browsers only allow over https. The first time, Tailscale may ask you to allow HTTPS certificates for the tailnet; the page links there. It needs `web.bind` to be `0.0.0.0` (the default) or `127.0.0.1`.
+Sharing over HTTPS runs `tailscale serve --bg --https=443 http://127.0.0.1:<web port>`: the UI opens at `https://<pi>.<tailnet>.ts.net` with a real certificate, for your tailnet only. That also makes **Use my location** on the Sky page work, which browsers only allow over https. The first time, Tailscale may ask you to allow HTTPS certificates for the tailnet; the page links there. It needs `web.bind` to be `0.0.0.0` (the default) or `127.0.0.1`, and leaves https:443 alone when something else is served there.
 
 Everything else is plain Tailscale: `tailscale status` over SSH shows the same state, and logging out on the page is `tailscale logout`.
 

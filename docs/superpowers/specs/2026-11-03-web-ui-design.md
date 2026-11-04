@@ -84,10 +84,13 @@ Secret fields (never sent to the browser in `/api/config`): `qbittorrent.pass`,
 * `rackscreen play <show|random>`: as today.
 * `rackscreen tailscale-setup` (root; re-runs itself through sudo): installs
   Tailscale with the official installer when `tailscale` is missing
-  (`curl -fsSL https://tailscale.com/install.sh | sh` under `bash -o pipefail`,
-  so an offline Pi fails cleanly), `systemctl enable --now tailscaled`, then
+  (`curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o <dir>/install.sh
+  https://tailscale.com/install.sh` into a fresh root-owned 0700 directory, then
+  `sh <dir>/install.sh` once the download finished; the directory is removed
+  afterwards), `systemctl enable --now tailscaled`, then
   `tailscale set --operator=<service user>` (retried while tailscaled starts).
-  Idempotent. The service user comes from `SUDO_USER` like `install`.
+  Idempotent. The service user is the one of the `rackscreen@<user>.service`
+  systemd lists (`systemctl list-units 'rackscreen@*'`), else `SUDO_USER`.
 * `setup` and `calibrate` subcommands are removed; running with no subcommand
   prints help plus the web address hint. The whole `crates/setup` TUI layer
   (screens, widgets, anim, theme, ratatui) is deleted; the non-interactive
@@ -198,12 +201,18 @@ key `^tskey-[A-Za-z0-9_-]+$`; the key is never logged). Commands go through a
 `{ "error": "..." }` with short messages (not installed, needs setup when the
 CLI says access denied, tailscaled not running, offline, rejected key).
 
-* `GET /api/tailscale` → `{ installed, version, operator_ok, can_setup,
-  backend_state: "NoState"|"NeedsLogin"|"NeedsMachineAuth"|"Starting"|"Running"|"Stopped"|null,
+* Every `POST /api/tailscale/*` answers 403 `{ error: "Set a web password first
+  (System → Web access): …" }` while `web.password` is empty (Tailscale can open
+  the Pi to a tailnet and SSH); with a password the auth guard demands the
+  session as everywhere else. `GET`s stay open; `password_set` tells the page.
+  Error and log text never carries an auth key (`tskey-…` → `tskey-***`).
+* `GET /api/tailscale` → `{ installed, version, operator_ok, can_setup, password_set,
+  backend_state: "NoState"|"NeedsLogin"|"NeedsMachineAuth"|"Starting"|"Running"|"Stopped"|other|null,
   auth_url, self: { hostname, dns_name, ips, os, online, last_seen, exit_node } | null,
   tailnet, user: { login, display_name } | null, peers: [device...] (online first),
   ssh, serve: { on, url }, health: [..], hostname, error }`, from
-  `tailscale version`, `tailscale status --json`, `tailscale debug prefs`
+  `tailscale version` (cached 5 min; `installed: false` only when the program
+  is missing, other start errors land in `error` and `health`), `tailscale status --json`, `tailscale debug prefs`
   (`OperatorUser` = this user → `operator_ok`; `RunSSH` → `ssh`) and
   `tailscale serve status --json` (`on` when 443 proxies to this port).
   `can_setup` = `sudo -n -l /usr/local/bin/rackscreen tailscale-setup`
@@ -214,16 +223,24 @@ CLI says access denied, tailscaled not running, offline, rejected key).
   as a background job; `GET /api/tailscale/setup` → `{ state, log }` (in memory).
 * `POST /api/tailscale/login` `{ hostname?, auth_key?, ssh? }`: first
   `tailscale set --hostname=… --ssh=…` for what was given. With a key:
-  `tailscale up --auth-key=… --hostname=… --ssh=…` (current values filled in,
-  since `up` with flags must mention every non-default one) → `{ running: true }`.
-  Without: a bare `tailscale up` kept running in the background (a new login
-  or a logout kills it); the auth URL comes from its output or the status's
+  `tailscale up --auth-key=file:<path> --hostname=… --ssh=…` (current values
+  filled in, since `up` with flags must mention every non-default one; the key
+  sits in a 0600 file in a fresh 0700 temp dir, removed when `up` returns;
+  Tailscale older than 1.32 gets it on argv with a warning) → `{ running: true }`.
+  Without: a bare `tailscale up` kept running in the background (a new login,
+  a logout or 5 minutes kill it); the auth URL comes from its output or the status's
   `AuthURL` within ~10 s → `{ auth_url }`. The UI then polls every 2 s until Running.
+  Logins run one at a time; the waiting `up` carries a generation so only its
+  own handler or timer kills it. SSH defaults off in the form.
 * `POST /api/tailscale/up`, `/down`, `/logout`.
 * `POST /api/tailscale/ssh` `{ on }` → `tailscale set --ssh=true`, or
-  `--ssh=false --accept-risk=lose-ssh`.
-* `POST /api/tailscale/serve` `{ on }` → `tailscale serve --bg --yes --https=443 http://127.0.0.1:<port>`
-  / `tailscale serve --https=443 off` → `{ on, url }`; when HTTPS is not
+  `--ssh=false --accept-risk=lose-ssh`. The UI asks before turning it on: the
+  tailnet ACLs decide who may SSH in, possibly as root.
+* `POST /api/tailscale/serve` `{ on }` reads `tailscale serve status --json`
+  first and only touches https:443 when it is free or holds nothing but our
+  proxy: `tailscale serve --bg --https=443 http://127.0.0.1:<port>` (no `--yes`)
+  / `tailscale serve --https=443 off` → `{ on, url }`; anything else on 443 is
+  a 409 saying what is there. When HTTPS is not
   enabled on the tailnet the CLI prints a consent link, returned as
   `{ on: false, enable_url }`. Refused when `web.bind` is a LAN address
   (serve only proxies to 127.0.0.1). Serve keeps the `Host` header, so the
