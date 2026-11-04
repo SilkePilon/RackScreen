@@ -10,8 +10,10 @@ mod deep_sea;
 mod desert_night;
 mod fireworks;
 mod freight;
+mod hyperspace;
 mod paper_plane;
 pub mod schedule;
+mod scifi;
 mod space;
 mod storm;
 pub mod world;
@@ -98,6 +100,12 @@ pub const SHOWS: &[ShowDef] = &[
         secs: desert_night::SECS,
         draw: desert_night::draw,
     },
+    ShowDef {
+        id: "hyperspace",
+        name: "Jump to hyperspace",
+        secs: hyperspace::SECS,
+        draw: hyperspace::draw,
+    },
 ];
 
 pub fn by_id(id: &str) -> Option<&'static ShowDef> {
@@ -152,6 +160,7 @@ mod tests {
                 ("alpine", "Mountains: alpine dawn", 10.0),
                 ("caravan", "Desert: caravan", 10.0),
                 ("desert-night", "Desert: night tumbleweed", 9.0),
+                ("hyperspace", "Jump to hyperspace", 10.0),
             ]
         );
     }

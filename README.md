@@ -159,6 +159,13 @@ Every `every_mins` minutes the four panels stop being four tiles and become one 
   <b>Desert: night tumbleweed</b> (<code>desert-night</code>) — a tumbleweed rolls past cactus silhouettes under a big moon; a shooting star streaks over.
 </p>
 
+<p align="center">
+  <img src=".github/media/shows/hyperspace.gif" alt="Jump to hyperspace show across four screens" width="720">
+</p>
+<p align="center">
+  <b>Jump to hyperspace</b> (<code>hyperspace</code>) — a small fighter cruises past a nebula and a night-side planet, spools up, the stars stretch into streaks and it shoots into the last screen with a white flash.
+</p>
+
 ```yaml
 shows:
   enabled: true            # pixel-art shows across all screens as one wide scene
