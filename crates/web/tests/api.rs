@@ -1445,3 +1445,77 @@ async fn tailscale_version_is_cached_and_only_a_missing_program_is_not_installed
     assert!(health.contains("cannot run tailscale"), "{b}");
     assert_eq!(b["error"], health);
 }
+
+#[tokio::test]
+async fn bambu_login_status_and_guards() {
+    use rackscreen_sources::bambu_cloud::{token_path_in, write_token, Region, TokenFile};
+    let f = fixture("");
+    let token_path = token_path_in(&f._dir.path().join("state"));
+    let state = Arc::new(
+        AppState::with_update_file(f.hub.clone(), String::new(), 8740, None)
+            .with_bambu(token_path.clone(), None),
+    );
+    let app = router(state);
+
+    let (st, _, body) = send(&app, get("/api/bambu")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["mode"], "lan");
+    assert_eq!(body["logged_in"], false);
+    assert_eq!(body["status"], "Not logged in");
+    assert_eq!(body["pending"], Value::Null);
+
+    let (st, _, body) = send(
+        &app,
+        post_json(
+            "POST",
+            "/api/bambu/code",
+            json!({"code": "123456"}),
+            true,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "no login started");
+    assert!(body["error"].as_str().unwrap().contains("password first"));
+    let (st, _, _) = send(
+        &app,
+        post_json(
+            "POST",
+            "/api/bambu/login",
+            json!({"account": "", "password": ""}),
+            true,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    let (st, _, _) = send(&app, get("/api/bambu/printers")).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "printers need a login");
+
+    let tok = TokenFile {
+        token: "t".into(),
+        username: "u_1".into(),
+        account: "me@example.com".into(),
+        region: Region::Global,
+        expires_at: i64::MAX,
+        error: None,
+    };
+    write_token(&token_path, &tok, None).unwrap();
+    let (_, _, body) = send(&app, get("/api/bambu")).await;
+    assert_eq!(body["logged_in"], true);
+    assert_eq!(body["account"], "me@example.com");
+    assert_eq!(body["status"], "Logged in as me@example.com");
+    assert!(
+        body.get("token").is_none() && !body.to_string().contains("\"t\""),
+        "the token never leaves the Pi"
+    );
+
+    let (st, _, body) = send(
+        &app,
+        post_json("POST", "/api/bambu/logout", json!({}), true, None),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(body["logged_in"], false);
+    assert!(!token_path.exists());
+}

@@ -1,15 +1,18 @@
-//! A Bambu Lab printer over its local MQTT broker (port 8883, TLS, user
-//! `bblp`, the access code as the password). The printer needs LAN only
-//! mode with Developer Mode on (or a firmware that still allows LAN access).
+//! A Bambu Lab printer over MQTT: its own broker (port 8883, TLS, user
+//! `bblp`, the access code as the password), which needs LAN only mode with
+//! Developer Mode on, or Bambu's cloud broker with an account login (see
+//! `bambu_cloud`), which needs neither.
 //!
 //! The printer reports on `device/<serial>/report`: one full state after a
 //! `pushall` request, partial updates after that (the P1 and A1 series send
 //! only what changed), so the reports are merged before they are read.
 //!
-//! The broker's certificate is signed by Bambu's own CA for the printer's
-//! serial, not for its address, so it is accepted without any check: keep
-//! the printer on a LAN you trust, as the access code crosses it.
+//! The printer's certificate is signed by Bambu's own CA for the printer's
+//! serial, not for its address, so on the LAN it is accepted without any
+//! check: keep the printer on a LAN you trust, as the access code crosses
+//! it. The cloud broker's certificate is checked like any other.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,7 +44,51 @@ pub struct BambuConfig {
     pub user: String,
     pub serial: String,
     pub access_code: String,
+    pub tls: Tls,
+    /// Cloud mode: the login's token file. Each connection reads it for
+    /// the user and password, which replace `user` and `access_code`.
+    pub token_file: Option<PathBuf>,
 }
+
+impl BambuConfig {
+    /// The printer's own broker.
+    pub fn lan(host: &str, serial: &str, access_code: &str) -> Self {
+        Self {
+            host: host.trim().to_string(),
+            port: PORT,
+            user: USER.to_string(),
+            serial: serial.trim().to_string(),
+            access_code: access_code.trim().to_string(),
+            tls: Tls::AnyCert,
+            token_file: None,
+        }
+    }
+
+    /// Bambu's broker for `region`, with the login in `token_file`.
+    pub fn cloud(region: crate::bambu_cloud::Region, serial: &str, token_file: PathBuf) -> Self {
+        Self {
+            host: region.mqtt_host().to_string(),
+            port: PORT,
+            user: String::new(),
+            serial: serial.trim().to_string(),
+            access_code: String::new(),
+            tls: Tls::Verified,
+            token_file: Some(token_file),
+        }
+    }
+}
+
+/// How the broker's certificate is checked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tls {
+    /// The printer's own: accepted as it is (see `AnyCert`).
+    AnyCert,
+    /// Against the system's roots and the host name.
+    Verified,
+}
+
+/// How often a cloud source without a usable login looks for one.
+const LOGIN_RECHECK: Duration = Duration::from_secs(10);
 
 // ---- MQTT 3.1.1, the four packets this needs -------------------------------
 
@@ -290,15 +337,25 @@ impl rustls::client::danger::ServerCertVerifier for AnyCert {
     }
 }
 
-fn tls_connector() -> tokio_rustls::TlsConnector {
+fn tls_connector(tls: Tls) -> Result<tokio_rustls::TlsConnector> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
+    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
-        .expect("ring supports the default versions")
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AnyCert(provider)))
-        .with_no_client_auth();
-    tokio_rustls::TlsConnector::from(Arc::new(config))
+        .expect("ring supports the default versions");
+    let config = match tls {
+        Tls::AnyCert => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AnyCert(provider))),
+        Tls::Verified => {
+            let v = rustls_platform_verifier::Verifier::new(provider)
+                .context("load the system's certificate roots")?;
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(v))
+        }
+    }
+    .with_no_client_auth();
+    Ok(tokio_rustls::TlsConnector::from(Arc::new(config)))
 }
 
 // ---- the session -----------------------------------------------------------
@@ -306,6 +363,8 @@ fn tls_connector() -> tokio_rustls::TlsConnector {
 enum Ended {
     Shutdown,
     Refused,
+    /// Cloud mode: the token file changed (a new login, a log out).
+    LoginChanged,
     Lost(anyhow::Error),
 }
 
@@ -318,14 +377,26 @@ fn pushall() -> Vec<u8> {
     br#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#.to_vec()
 }
 
-async fn session(cfg: &BambuConfig, ctx: &SourceCtx, connected: &mut bool) -> Ended {
-    match session_inner(cfg, ctx, connected).await {
+async fn session(
+    cfg: &BambuConfig,
+    user: &str,
+    pass: &str,
+    ctx: &SourceCtx,
+    connected: &mut bool,
+) -> Ended {
+    match session_inner(cfg, user, pass, ctx, connected).await {
         Ok(e) => e,
         Err(e) => Ended::Lost(e),
     }
 }
 
-async fn session_inner(cfg: &BambuConfig, ctx: &SourceCtx, connected: &mut bool) -> Result<Ended> {
+async fn session_inner(
+    cfg: &BambuConfig,
+    user: &str,
+    pass: &str,
+    ctx: &SourceCtx,
+    connected: &mut bool,
+) -> Result<Ended> {
     let host = cfg.host.trim();
     let tcp = tokio::time::timeout(
         Duration::from_secs(5),
@@ -340,17 +411,16 @@ async fn session_inner(cfg: &BambuConfig, ctx: &SourceCtx, connected: &mut bool)
             rustls::pki_types::ServerName::try_from(host.to_string()).context("printer host")?
         }
     };
-    let tls = tokio::time::timeout(Duration::from_secs(10), tls_connector().connect(name, tcp))
-        .await
-        .context("TLS handshake timed out")?
-        .context("TLS handshake")?;
+    let tls = tokio::time::timeout(
+        Duration::from_secs(10),
+        tls_connector(cfg.tls)?.connect(name, tcp),
+    )
+    .await
+    .context("TLS handshake timed out")?
+    .context("TLS handshake")?;
     let (mut rd, mut wr) = tokio::io::split(tls);
     let id = format!("rackscreen-{:08x}", fastrand::u32(..));
-    send(
-        &mut wr,
-        &connect_packet(&id, &cfg.user, &cfg.access_code, KEEPALIVE_SECS),
-    )
-    .await?;
+    send(&mut wr, &connect_packet(&id, user, pass, KEEPALIVE_SECS)).await?;
     let (first, body) = tokio::time::timeout(Duration::from_secs(10), read_packet(&mut rd))
         .await
         .context("no CONNACK")??;
@@ -370,7 +440,7 @@ async fn session_inner(cfg: &BambuConfig, ctx: &SourceCtx, connected: &mut bool)
     .await?;
     let request = format!("device/{serial}/request");
     send(&mut wr, &publish_packet(&request, &pushall())).await?;
-    tracing::info!("bambu: connected to {host}");
+    tracing::info!("bambu: connected to {host} for {serial}");
     *connected = true;
 
     // Reading runs on its own task so a half-read packet is never dropped
@@ -396,7 +466,15 @@ async fn session_inner(cfg: &BambuConfig, ctx: &SourceCtx, connected: &mut bool)
     loop {
         tokio::select! {
             _ = ctx.shutdown.cancelled() => return Ok(Ended::Shutdown),
-            _ = ping.tick() => send(&mut wr, &PINGREQ).await?,
+            _ = ping.tick() => {
+                if cfg.token_file.is_some()
+                    && credentials(cfg, unix_now()).as_ref().map(|(u, p)| (u.as_str(), p.as_str()))
+                        != Some((user, pass))
+                {
+                    return Ok(Ended::LoginChanged);
+                }
+                send(&mut wr, &PINGREQ).await?
+            }
             _ = resync.tick() => send(&mut wr, &publish_packet(&request, &pushall())).await?,
             p = tokio::time::timeout(SILENT_LIMIT, prx.recv()) => {
                 let (first, body) = match p {
@@ -431,22 +509,74 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// The user and password for the next connection: the config's on the LAN,
+/// the token file's in cloud mode (`None` while there is no usable login).
+pub fn credentials(cfg: &BambuConfig, now: i64) -> Option<(String, String)> {
+    match &cfg.token_file {
+        None => Some((cfg.user.clone(), cfg.access_code.clone())),
+        Some(path) => crate::bambu_cloud::read_token(path)
+            .filter(|t| t.usable(now))
+            .map(|t| (t.username, t.token)),
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 pub async fn run_bambu(cfg: BambuConfig, ctx: SourceCtx) {
+    let cloud = cfg.token_file.is_some();
     let mut backoff = 5u64;
     // a printer that is switched off is normal: say so once, not every retry
     let mut said = false;
+    let mut said_logged_out = false;
     loop {
         if ctx.shutdown.is_cancelled() {
             return;
         }
+        let Some((user, pass)) = credentials(&cfg, unix_now()) else {
+            // cloud mode before a login (or after a refused one): look
+            // again soon, so a login in the web UI needs no restart
+            if !said_logged_out {
+                tracing::warn!("bambu: no Bambu Lab login; log in on the Home & printer page");
+                said_logged_out = true;
+            }
+            ctx.emit(Event::Printer {
+                status: PrinterStatus::LoggedOut,
+                report: None,
+            });
+            tokio::select! {
+                _ = ctx.shutdown.cancelled() => return,
+                _ = tokio::time::sleep(LOGIN_RECHECK) => {}
+            }
+            continue;
+        };
+        said_logged_out = false;
         let mut connected = false;
-        let ended = session(&cfg, &ctx, &mut connected).await;
+        let ended = session(&cfg, &user, &pass, &ctx, &mut connected).await;
         if connected {
             backoff = 5;
             said = false;
         }
         let wait = match ended {
             Ended::Shutdown => return,
+            Ended::LoginChanged => {
+                tracing::info!("bambu: the login changed; connecting again");
+                0
+            }
+            Ended::Refused if cloud => {
+                tracing::warn!("bambu: Bambu Lab refused the login; log in again");
+                if let Some(path) = &cfg.token_file {
+                    if let Err(e) = crate::bambu_cloud::mark_refused(path) {
+                        tracing::warn!("bambu: {e:#}");
+                    }
+                }
+                // the next turn finds no usable login and waits for one
+                0
+            }
             Ended::Refused => {
                 tracing::warn!("bambu: access code refused; check it on the printer's screen");
                 ctx.emit(Event::Printer {
@@ -599,6 +729,8 @@ mod tests {
             user: "emqx".into(),
             serial: serial.clone(),
             access_code: "public".into(),
+            tls: Tls::Verified,
+            token_file: None,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = SourceCtx {
@@ -615,7 +747,11 @@ mod tests {
             .await
             .unwrap();
         let name = rustls::pki_types::ServerName::try_from("broker.emqx.io").unwrap();
-        let mut tls = tls_connector().connect(name, tcp).await.unwrap();
+        let mut tls = tls_connector(Tls::Verified)
+            .unwrap()
+            .connect(name, tcp)
+            .await
+            .unwrap();
         send(
             &mut tls,
             &connect_packet("rs-printer", "emqx", "public", 30),
@@ -651,6 +787,43 @@ mod tests {
             }
             e => panic!("{e:?}"),
         }
+    }
+
+    #[test]
+    fn credentials_by_mode() {
+        let lan = BambuConfig::lan(" 192.168.1.5 ", "S1", "12345678");
+        assert_eq!((lan.host.as_str(), lan.tls), ("192.168.1.5", Tls::AnyCert));
+        assert_eq!(
+            credentials(&lan, 0),
+            Some(("bblp".into(), "12345678".into()))
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = crate::bambu_cloud::token_path_in(dir.path());
+        let cloud = BambuConfig::cloud(crate::bambu_cloud::Region::Global, "S1", path.clone());
+        assert_eq!(
+            (cloud.host.as_str(), cloud.tls),
+            ("us.mqtt.bambulab.com", Tls::Verified)
+        );
+        assert_eq!(credentials(&cloud, 0), None, "no login yet");
+        let tok = crate::bambu_cloud::TokenFile {
+            token: "tok".into(),
+            username: "u_9".into(),
+            account: "a@b".into(),
+            region: crate::bambu_cloud::Region::Global,
+            expires_at: 100,
+            error: None,
+        };
+        crate::bambu_cloud::write_token(&path, &tok, None).unwrap();
+        assert_eq!(credentials(&cloud, 50), Some(("u_9".into(), "tok".into())));
+        assert_eq!(credentials(&cloud, 100), None, "expired");
+        crate::bambu_cloud::mark_refused(&path).unwrap();
+        assert_eq!(credentials(&cloud, 50), None, "refused");
+    }
+
+    #[tokio::test]
+    async fn verified_tls_loads_the_system_roots() {
+        assert!(tls_connector(Tls::Verified).is_ok());
     }
 
     #[test]

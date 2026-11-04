@@ -3,6 +3,7 @@
 //! frontend is built against, and the embedded frontend itself.
 
 pub mod auth;
+pub mod bambu;
 pub mod config_api;
 pub mod control;
 pub mod gif_memory;
@@ -106,6 +107,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/live", get(live::live))
         .route("/logs", get(logs::logs))
         .route("/logs/stream", get(logs::stream))
+        .route("/bambu", get(bambu::get_bambu))
+        .route("/bambu/login", post(bambu::login))
+        .route("/bambu/code", post(bambu::code))
+        .route("/bambu/resend", post(bambu::resend))
+        .route("/bambu/printers", get(bambu::printers))
+        .route("/bambu/logout", post(bambu::logout))
         .route("/spotify", get(spotify::get_spotify))
         .route("/spotify/login", post(spotify::login))
         .route("/spotify/callback", post(spotify::callback))

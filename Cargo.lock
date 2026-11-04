@@ -2288,6 +2288,7 @@ dependencies = [
  "rackscreen-core",
  "reqwest",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sgp4",

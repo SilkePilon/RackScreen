@@ -27,6 +27,8 @@ export const keys = {
   config: ["config"] as const,
   yaml: ["config", "yaml"] as const,
   spotify: ["spotify"] as const,
+  bambu: ["bambu"] as const,
+  bambuPrinters: ["bambu", "printers"] as const,
   update: ["update"] as const,
   system: ["system"] as const,
   gifMemory: ["gifs", "memory"] as const,
@@ -78,6 +80,10 @@ export const useGifMemory = () =>
 export const useRoles = () => useQuery({ queryKey: keys.roles, queryFn: api.roles, staleTime: 30_000 })
 export const useShows = () => useQuery({ queryKey: keys.shows, queryFn: api.shows, staleTime: Infinity })
 export const useConfig = () => useQuery({ queryKey: keys.config, queryFn: api.config, staleTime: Infinity })
+export const useBambu = () => useQuery({ queryKey: keys.bambu, queryFn: api.bambu })
+export const useBambuPrinters = (enabled: boolean) =>
+  useQuery({ queryKey: keys.bambuPrinters, queryFn: api.bambuPrinters, enabled, staleTime: 60_000 })
+
 export const useSpotify = () =>
   useQuery({ queryKey: keys.spotify, queryFn: api.spotify, refetchInterval: 5000 })
 export const useUpdate = () =>

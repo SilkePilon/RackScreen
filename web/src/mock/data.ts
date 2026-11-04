@@ -79,7 +79,11 @@ export function rolesFor(cfg: Config, secretSet: (p: string) => boolean): RoleIn
     if (name === "deploys") return cfg.argocd.enabled ? null : "Argo CD"
     if (name === "jellyfin") return cfg.jellyfin.enabled && cfg.jellyfin.url ? null : "Jellyfin address"
     if (name === "printer")
-      return cfg.bambu.enabled && cfg.bambu.host && secretSet("bambu.access_code") ? null : "Bambu printer"
+      return cfg.bambu.enabled &&
+        cfg.bambu.serial &&
+        (cfg.bambu.mode === "cloud" || (cfg.bambu.host && secretSet("bambu.access_code")))
+        ? null
+        : "Bambu printer"
     if (name.startsWith("ha:"))
       return cfg.homeassistant.enabled && cfg.homeassistant.url && secretSet("homeassistant.token")
         ? null
@@ -153,7 +157,7 @@ export function defaultConfig(): Config {
       lidarr: { service: "auto", port: 8686, api_key: null },
     },
     jellyfin: { enabled: false, url: "", api_key: null, poll_secs: 5 },
-    bambu: { enabled: false, host: "", serial: "", access_code: null },
+    bambu: { enabled: false, mode: "lan", region: "global", host: "", serial: "", access_code: null },
     homeassistant: {
       enabled: true,
       url: "http://homeassistant.local:8123",

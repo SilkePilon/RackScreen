@@ -262,11 +262,26 @@ export const SETTINGS: Record<string, SettingMeta> = {
 
   "bambu.enabled": {
     title: "Bambu Lab printer",
-    description: "Print progress over the printer's local MQTT (LAN only mode with Developer Mode).",
+    description: "Print progress from the printer itself (LAN only mode) or through a Bambu Lab account.",
     page: H,
     section: "Bambu Lab",
     def: false,
     keywords: "3d printer mqtt p1s x1c a1",
+  },
+  "bambu.mode": {
+    title: "Connection",
+    description: "On the LAN, the printer needs LAN only mode and Developer Mode. Bambu Cloud needs neither.",
+    page: H,
+    section: "Bambu Lab",
+    def: "lan",
+    keywords: "cloud account login lan only developer mode",
+  },
+  "bambu.region": {
+    title: "Region",
+    description: "Where your Bambu Lab account lives: China for bambulab.cn accounts.",
+    page: H,
+    section: "Bambu Lab",
+    def: "global",
   },
   "bambu.host": {
     title: "Printer address",

@@ -270,6 +270,8 @@ pub enum PrinterStatus {
     Offline,
     /// The broker refused the access code.
     Unauthorized,
+    /// Cloud mode without a usable Bambu Lab login.
+    LoggedOut,
 }
 
 /// The printer's state, merged from its (partial) MQTT reports.

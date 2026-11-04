@@ -419,27 +419,47 @@ pub struct JellyfinCfg {
     pub poll_secs: u64,
 }
 
-/// A Bambu Lab printer's local MQTT report. The printer needs LAN only mode
-/// with Developer Mode on; the access code and serial are on its screen.
+/// A Bambu Lab printer's MQTT report. On the LAN the printer needs LAN only
+/// mode with Developer Mode on; the access code and serial are on its
+/// screen. In cloud mode the web UI logs in to the Bambu Lab account
+/// instead (the token lives in its own file, never here).
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct BambuCfg {
     pub enabled: bool,
-    /// The printer's IP address or host name.
+    /// `lan` (the printer's own broker) or `cloud` (a Bambu Lab login).
+    pub mode: BambuMode,
+    /// Cloud mode: `global` or `china`, where the account lives.
+    pub region: rackscreen_sources::bambu_cloud::Region,
+    /// LAN mode: the printer's IP address or host name.
     pub host: String,
     /// The serial number, `01P00A000000000`.
     pub serial: String,
-    /// The 8-character LAN access code.
+    /// LAN mode: the 8-character access code.
     pub access_code: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BambuMode {
+    #[default]
+    Lan,
+    Cloud,
+}
+
 impl BambuCfg {
-    /// On, with a host, serial and access code.
+    /// On, with a serial, and on the LAN a host and access code. Cloud mode
+    /// does not wait for the login here: the source does, so a login in the
+    /// web UI takes effect without a restart.
     pub fn ready(&self) -> bool {
         self.enabled
-            && !self.host.trim().is_empty()
             && !self.serial.trim().is_empty()
-            && !self.access_code.trim().is_empty()
+            && match self.mode {
+                BambuMode::Lan => {
+                    !self.host.trim().is_empty() && !self.access_code.trim().is_empty()
+                }
+                BambuMode::Cloud => true,
+            }
     }
 }
 
@@ -1777,6 +1797,24 @@ screens:
         assert!(
             valid_entity_id("sensor.a_1") && !valid_entity_id("sensor") && !valid_entity_id(".x")
         );
+        assert_eq!(c.bambu.mode, BambuMode::Lan, "LAN unless asked");
+
+        let mut cloud = c.clone();
+        cloud.bambu = serde_yaml_ng::from_str(
+            "{ enabled: true, mode: cloud, region: china, serial: 01P00A000000000 }",
+        )
+        .unwrap();
+        cloud.validate().unwrap();
+        assert!(cloud.bambu.ready(), "cloud needs no host or access code");
+        assert_eq!(
+            cloud.bambu.region,
+            rackscreen_sources::bambu_cloud::Region::China
+        );
+        let mut no_serial = cloud.clone();
+        no_serial.bambu.serial.clear();
+        assert!(!no_serial.bambu.ready());
+        assert!(serde_yaml_ng::from_str::<BambuCfg>("{ mode: wifi }").is_err());
+
         let mut off = c.clone();
         off.bambu.access_code.clear();
         off.homeassistant.token = " ".into();

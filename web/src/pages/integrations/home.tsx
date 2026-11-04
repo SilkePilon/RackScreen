@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDraft } from "@/lib/draft"
 import type { Config, HaEntityCfg } from "@/lib/types"
+import { BambuSection } from "@/pages/integrations/bambu"
 import { ScreenSelect } from "@/pages/integrations/gif-search"
 
 const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -67,36 +68,12 @@ export default function Home() {
 }
 
 function Body() {
-  const bambu = useEnabled("bambu.enabled")
   const ha = useEnabled("homeassistant.enabled")
   const d = useDraft()
-  const host = ((d.get("bambu.host") as string) ?? "").trim()
   const url = ((d.get("homeassistant.url") as string) ?? "").trim()
   return (
     <>
-      <Section
-        title="Bambu Lab"
-        description="On the printer: Settings → WLAN → LAN only mode on, then Developer Mode on. The serial and access code are on the same screens."
-      >
-        <SettingsCard>
-          <SwitchRow id="bambu.enabled" />
-          <TextRow
-            id="bambu.host"
-            mono
-            muted={!bambu}
-            placeholder="192.168.1.50"
-            validate={() =>
-              /:\/\/|\/|\s/.test(host)
-                ? "Only the address, without http://."
-                : bambu && !host
-                  ? "Needed while the printer is on."
-                  : null
-            }
-          />
-          <TextRow id="bambu.serial" mono muted={!bambu} placeholder="01P00A000000000" />
-          <SecretRow id="bambu.access_code" muted={!bambu} />
-        </SettingsCard>
-      </Section>
+      <BambuSection />
       <Section
         title="Home Assistant"
         description="The Pi talks to Home Assistant directly, so give the address it can reach."

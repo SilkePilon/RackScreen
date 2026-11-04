@@ -8,6 +8,7 @@ pub mod argocd;
 pub mod arr;
 pub mod astro;
 pub mod bambu;
+pub mod bambu_cloud;
 pub mod buienradar;
 pub mod cover;
 pub mod electricity;

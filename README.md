@@ -360,7 +360,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-nine ro
 | `load` | Prometheus (node-exporter) | highest 1-minute load, a segment per node by load per core, card the cluster means |
 | `ci` | GitHub Actions | passes over the last twelve runs, a segment per run, pill the newest run, card average run time and failures |
 | `jellyfin` | Jellyfin | time left, ring the position (amber movie, cyan episode, dim when paused), pill direct play / transcoding / paused, card title, episode or year and viewer |
-| `printer` | Bambu Lab (local MQTT) | print progress in %, ring in the filament colour (green when done, red when failed), pill time left / paused / done N ago, card job, layer and nozzle/bed temperatures |
+| `printer` | Bambu Lab (local or cloud MQTT) | print progress in %, ring in the filament colour (green when done, red when failed), pill time left / paused / done N ago, card job, layer and nozzle/bed temperatures |
 | `ha:<name>` | Home Assistant | a number with its unit and a 30-minute sparkline, or a state as a word (On, Open, Away); the icon follows the device class |
 | `music` | Spotify + Jellyfin | album cover, ring the track's progress (green Spotify, violet Jellyfin, dim when paused), pill time left / paused / played N ago, card song, artist and device |
 
@@ -435,9 +435,11 @@ The login (Authorization Code with PKCE, no client secret) is written to `~/.loc
 
 ## Printer role
 
-`printer` shows a Bambu Lab printer (X1, P1, A1 series) over its own MQTT broker on the LAN, no cloud: the progress as the number and the ring, in the colour of the loaded filament (from the AMS or the external spool; very dark filament is lightened so it shows on black), time left in the pill, and the job, layer and nozzle/bed temperatures in the card. Paused dims it, a finished print turns the ring green with "Done · 12 m ago", a failed one red. While the printer is idle or switched off the card shows the last job seen.
+`printer` shows a Bambu Lab printer (X1, P1, A1 series) over its own MQTT broker on the LAN, or through Bambu Lab's cloud with an account login: the progress as the number and the ring, in the colour of the loaded filament (from the AMS or the external spool; very dark filament is lightened so it shows on black), time left in the pill, and the job, layer and nozzle/bed temperatures in the card. Paused dims it, a finished print turns the ring green with "Done · 12 m ago", a failed one red. While the printer is idle or switched off the card shows the last job seen.
 
 On the printer, turn on **LAN only mode** and then **Developer Mode** (Settings → WLAN on the screen; recent firmware only allows local access this way). Note the **access code** shown there and the **serial number** (Settings → Device), then fill in `bambu` on the **Home & printer** page or in the config with the printer's IP address. RackScreen connects to port 8883 as `bblp`, asks for a full report once, and merges the partial updates after it. A printer that is off is retried quietly (5 s up to every minute); a wrong access code says "Check access code" and is retried every 5 minutes. The printer's certificate is self-signed by Bambu and is accepted as is, so keep the printer on a network you trust.
+
+**Bambu Cloud** instead needs no LAN only mode or Developer Mode (and the printer must not be in LAN only mode). Pick **Bambu Cloud** under Connection on the **Home & printer** page, log in with the Bambu Lab account's email and password, then enter the code Bambu Lab emails you (or the authenticator code, with two-factor login on), and pick the printer from the account's list. The password goes to Bambu Lab only; the Pi keeps the login's token in `~/.local/state/rackscreen/bambu.json` (mode 0600) and reads the printer from `us.mqtt.bambulab.com` (`cn.` for China accounts), with the certificate checked. A login lasts about three months; when it runs out or is refused the role says "Not logged in" until you log in again, which takes effect within seconds, without a restart. Accounts made with Google or Apple sign-in need a password set at bambulab.com first. This uses the same unofficial interface as Bambu Studio and Home Assistant's Bambu Lab integration, so Bambu Lab can change it.
 
 ## Home Assistant role
 
@@ -561,10 +563,12 @@ jellyfin:
   poll_secs: 5             # >= 2
 
 bambu:
-  enabled: false           # a Bambu Lab printer for the printer role (LAN only + Developer Mode)
-  host: ""                 # the printer's IP address
-  serial: ""               # Settings → Device on the printer
-  access_code: ""          # the LAN access code
+  enabled: false           # a Bambu Lab printer for the printer role
+  mode: lan                # lan (LAN only + Developer Mode) or cloud (a Bambu Lab login in the web UI)
+  region: global           # cloud: global or china
+  host: ""                 # lan: the printer's IP address
+  serial: ""               # Settings → Device on the printer (cloud: picked in the web UI)
+  access_code: ""          # lan: the LAN access code
 
 homeassistant:
   enabled: false           # entities for the ha:<name> roles

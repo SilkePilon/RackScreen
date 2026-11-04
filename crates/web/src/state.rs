@@ -36,6 +36,8 @@ pub struct AppState {
     /// The current `web.password`; empty means no login.
     password: RwLock<String>,
     pub spotify: Mutex<Option<PendingLogin>>,
+    /// The Bambu Lab login: a login waiting for its code, the token file.
+    pub bambu: crate::bambu::BambuState,
     pub update: Mutex<UpdateState>,
     /// PNG of the latest encoded frame per screen, keyed by its sequence
     /// number, so several live clients share one encode.
@@ -76,6 +78,7 @@ impl AppState {
             login_failures: Mutex::new(VecDeque::new()),
             password: RwLock::new(password),
             spotify: Mutex::new(None),
+            bambu: crate::bambu::BambuState::real(),
             update: Mutex::new(update),
             png_cache: Mutex::new(vec![None; screens]),
             config_lock: tokio::sync::Mutex::new(()),
@@ -84,6 +87,17 @@ impl AppState {
             cpu_sampler: Mutex::new(cpu),
             tailscale: crate::tailscale::TsState::real(),
         }
+    }
+
+    /// Keep the Bambu Lab login in `token_path` and send it to `endpoints`
+    /// (tests point both at temp dirs and local servers).
+    pub fn with_bambu(
+        mut self,
+        token_path: std::path::PathBuf,
+        endpoints: Option<rackscreen_sources::bambu_cloud::Endpoints>,
+    ) -> AppState {
+        self.bambu = crate::bambu::BambuState::new(Some(token_path), endpoints);
+        self
     }
 
     /// Run Tailscale commands through `runner` as `user` (tests use a fake).

@@ -13,6 +13,9 @@ import type {
   SaveResponse,
   ShowInfo,
   SpotifyState,
+  BambuState,
+  BambuPrinter,
+  BambuRegion,
   Status,
   SystemInfo,
   TailscaleLoginResult,
@@ -116,6 +119,14 @@ export const api = {
 
   logs: (after?: number, limit = 500) =>
     get<LogsPage>(`/logs?${after !== undefined ? `after=${after}&` : ""}limit=${limit}`),
+
+  bambu: () => get<BambuState>("/bambu"),
+  bambuLogin: (account: string, password: string, region: BambuRegion) =>
+    post<BambuState | { needs: "code" | "tfa" }>("/bambu/login", { account, password, region }),
+  bambuCode: (code: string) => post<BambuState>("/bambu/code", { code }),
+  bambuResend: () => post<unknown>("/bambu/resend"),
+  bambuPrinters: () => get<{ printers: BambuPrinter[] }>("/bambu/printers"),
+  bambuLogout: () => post<BambuState>("/bambu/logout"),
 
   spotify: () => get<SpotifyState>("/spotify"),
   spotifyLogin: () => post<{ url: string }>("/spotify/login"),

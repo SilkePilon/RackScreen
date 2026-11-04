@@ -75,10 +75,12 @@ jellyfin:
   poll_secs: 5             # >= 2
 
 bambu:
-  enabled: false           # a Bambu Lab printer for the printer role (LAN only + Developer Mode)
-  host: ""                 # the printer's IP address
-  serial: ""               # Settings → Device on the printer
-  access_code: ""          # the LAN access code
+  enabled: false           # a Bambu Lab printer for the printer role
+  mode: lan                # lan (LAN only + Developer Mode) or cloud (a Bambu Lab login in the web UI)
+  region: global           # cloud: global or china
+  host: ""                 # lan: the printer's IP address
+  serial: ""               # Settings → Device on the printer (cloud: picked in the web UI)
+  access_code: ""          # lan: the LAN access code
 
 homeassistant:
   enabled: false           # entities for the ha:<name> roles

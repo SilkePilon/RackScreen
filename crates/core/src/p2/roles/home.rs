@@ -102,6 +102,7 @@ pub fn printer(model: &Model, _now: Secs) -> P2Screen {
         (PrinterStatus::Unauthorized, _) => {
             return empty_tile(TITLE, ("Check access code".into(), WARN))
         }
+        (PrinterStatus::LoggedOut, _) => return empty_tile(TITLE, ("Not logged in".into(), WARN)),
         (PrinterStatus::Offline, _) | (PrinterStatus::Ok, None) => {
             let mut t = empty_tile(TITLE, ("Printer off".into(), TEXT2));
             t.card = last_job_card(model);
@@ -525,6 +526,18 @@ mod tests {
         assert_eq!(
             printer(&bad, 1.0).pill,
             Some(("Check access code".into(), WARN))
+        );
+
+        bad.apply(
+            Event::Printer {
+                status: PrinterStatus::LoggedOut,
+                report: None,
+            },
+            2.0,
+        );
+        assert_eq!(
+            printer(&bad, 2.0).pill,
+            Some(("Not logged in".into(), WARN))
         );
     }
 

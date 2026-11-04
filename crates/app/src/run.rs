@@ -355,6 +355,27 @@ fn spotify_token_path(cfg: &Config) -> Option<std::path::PathBuf> {
     path
 }
 
+/// The printer source's settings, when the printer is set up. Cloud mode
+/// starts before a login exists and picks one up once the web UI writes it.
+fn bambu_config(cfg: &Config) -> Option<rackscreen_sources::bambu::BambuConfig> {
+    use crate::config::BambuMode;
+    use rackscreen_sources::bambu::BambuConfig;
+    if !cfg.bambu.ready() {
+        return None;
+    }
+    let b = &cfg.bambu;
+    match b.mode {
+        BambuMode::Lan => Some(BambuConfig::lan(&b.host, &b.serial, &b.access_code)),
+        BambuMode::Cloud => match crate::bambu::token_path() {
+            Some(path) => Some(BambuConfig::cloud(b.region, &b.serial, path)),
+            None => {
+                tracing::warn!("bambu: no home directory for the login's token file");
+                None
+            }
+        },
+    }
+}
+
 /// Sky and GitHub sources: public APIs and local maths, independent of the cluster.
 fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
     if cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty() {
@@ -369,21 +390,10 @@ fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: 
     } else if cfg.jellyfin.enabled {
         tracing::warn!("jellyfin enabled but no url set; the role says Check config");
     }
-    if cfg.bambu.ready() {
-        runtime.spawn(rackscreen_sources::bambu::run_bambu(
-            rackscreen_sources::bambu::BambuConfig {
-                host: cfg.bambu.host.trim().to_string(),
-                port: rackscreen_sources::bambu::PORT,
-                user: rackscreen_sources::bambu::USER.to_string(),
-                serial: cfg.bambu.serial.trim().to_string(),
-                access_code: cfg.bambu.access_code.trim().to_string(),
-            },
-            ctx.clone(),
-        ));
+    if let Some(bambu) = bambu_config(cfg) {
+        runtime.spawn(rackscreen_sources::bambu::run_bambu(bambu, ctx.clone()));
     } else if cfg.bambu.enabled {
-        tracing::warn!(
-            "bambu enabled but host, serial or access code missing; the role says Check config"
-        );
+        tracing::warn!("bambu enabled but not set up; the role says Check config");
     }
     let ha = cfg.used_ha();
     if cfg.homeassistant.ready() && !ha.is_empty() {

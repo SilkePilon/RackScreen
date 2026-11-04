@@ -50,6 +50,8 @@ const state = {
   loginRequired: params.has("login"),
   authenticated: false,
   spotifyLoggedIn: false,
+  bambuAccount: null as string | null,
+  bambuPending: null as { account: string; kind: "code" | "tfa" } | null,
   started: Math.floor(Date.now() / 1000) - 3 * 86400 - 4 * 3600,
   monitorSince: Math.floor(Date.now() / 1000) - 3 * 86400,
   jumps: new Map<number, { role: string; at: number }>(),
@@ -504,6 +506,19 @@ function pushLog(level: LogLine["level"], msg: string) {
   logSubscribers.forEach((fn) => fn(l))
 }
 
+function bambuState() {
+  const a = state.bambuAccount
+  return {
+    mode: state.config.bambu.mode,
+    logged_in: !!a,
+    account: a,
+    region: a ? "global" : null,
+    expires_at: a ? Math.floor(Date.now() / 1000) + 89 * 86400 : null,
+    status: a ? `Logged in as ${a}` : "Not logged in",
+    pending: state.bambuPending?.kind ?? null,
+  }
+}
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -651,6 +666,38 @@ async function handle(method: string, path: string, body: unknown, headers: Head
       const lines = state.logs.filter((l) => l.seq > after).slice(0, limit)
       return json(200, { lines, next: lines.at(-1)?.seq ?? after })
     }
+    case "GET /bambu":
+      return json(200, bambuState())
+    case "POST /bambu/login": {
+      const account = String(b.account ?? "").trim()
+      if (!account || !b.password) return json(400, { error: "enter the email and the password" })
+      if (b.password === "wrong")
+        return json(400, { error: "the login was refused: Incorrect account or password." })
+      state.bambuPending = { account, kind: account.includes("2fa") ? "tfa" : "code" }
+      return json(200, { needs: state.bambuPending.kind })
+    }
+    case "POST /bambu/code": {
+      if (!state.bambuPending)
+        return json(400, { error: "log in with the password first (it expires after 10 min)" })
+      if (String(b.code ?? "").trim() !== "123456") return json(400, { error: "that code is not right" })
+      state.bambuAccount = state.bambuPending.account
+      state.bambuPending = null
+      return json(200, bambuState())
+    }
+    case "POST /bambu/resend":
+      return json(200, { ok: true })
+    case "GET /bambu/printers":
+      if (!state.bambuAccount) return json(400, { error: "log in to Bambu Lab first" })
+      return json(200, {
+        printers: [
+          { serial: "01P00A391800123", name: "Workshop P1S", model: "P1S", online: true },
+          { serial: "03919C461900456", name: "A1 mini", model: "A1 mini", online: false },
+        ],
+      })
+    case "POST /bambu/logout":
+      state.bambuAccount = null
+      state.bambuPending = null
+      return json(200, bambuState())
     case "GET /spotify":
       return json(200, {
         enabled: state.config.spotify.enabled,

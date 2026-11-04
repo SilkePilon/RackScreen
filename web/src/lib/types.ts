@@ -90,8 +90,12 @@ export interface JellyfinCfg {
   api_key: Secret
   poll_secs: number
 }
+export type BambuMode = "lan" | "cloud"
+export type BambuRegion = "global" | "china"
 export interface BambuCfg {
   enabled: boolean
+  mode: BambuMode
+  region: BambuRegion
   host: string
   serial: string
   access_code: Secret
@@ -337,6 +341,25 @@ export interface LogLine {
 export interface LogsPage {
   lines: LogLine[]
   next: number
+}
+
+export interface BambuState {
+  mode: BambuMode
+  logged_in: boolean
+  account: string | null
+  region: BambuRegion | null
+  /** Unix seconds. */
+  expires_at: number | null
+  status: string
+  /** A login waiting for its emailed (`code`) or authenticator (`tfa`) code. */
+  pending: "code" | "tfa" | null
+}
+
+export interface BambuPrinter {
+  serial: string
+  name: string
+  model: string
+  online: boolean
 }
 
 export interface SpotifyState {
