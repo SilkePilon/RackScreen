@@ -134,6 +134,22 @@ pub fn effective_chunk(requested: usize, sysfs_value: Option<&str>) -> usize {
     requested.min(bufsiz)
 }
 
+/// The largest write on SPI1. SPI1 is the aux controller (no DMA): it keeps
+/// up with the wire only while the driver polls, which it does for transfers
+/// estimated under `polling_limit_us` (set by `rackscreen install`/`update`)
+/// and for at most two jiffies (8 ms at HZ=250) per transfer before it falls
+/// back to an interrupt per FIFO fill. 16 KiB is 2.6 ms at 50 MHz.
+pub const AUX_CHUNK: usize = 16384;
+
+/// The chunk for `bus`: SPI0 takes `chunk` as is (DMA), SPI1 at most `AUX_CHUNK`.
+pub fn bus_chunk(bus: u8, chunk: usize) -> usize {
+    if bus == 1 {
+        chunk.min(AUX_CHUNK)
+    } else {
+        chunk
+    }
+}
+
 pub struct Gc9a01 {
     spi: Spi,
     dc: OutputPin,
@@ -151,7 +167,7 @@ impl Gc9a01 {
                  (reboot after enabling SPI to use the larger value)"
             );
         }
-        let chunk = effective;
+        let chunk = bus_chunk(pins.bus, effective);
         let bus = match pins.bus {
             0 => Bus::Spi0,
             1 => Bus::Spi1,
@@ -275,6 +291,13 @@ mod tests {
         assert_eq!(r, [0, 0, 0, 0xEF]);
         let (c, _) = window_bytes(10, 5, 25, 9);
         assert_eq!(c, [0, 10, 0, 25]);
+    }
+
+    #[test]
+    fn spi1_writes_fit_the_aux_polling_window() {
+        assert_eq!(bus_chunk(0, 65536), 65536);
+        assert_eq!(bus_chunk(1, 65536), AUX_CHUNK);
+        assert_eq!(bus_chunk(1, 4096), 4096);
     }
 
     #[test]

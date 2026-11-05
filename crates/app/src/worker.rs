@@ -273,6 +273,11 @@ mod tests {
         s
     }
 
+    /// A full frame as the mailbox sends it: cut to the round panel.
+    fn full_round() -> Vec<Rect> {
+        rackscreen_render::frame::round_rects(&[Rect::full()], 240)
+    }
+
     fn job(s: Scene) -> Job {
         Job::single(s, None, false)
     }
@@ -283,7 +288,7 @@ mod tests {
         let mut f = ScreenFrames::new(Orient::identity(), mb.clone(), 1.0);
         let mut r = Renderer::new().unwrap();
         assert!(!f.run(&mut r, job(scene(50.0))).skipped);
-        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == vec![Rect::full()]));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == full_round()));
         assert!(f.run(&mut r, job(scene(50.0))).skipped);
         assert!(mb.try_take().is_none());
         assert!(!f.run(&mut r, job(scene(60.0))).skipped);
@@ -301,7 +306,7 @@ mod tests {
         let _ = mb.take();
         let d = f.run(&mut r, Job::single(scene(50.0), None, true));
         assert!(!d.skipped);
-        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == vec![Rect::full()]));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == full_round()));
         let d = f.run(&mut r, Job::single(scene(50.0), Some(0.5), false));
         assert!(!d.skipped);
     }
@@ -366,7 +371,7 @@ mod tests {
         mb.set_needs_full();
         let d = f.run(&mut r, job(scene(50.0)));
         assert!(!d.skipped, "the panel may be stale: not skipped");
-        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == vec![Rect::full()]));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(fr) if fr.rects == full_round()));
         assert!(!mb.take_needs_full(), "taken once");
         assert!(f.run(&mut r, job(scene(50.0))).skipped);
     }
@@ -386,7 +391,7 @@ mod tests {
         let mb = Mailbox::new();
         let mut frames = ScreenFrames::new(Orient::new(90, false), mb.clone(), 1.0);
         assert_eq!(frames.flush(), Some(vec![Rect::full()]));
-        assert!(matches!(mb.take(), DisplayCmd::Frame(f) if f.rects == vec![Rect::full()]));
+        assert!(matches!(mb.take(), DisplayCmd::Frame(f) if f.rects == full_round()));
         assert_eq!(frames.flush(), None, "identical frame pushes nothing");
         // source pixel (10, 20) lands at panel (219, 10) for a 90° turn
         frames.cur.data_mut()[(20 * 240 + 10) * 4] = 200;

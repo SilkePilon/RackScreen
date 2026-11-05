@@ -21,18 +21,20 @@ pub enum StepId {
     Owner,
     Sudoers,
     Groups,
+    SpiTune,
     Service,
     Boot,
 }
 
 impl StepId {
-    pub const ALL: [StepId; 8] = [
+    pub const ALL: [StepId; 9] = [
         StepId::Platform,
         StepId::Binary,
         StepId::Config,
         StepId::Owner,
         StepId::Sudoers,
         StepId::Groups,
+        StepId::SpiTune,
         StepId::Service,
         StepId::Boot,
     ];
@@ -47,6 +49,7 @@ impl StepId {
                 "Allow the service user to run rackscreen update and tailscale-setup"
             }
             StepId::Groups => "Add user to spi and gpio groups",
+            StepId::SpiTune => "Poll SPI1 instead of an interrupt per FIFO fill",
             StepId::Service => "Install and start systemd service",
             StepId::Boot => "Enable SPI in boot files",
         }
@@ -357,6 +360,11 @@ impl Installer {
                 self.sh.check("usermod", &["-aG", "spi,gpio", &self.user])?;
                 Ok(Outcome::Done(format!("{} in spi,gpio", self.user)))
             }
+            // Not fatal: the panels work without it, only SPI1 is slower.
+            StepId::SpiTune => Ok(match crate::spi_tune::ensure(&self.paths) {
+                Ok(t) => Outcome::Done(t.describe()),
+                Err(e) => Outcome::Warn(format!("{e:#}")),
+            }),
             StepId::Service => {
                 let unit = self.paths.unit();
                 if let Some(dir) = unit.parent() {

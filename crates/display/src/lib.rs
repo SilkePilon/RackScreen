@@ -5,7 +5,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use anyhow::Result;
-use rackscreen_render::frame::merge_rects;
+use rackscreen_render::frame::{merge_rects, round_rects};
 
 pub use rackscreen_render::frame::Rect;
 
@@ -137,7 +137,9 @@ impl Mailbox {
     /// Queue a rendered frame. `rects` changed since the previous frame. When
     /// the display thread has not taken the previous frame yet, its rects join
     /// this one so no region is lost, and `pack` is called once for the merged
-    /// set: it must read the newest pixels. Runs under the mailbox lock.
+    /// set: it must read the newest pixels. The merged set is cut to the round
+    /// panel (`round_rects`), so the invisible corners are never packed or
+    /// sent. Runs under the mailbox lock.
     pub fn put_frame(&self, rects: &[Rect], pack: impl FnOnce(&[Rect]) -> Vec<u8>) {
         let (lock, cv) = &*self.inner;
         let mut slot = lock.lock().unwrap();
@@ -146,7 +148,11 @@ impl Mailbox {
             all.extend(old.rects);
         }
         let full = Rect::full();
-        let rects = merge_rects(all, full.w, full.h);
+        let rects = round_rects(&merge_rects(all, full.w, full.h), full.w);
+        if rects.is_empty() {
+            // every change (and any pending one) lies outside the circle
+            return;
+        }
         let bytes = pack(&rects);
         debug_assert_eq!(bytes.len(), packed_len(&rects), "packed bytes vs rects");
         slot.frame = Some(PackedFrame { rects, bytes });
@@ -222,8 +228,8 @@ mod tests {
     fn put_frame_packs_the_given_rects() {
         let mb = Mailbox::new();
         let r = Rect {
-            x: 1,
-            y: 2,
+            x: 101,
+            y: 102,
             w: 3,
             h: 4,
         };
@@ -242,8 +248,8 @@ mod tests {
     fn untaken_frame_rects_join_the_next_pack() {
         let mb = Mailbox::new();
         let a = Rect {
-            x: 0,
-            y: 0,
+            x: 60,
+            y: 60,
             w: 2,
             h: 2,
         };
@@ -351,6 +357,27 @@ mod tests {
             (2, 6.0, 4.0, 400)
         );
         assert_eq!(mb.take_push_stats(), PushStats::default());
+    }
+
+    #[test]
+    fn put_frame_sends_only_what_the_round_panel_shows() {
+        let mb = Mailbox::new();
+        let corner = Rect {
+            x: 0,
+            y: 0,
+            w: 10,
+            h: 10,
+        };
+        mb.put_frame(&[corner], |rs| bytes_for(rs, 1));
+        assert!(mb.try_take().is_none(), "a corner change is never seen");
+        mb.put_frame(&[Rect::full()], |rs| bytes_for(rs, 1));
+        match mb.take() {
+            DisplayCmd::Frame(f) => {
+                assert_eq!(f.rects, round_rects(&[Rect::full()], 240));
+                assert!(f.bytes.len() < 240 * 240 * 2 * 9 / 10, "{}", f.bytes.len());
+            }
+            _ => panic!(),
+        }
     }
 
     #[test]

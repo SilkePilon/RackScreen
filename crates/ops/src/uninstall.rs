@@ -17,16 +17,18 @@ pub enum UStep {
     Unit,
     Reload,
     Sudoers,
+    SpiTune,
     Config,
     Binary,
 }
 
 impl UStep {
-    pub const ALL: [UStep; 6] = [
+    pub const ALL: [UStep; 7] = [
         UStep::Service,
         UStep::Unit,
         UStep::Reload,
         UStep::Sudoers,
+        UStep::SpiTune,
         UStep::Config,
         UStep::Binary,
     ];
@@ -36,6 +38,7 @@ impl UStep {
             UStep::Unit => "Remove systemd unit",
             UStep::Reload => "Reload systemd",
             UStep::Sudoers => "Remove sudoers drop-in",
+            UStep::SpiTune => "Remove the SPI1 modprobe drop-in",
             UStep::Config => "Remove /etc/rackscreen",
             UStep::Binary => "Remove /usr/local/bin/rackscreen",
         }
@@ -94,6 +97,7 @@ impl Uninstaller {
                 Ok(Outcome::Done(String::new()))
             }
             UStep::Sudoers => remove_if_exists(&self.paths.sudoers(), false),
+            UStep::SpiTune => remove_if_exists(&crate::spi_tune::modprobe_path(&self.paths), false),
             UStep::Config => {
                 if !self.purge {
                     return Ok(Outcome::Skipped("kept (use --purge to remove)".into()));

@@ -614,6 +614,8 @@ display:
   brightness: 1.0
   fps: 60
   spi_chunk: 4096          # 65536 once spidev.bufsiz=65536 is in cmdline.txt
+                           # (SPI1 writes at most 16384: its driver polls only short
+                           # transfers; install/update set spi_bcm2835aux polling_limit_us)
   one_at_a_time: true      # one screen changes at a time, in random order (kinder to the SPI bus)
 
 transitions:

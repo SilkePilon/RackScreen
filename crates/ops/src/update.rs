@@ -241,16 +241,18 @@ pub enum StepId {
     Download,
     Verify,
     Install,
+    SpiTune,
     Restart,
 }
 
 impl StepId {
-    pub const ALL: [StepId; 6] = [
+    pub const ALL: [StepId; 7] = [
         StepId::Check,
         StepId::Platform,
         StepId::Download,
         StepId::Verify,
         StepId::Install,
+        StepId::SpiTune,
         StepId::Restart,
     ];
 
@@ -261,6 +263,7 @@ impl StepId {
             StepId::Download => "Download rackscreen-aarch64",
             StepId::Verify => "Verify checksum",
             StepId::Install => "Install to /usr/local/bin/rackscreen",
+            StepId::SpiTune => "Poll SPI1 instead of an interrupt per FIFO fill",
             StepId::Restart => "Restart the service",
         }
     }
@@ -408,6 +411,15 @@ impl Updater {
             &tmp,
             install_new_binary(&tmp, &dest).map(|()| ((), Some(dest.display().to_string()))),
         )?;
+
+        // Before the restart, so the panels reopen with the driver polling.
+        // Not fatal: the panels work without it, only SPI1 is slower.
+        let _ = events.send(Event::Started(StepId::SpiTune));
+        let tuned = match crate::spi_tune::ensure(&self.paths) {
+            Ok(t) => Outcome::Done(t.describe()),
+            Err(e) => Outcome::Warn(format!("{e:#}")),
+        };
+        let _ = events.send(Event::Finished(StepId::SpiTune, tuned));
 
         let _ = events.send(Event::Started(StepId::Restart));
         let sd = Systemd::new(self.sh.as_ref(), &self.user);

@@ -256,6 +256,73 @@ pub fn merge_rects(mut rects: Vec<Rect>, w: u32, h: u32) -> Vec<Rect> {
     rects
 }
 
+/// Rows per band when a rect is cut to the round panel.
+const ROUND_BAND_ROWS: u32 = 30;
+/// What one more panel window costs, in pixels of wire time: five small SPI
+/// writes, about 0.15 ms against 2 bytes per pixel at 50 MHz.
+const WINDOW_COST_PX: u64 = 470;
+/// Columns kept beyond the exact circle on each side.
+const ROUND_MARGIN: f32 = 1.0;
+
+/// Columns `[x0, x1)` of a `size`-wide round panel that are visible on any of
+/// rows `[y0, y1)`: those of the row nearest the centre.
+fn round_span(size: u32, y0: u32, y1: u32) -> (u32, u32) {
+    let c = size as f32 / 2.0;
+    // the row whose centre is nearest the panel centre
+    let y = (c - 0.5).clamp(y0 as f32, (y1 - 1) as f32);
+    let d = (y + 0.5 - c).abs();
+    let hw = (c * c - d * d).max(0.0).sqrt() + ROUND_MARGIN;
+    let x0 = (c - hw).floor().max(0.0) as u32;
+    let x1 = ((c + hw).ceil() as u32).min(size);
+    (x0, x1)
+}
+
+/// `r` limited to the columns visible on its rows, or `None` when it lies
+/// wholly outside the circle.
+fn round_clip(size: u32, r: Rect) -> Option<Rect> {
+    let (x0, x1) = round_span(size, r.y, r.y + r.h);
+    let (a, b) = (r.x.max(x0), (r.x + r.w).min(x1));
+    (a < b).then(|| Rect {
+        x: a,
+        w: b - a,
+        ..r
+    })
+}
+
+/// The panels are round: what lies outside the circle inscribed in the
+/// `size`×`size` frame is never seen, about a fifth of a full frame. Each rect
+/// is clipped to the columns visible on its rows, and cut into row bands
+/// (each clipped on its own) when the pixels that saves outweigh the extra
+/// windows. Rects wholly outside the circle are dropped. The circle is
+/// symmetric, so this works the same in panel and source space.
+pub fn round_rects(rects: &[Rect], size: u32) -> Vec<Rect> {
+    let mut out = Vec::new();
+    for &r in rects {
+        if r.is_empty() {
+            continue;
+        }
+        let one = round_clip(size, r);
+        let mut bands = Vec::new();
+        let mut y = r.y;
+        while y < r.y + r.h {
+            let end = ((y / ROUND_BAND_ROWS + 1) * ROUND_BAND_ROWS).min(r.y + r.h);
+            if let Some(b) = round_clip(size, Rect { y, h: end - y, ..r }) {
+                bands.push(b);
+            }
+            y = end;
+        }
+        let one_cost = one.map_or(0, |o| o.area());
+        let bands_cost = bands.iter().map(Rect::area).sum::<u64>()
+            + bands.len().saturating_sub(1) as u64 * WINDOW_COST_PX;
+        if bands.len() > 1 && bands_cost < one_cost {
+            out.extend(bands);
+        } else {
+            out.extend(one);
+        }
+    }
+    out
+}
+
 /// Changed regions between two frames, grouped into row bands.
 pub fn dirty_rects(prev: &Pixmap, next: &Pixmap) -> Vec<Rect> {
     let w = prev.width() as usize;
@@ -594,6 +661,79 @@ mod tests {
             ]
         );
         assert!(dirty_rects(&a, &a.clone()).is_empty());
+    }
+
+    fn visible(x: u32, y: u32) -> bool {
+        let (dx, dy) = (x as f32 + 0.5 - 120.0, y as f32 + 0.5 - 120.0);
+        dx * dx + dy * dy <= 120.0 * 120.0
+    }
+
+    fn covers(rects: &[Rect], r: Rect) {
+        for y in r.y..r.y + r.h {
+            for x in r.x..r.x + r.w {
+                let n = rects
+                    .iter()
+                    .filter(|q| x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h)
+                    .count();
+                assert!(n <= 1, "({x}, {y}) in {n} rects");
+                if visible(x, y) {
+                    assert_eq!(n, 1, "visible ({x}, {y}) not pushed");
+                }
+                assert!(rects.iter().all(|q| q.x >= r.x
+                    && q.x + q.w <= r.x + r.w
+                    && q.y >= r.y
+                    && q.y + q.h <= r.y + r.h));
+            }
+        }
+    }
+
+    #[test]
+    fn round_rects_cut_a_full_frame_to_the_circle() {
+        let out = round_rects(&[Rect::full()], 240);
+        covers(&out, Rect::full());
+        assert_eq!(out.len(), 8);
+        let area: u64 = out.iter().map(Rect::area).sum();
+        assert!(area < 51_000, "{area}");
+        assert!(area > 45_239, "the circle itself is π·120²");
+    }
+
+    #[test]
+    fn round_rects_drop_corners_and_keep_small_rects_whole() {
+        let corner = Rect {
+            x: 0,
+            y: 0,
+            w: 20,
+            h: 20,
+        };
+        assert!(round_rects(&[corner], 240).is_empty());
+        let mid = Rect {
+            x: 100,
+            y: 100,
+            w: 40,
+            h: 40,
+        };
+        assert_eq!(round_rects(&[mid], 240), vec![mid]);
+        // a wide strip near the top loses its invisible ends, as one rect
+        let top = Rect {
+            x: 0,
+            y: 10,
+            w: 240,
+            h: 6,
+        };
+        let out = round_rects(&[top], 240);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].w <= 130, "{:?}", out[0]);
+        covers(&out, top);
+        // an uneven rect straddling bands
+        let odd = Rect {
+            x: 3,
+            y: 41,
+            w: 230,
+            h: 170,
+        };
+        let out = round_rects(&[odd, corner], 240);
+        covers(&out, odd);
+        assert!(out.iter().map(Rect::area).sum::<u64>() <= odd.area());
     }
 
     #[test]
