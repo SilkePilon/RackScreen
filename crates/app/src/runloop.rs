@@ -334,6 +334,9 @@ pub struct RenderLoop {
     pub hub: Option<Arc<Hub>>,
     /// Which links the config turned on.
     pub links: LinkCfg,
+    /// Raised while the SEN stream should run (`Model::sen_wanted`); `None`
+    /// when no screen has the role.
+    pub sen_demand: Option<tokio::sync::watch::Sender<bool>>,
     /// Names of the config's `gifs:`, so `Role::Gif(i)` can be named.
     pub gif_names: Vec<String>,
     /// Names of the config's `homeassistant.entities`, for `Role::Ha(i)`.
@@ -556,6 +559,11 @@ impl RenderLoop {
             // so none starts on the tick the night fade begins.
             model.set_night_day(phase == NightPhase::Day);
             model.tick(now);
+            if let Some(demand) = &self.sen_demand {
+                // only by day and with the roles on the panels
+                let want = phase == NightPhase::Day && pattern.is_none() && model.sen_wanted(now);
+                demand.send_if_modified(|on| std::mem::replace(on, want) != want);
+            }
             if let Some(hub) = &self.hub {
                 if Instant::now() >= next_status {
                     let t = Instant::now();

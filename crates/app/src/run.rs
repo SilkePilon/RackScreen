@@ -132,6 +132,7 @@ impl Monitor {
         }
         // GIFs are pasted links, real in every source mode.
         spawn_gif_source(&runtime, cfg, &ctx);
+        let sen_demand = spawn_sen_source(&runtime, cfg, &ctx, matches!(source, SourceKind::Fake));
 
         // displays
         let panels = open_panels(cfg, opts.sim, opts.sim_grid, key_tx)?;
@@ -211,6 +212,7 @@ impl Monitor {
                 argocd: cfg.argocd.enabled,
                 simulated: matches!(source, SourceKind::Fake),
             },
+            sen_demand,
             gif_names: cfg.gifs.iter().map(|g| g.name.clone()).collect(),
             ha_names: cfg
                 .homeassistant
@@ -292,6 +294,28 @@ impl Drop for Monitor {
             p.shutdown();
         }
     }
+}
+
+/// The SEN live stream, when a screen has the `sen` role. It idles until the
+/// render loop raises the returned demand flag; the simulator plays a
+/// recorded segment in place of the stream.
+fn spawn_sen_source(
+    runtime: &tokio::runtime::Runtime,
+    cfg: &Config,
+    ctx: &SourceCtx,
+    fake: bool,
+) -> Option<tokio::sync::watch::Sender<bool>> {
+    if !cfg.uses_role(rackscreen_core::theme::Role::Sen) {
+        return None;
+    }
+    let feed = if fake {
+        rackscreen_sources::sen::Feed::Loop(rackscreen_sources::fake::SEN_DEMO_SEGMENT)
+    } else {
+        rackscreen_sources::sen::Feed::Live
+    };
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    runtime.spawn(rackscreen_sources::sen::run_sen(feed, ctx.clone(), rx));
+    Some(tx)
 }
 
 /// Download and decode the GIFs the screens show, if any.

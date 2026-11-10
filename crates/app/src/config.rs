@@ -1135,6 +1135,15 @@ impl Config {
             .collect()
     }
 
+    /// Some screen has `role` in its list.
+    pub fn uses_role(&self, role: Role) -> bool {
+        self.screens
+            .iter()
+            .filter_map(|s| self.screen_roles(s).ok())
+            .flatten()
+            .any(|r| r == role)
+    }
+
     /// `(lat, lon)` when both are set.
     pub fn location(&self) -> Option<(f64, f64)> {
         match (self.location.lat, self.location.lon) {
