@@ -133,6 +133,10 @@ fn is_renewable(s: Source) -> bool {
     )
 }
 
+/// Five seconds of Sen's stream for the simulator's `sen` role, played in a
+/// loop (`sen::Feed::Loop`).
+pub const SEN_DEMO_SEGMENT: &[u8] = include_bytes!("../tests/fixtures/sen_live.ts");
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FakeCmd {
     PodStarted,

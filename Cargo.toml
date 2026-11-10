@@ -80,6 +80,9 @@ opt-level = 3
 opt-level = 3
 [profile.release.package.rppal]
 opt-level = 3
+# The H.264 decoder of the sen role (C++ built by its build script).
+[profile.release.package.openh264-sys2]
+opt-level = 3
 [profile.release.package.rackscreen-sources]
 opt-level = "s"
 [profile.release.package.rackscreen-web]

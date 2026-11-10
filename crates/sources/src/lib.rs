@@ -25,6 +25,7 @@ pub mod open_meteo;
 pub mod owned_fs;
 pub mod prometheus;
 pub mod qbittorrent;
+pub mod sen;
 pub mod spotify;
 pub mod tunnel;
 
