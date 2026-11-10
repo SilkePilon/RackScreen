@@ -1,0 +1,15 @@
+{
+ "playabilityStatus": {
+  "status": "OK"
+ },
+ "videoDetails": {
+  "videoId": "fO9e9jnhYK8",
+  "isLive": true,
+  "isLiveContent": true,
+  "title": "Live 4K video of Earth and space: 24/7 Livestream of Earth by Sen\u2019s 4K video cameras on the ISS"
+ },
+ "streamingData": {
+  "expiresInSeconds": "21540",
+  "hlsManifestUrl": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1794374386/ei/kabzavbMPN_fp-oP5576-A0/ip/0.0.0.0/id/fO9e9jnhYK8.2/source/yt_live_broadcast/requiressl/yes/xpc/EgVo2aDSNQ%3D%3D/hfr/1/playlist_duration/3600/manifest_duration/3600/demuxed/1/maudio/1/bui/AZFAFb96R2g-rlXaAbW8VohRcPZsKhZegsFB9vRAwl3douxI1buTRivyiB_7Qi18euaZEPrc2QBinQt6/spc/mpRQ_5CnaLucednS4mZE7j7Q102FufyxxBKcIF1k8It1CEbrMzDl5MVOH7Xt/vprv/1/go/1/rqh/5/reg/0/pacing/0/epbp/1/nvgoi/1/short_key/1/ncsapi/1/keepalive/yes/fexp/51565116/dover/13/itag/0/playlist_type/DVR/sparams/expire%2Cei%2Cip%2Cid%2Csource%2Crequiressl%2Cxpc%2Chfr%2Cplaylist_duration%2Cmanifest_duration%2Cdemuxed%2Cmaudio%2Cbui%2Cspc%2Cvprv%2Cgo%2Crqh%2Creg%2Citag%2Cplaylist_type/sig/AE0s2JYwRgIhAIMYxf7lJ-Qw0t3DT9EjAjcsTutQaRy03j_GE3_0JhR1AiEAoSM5uWnYp2VMupsrl8B5Q_Bcdg5zmlyQcbTFvrNq3ks%3D/file/index.m3u8"
+ }
+}
