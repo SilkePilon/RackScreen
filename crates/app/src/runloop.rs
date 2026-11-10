@@ -759,7 +759,10 @@ impl RenderLoop {
                     role: self.role_name(role),
                     title: role.title().to_string(),
                     roles: st.map_or_else(Vec::new, |st| {
-                        st.roles().iter().map(|r| self.role_name(*r)).collect()
+                        st.entries()
+                            .iter()
+                            .map(|e| self.role_name(e.role))
+                            .collect()
                     }),
                     cycle_secs: self.cycle_secs_cfg.get(i).copied().unwrap_or(15),
                     cycle_progress: st.map_or(0.0, |st| st.progress(now)),

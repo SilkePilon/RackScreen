@@ -7,7 +7,7 @@ use crate::event::{
     Robustness, Torrent,
 };
 use crate::history::{History, Hourly};
-use crate::screens::ScreenState;
+use crate::screens::{Entry, ScreenState};
 use crate::shows::schedule::{Request, ShowRun, ShowScheduler};
 use crate::shows::world::{Layout, WorldFrame};
 use crate::theme::Role;
@@ -549,7 +549,7 @@ impl Model {
             night_override: None,
             screens: [Role::Cpu, Role::Mem, Role::Pods, Role::Health]
                 .into_iter()
-                .map(|r| ScreenState::new(vec![r], DEFAULT_CYCLE_SECS))
+                .map(|r| ScreenState::new(vec![Entry::new(r, DEFAULT_CYCLE_SECS)]))
                 .collect(),
             one_at_a_time: false,
             transition_free_at: 0.0,
@@ -792,30 +792,51 @@ impl Model {
         self.github_token_present
     }
 
-    /// Replace the per-screen role lists. `cycle_secs[i]` is the dwell for screen
-    /// `i`; missing entries use `DEFAULT_CYCLE_SECS`. An empty layout keeps one
-    /// CPU screen so `scene(0, ..)` always has something to show.
+    /// Replace the per-screen role lists, every role of screen `i` dwelling
+    /// `cycle_secs[i]`; missing entries use `DEFAULT_CYCLE_SECS`.
     pub fn set_screens(&mut self, roles: Vec<Vec<Role>>, cycle_secs: Vec<Secs>) {
-        let count = roles.len().max(1);
-        self.screens = roles
+        let entries = roles
             .into_iter()
             .enumerate()
             .map(|(i, r)| {
-                let cycle = cycle_secs
-                    .get(i)
-                    .copied()
-                    .unwrap_or(DEFAULT_CYCLE_SECS)
+                let secs = cycle_secs.get(i).copied().unwrap_or(DEFAULT_CYCLE_SECS);
+                r.into_iter().map(|role| Entry::new(role, secs)).collect()
+            })
+            .collect();
+        self.set_screen_entries(entries);
+    }
+
+    /// Replace the per-screen cycles, each entry with its own dwell. An empty
+    /// layout keeps one CPU screen so `scene(0, ..)` always has something to show.
+    pub fn set_screen_entries(&mut self, entries: Vec<Vec<Entry>>) {
+        let count = entries.len().max(1);
+        self.screens = entries
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let first = e
+                    .first()
+                    .map_or(DEFAULT_CYCLE_SECS, |e| e.secs)
                     .max(crate::screens::MIN_CYCLE_SECS);
                 // Spread the first transitions over at most one dwell, so screens
                 // that share a dwell never transition on the same frame again.
-                let step = SCREEN_STAGGER_SECS.min(cycle / count as Secs);
-                ScreenState::new_with_offset(r, cycle, i as Secs * step)
+                let step = SCREEN_STAGGER_SECS.min(first / count as Secs);
+                ScreenState::new_with_offset(e, i as Secs * step)
             })
             .collect();
         if self.screens.is_empty() {
-            self.screens
-                .push(ScreenState::new(vec![Role::Cpu], DEFAULT_CYCLE_SECS));
+            self.screens.push(ScreenState::new(vec![Entry::new(
+                Role::Cpu,
+                DEFAULT_CYCLE_SECS,
+            )]));
         }
+    }
+
+    /// Whether `role` has something to show right now. A screen skips an entry
+    /// whose role cannot show, and leaves one that stops being able to. Every
+    /// role can show for now.
+    pub fn role_available(&self, _role: Role) -> bool {
+        true
     }
     pub fn screen_count(&self) -> usize {
         self.screens.len()
@@ -881,7 +902,7 @@ impl Model {
         }
         match screen {
             Some(i) => match self.screens.get_mut(i) {
-                Some(s) if s.roles().len() >= 2 => {
+                Some(s) if s.entries().len() >= 2 => {
                     s.make_due(now, 0.0);
                     true
                 }
@@ -899,7 +920,7 @@ impl Model {
                 for i in 0..self.screens.len() {
                     let pos = self.show_position(i);
                     let s = &mut self.screens[i];
-                    if s.roles().len() >= 2 {
+                    if s.entries().len() >= 2 {
                         s.make_due(now, pos as Secs * step);
                         any = true;
                     }
@@ -1021,10 +1042,17 @@ impl Model {
         // Role cycling pauses while a show runs (the dwells cover it anyway).
         let show_on = self.shows.current().is_some_and(|r| r.phase(now).is_some());
         let mut waiting: Vec<usize> = Vec::new();
-        for (i, s) in self.screens.iter_mut().enumerate() {
+        for i in 0..self.screens.len() {
             // Finish a running transition; starting one is decided below.
-            s.advance(now);
-            if !show_on && s.ready_to_transition(now) {
+            self.screens[i].advance(now);
+            if show_on {
+                continue;
+            }
+            // A role that can no longer show gives way at once.
+            if self.screens[i].stranded(|r| self.role_available(r)) {
+                self.screens[i].request_leave(now);
+            }
+            if self.screens[i].ready_to_transition(now) {
                 waiting.push(i);
             }
         }
@@ -1033,7 +1061,7 @@ impl Model {
         } else {
             for i in waiting {
                 let spec = self.next_screen_spec();
-                self.screens[i].start_transition_with(now, spec);
+                self.start_screen_transition(i, now, spec);
             }
         }
         self.tick_shows(now);
@@ -1050,8 +1078,16 @@ impl Model {
         }
         let i = waiting[(self.next_rand() % waiting.len() as u64) as usize];
         let spec = self.next_screen_spec();
-        self.screens[i].start_transition_with(now, spec);
-        self.transition_free_at = now + spec.secs + crate::screens::TRANSITION_GAP_SECS;
+        if self.start_screen_transition(i, now, spec) {
+            self.transition_free_at = now + spec.secs + crate::screens::TRANSITION_GAP_SECS;
+        }
+    }
+
+    /// Start `screen`'s transition to its next entry that can show; with none,
+    /// its dwell restarts and false comes back.
+    fn start_screen_transition(&mut self, screen: usize, now: Secs, spec: Spec) -> bool {
+        let to = self.screens[screen].next_entry(|r| self.role_available(r));
+        self.screens[screen].start_transition_to(now, spec, to)
     }
 
     pub fn all_healthy(&self) -> bool {
