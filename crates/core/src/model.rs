@@ -3,8 +3,8 @@
 use crate::anim::Secs;
 use crate::electricity::Source;
 use crate::event::{
-    App, CiRun, Download, Event, IssPass, JfSession, JfStatus, LinkTarget, MoonPhase, NodeLoad,
-    Robustness, Torrent,
+    App, CiRun, Download, Event, IssPass, IssTrack, JfSession, JfStatus, LinkTarget, MoonPhase,
+    NodeLoad, Robustness, Torrent,
 };
 use crate::history::{History, Hourly};
 use crate::screens::{Entry, ScreenState};
@@ -173,6 +173,8 @@ impl Default for SkyState {
 pub struct IssState {
     pub pass: Option<IssPass>,
     pub have: bool,
+    /// The ephemeris the globe draws from.
+    pub track: Option<IssTrack>,
 }
 
 /// Library counts from the arr exporter; the download card state arrives in Task 5.
@@ -665,6 +667,10 @@ impl Model {
     }
     pub fn iss(&self) -> &IssState {
         &self.iss
+    }
+    /// Where the ISS is over the ground now, when the ephemeris covers it.
+    pub fn iss_position(&self) -> Option<crate::globe::V3> {
+        self.iss.track.as_ref()?.at(self.unix_now)
     }
     pub fn media(&self) -> &MediaState {
         &self.media
@@ -1447,7 +1453,11 @@ impl Model {
                 };
             }
             Event::IssPass(pass) => {
-                self.iss = IssState { pass, have: true };
+                self.iss.pass = pass;
+                self.iss.have = true;
+            }
+            Event::IssTrack(track) => {
+                self.iss.track = Some(track);
             }
             Event::GithubActivity { days } => {
                 self.github = GithubState { days, have: true };

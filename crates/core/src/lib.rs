@@ -4,6 +4,7 @@ pub mod electricity;
 pub mod event;
 pub mod format;
 pub mod gif;
+pub mod globe;
 pub mod history;
 pub mod model;
 pub mod music;

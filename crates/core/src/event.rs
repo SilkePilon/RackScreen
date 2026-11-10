@@ -106,6 +106,22 @@ pub struct IssPass {
     pub end: i64,
     pub max_elevation_deg: f32,
     pub visible: bool,
+    /// The stretch of the pass that can be seen by eye (the station at
+    /// least 10° up, the observer in the dark, the station still sunlit).
+    pub vis: Option<(i64, i64)>,
+}
+
+/// Where the ISS is over the ground around now: sub-satellite points every
+/// `step_secs` from `t0` (unix seconds), about an hour back and an orbit
+/// ahead. The globe screen interpolates between them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IssTrack {
+    pub t0: i64,
+    pub step_secs: u32,
+    /// `(lat, lon)` in degrees.
+    pub points: Vec<(f32, f32)>,
+    /// The observer, `(lat, lon)` in degrees.
+    pub home: (f32, f32),
 }
 
 /// One node's load averages and core count, for the load role.
@@ -461,6 +477,8 @@ pub enum Event {
     },
     /// `None` when no pass clears `iss.min_elevation` in the next 24 h.
     IssPass(Option<IssPass>),
+    /// The ISS ephemeris for the globe; re-sent every few minutes.
+    IssTrack(IssTrack),
     /// Thirty days of contribution counts, oldest first, last entry today.
     GithubActivity {
         days: Vec<(String, u32)>,

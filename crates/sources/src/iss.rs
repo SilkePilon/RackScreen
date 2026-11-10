@@ -1,10 +1,11 @@
 //! ISS pass prediction on the Pi: the TLE from Celestrak once a day, SGP4
-//! propagation, a topocentric elevation search for the next pass.
+//! propagation, a topocentric elevation search for the next pass, and the
+//! ground track around now for the globe screen.
 
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use rackscreen_core::event::{Event, IssPass};
+use rackscreen_core::event::{Event, IssPass, IssTrack};
 
 use crate::astro::{sun_direction, sun_elevation};
 use crate::electricity::HttpStatus;
@@ -27,6 +28,18 @@ const TLE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
 const RECOMPUTE: Duration = Duration::from_secs(600);
 /// The observer counts as dark below this sun elevation (civil twilight).
 const DARK_DEG: f64 = -6.0;
+/// The station is seen by eye from this elevation up.
+const VISIBLE_MIN_DEG: f64 = 10.0;
+/// Step of the visible-window search, and how far around the pass it looks
+/// (a pass above a higher `min_elevation` is shorter than its 10° stretch).
+const VISIBLE_STEP_SECS: i64 = 5;
+const VISIBLE_MARGIN_SECS: i64 = 300;
+/// The ephemeris for the globe: a point every `TRACK_STEP_SECS` from an
+/// hour ago to 100 minutes ahead, sent again every `TRACK_EVERY`.
+pub const TRACK_STEP_SECS: u32 = 20;
+pub const TRACK_BACK_SECS: i64 = 60 * 60;
+pub const TRACK_AHEAD_SECS: i64 = 100 * 60;
+const TRACK_EVERY: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug)]
 pub struct IssConfig {
@@ -139,6 +152,71 @@ fn sunlit(r_teme: [f64; 3], unix: i64) -> bool {
     (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt() > EARTH_RADIUS_KM
 }
 
+/// Geodetic `(lat, lon)` in degrees of the point under an ECEF position.
+pub fn ground_point(ecef: [f64; 3]) -> (f64, f64) {
+    let e2 = WGS84_F * (2.0 - WGS84_F);
+    let p = ecef[0].hypot(ecef[1]);
+    let mut lat = ecef[2].atan2(p * (1.0 - e2));
+    for _ in 0..3 {
+        let (sin, cos) = lat.sin_cos();
+        let root = (1.0 - e2 * sin * sin).sqrt();
+        let n = WGS84_A / root;
+        // height above the ellipsoid, well behaved at the poles too
+        let h = p * cos + ecef[2] * sin - WGS84_A * root;
+        lat = ecef[2].atan2(p * (1.0 - e2 * n / (n + h)));
+    }
+    (lat.to_degrees(), ecef[1].atan2(ecef[0]).to_degrees())
+}
+
+/// The ground track from `TRACK_BACK_SECS` before `now` to
+/// `TRACK_AHEAD_SECS` after it, for an observer at `(lat, lon)`.
+pub fn ephemeris(l1: &str, l2: &str, lat: f64, lon: f64, now: i64) -> Result<IssTrack> {
+    let (el, k) = elements(l1, l2)?;
+    let t0 = now - TRACK_BACK_SECS;
+    let n = (TRACK_BACK_SECS + TRACK_AHEAD_SECS) / TRACK_STEP_SECS as i64;
+    let points = (0..=n)
+        .map(|i| {
+            let t = t0 + i * TRACK_STEP_SECS as i64;
+            let r = propagate(&el, &k, t)?;
+            let (lat, lon) = ground_point(teme_to_ecef(r, gmst_rad(t as f64)));
+            Ok((lat as f32, lon as f32))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(IssTrack {
+        t0,
+        step_secs: TRACK_STEP_SECS,
+        points,
+        home: (lat as f32, lon as f32),
+    })
+}
+
+/// The stretch around a pass (`start` to `end`) in which the station can be
+/// seen by eye: at least 10° up, the observer in the dark, the station in
+/// sunlight. `None` for a daytime pass or one in the Earth's shadow.
+fn visible_window(
+    el: &sgp4::Elements,
+    k: &sgp4::Constants,
+    lat: f64,
+    lon: f64,
+    start: i64,
+    end: i64,
+) -> Result<Option<(i64, i64)>> {
+    let obs = observer_ecef(lat, lon);
+    let mut window: Option<(i64, i64)> = None;
+    let mut t = start - VISIBLE_MARGIN_SECS;
+    while t <= end + VISIBLE_MARGIN_SECS {
+        let r = propagate(el, k, t)?;
+        let up = topocentric_elevation(teme_to_ecef(r, gmst_rad(t as f64)), obs, lat, lon);
+        if up >= VISIBLE_MIN_DEG && sun_elevation(lat, lon, t) < DARK_DEG && sunlit(r, t) {
+            window = Some((window.map_or(t, |w| w.0), t + VISIBLE_STEP_SECS));
+        } else if window.is_some() {
+            break;
+        }
+        t += VISIBLE_STEP_SECS;
+    }
+    Ok(window)
+}
+
 /// The first pass above `min_elevation` that ends after `from`, searched in
 /// ten-second steps over the next 24 hours.
 pub fn next_pass(
@@ -177,6 +255,7 @@ pub fn next_pass(
                 end: t,
                 max_elevation_deg: max_el as f32,
                 visible,
+                vis: visible_window(&el, &k, lat, lon, s, t)?,
             }));
         }
         t += STEP_SECS;
@@ -198,15 +277,19 @@ async fn fetch_tle() -> Result<(String, String)> {
     parse_tle(&body)
 }
 
-/// Refresh the TLE, then recompute the next pass on a timer. With no usable
-/// TLE the loop emits nothing at all: `Event::IssPass(None)` would set
-/// `IssState::have`, which is what the role's no-data state keys off, so a Pi
-/// with no internet would claim "no pass in the next 24 h" instead of showing
-/// `cloud-off`. A TLE that has gone stale keeps serving its last computed
-/// pass until a fetch succeeds or `TLE_MAX_AGE` drops it.
+/// Refresh the TLE, then recompute the next pass and the ground track on
+/// their timers. With no usable TLE the loop emits nothing at all:
+/// `Event::IssPass(None)` would set `IssState::have`, which is what the
+/// role's no-data state keys off, so a Pi with no internet would claim "no
+/// pass in the next 24 h" instead of showing `cloud-off`. A TLE that has
+/// gone stale keeps serving its last computed pass until a fetch succeeds or
+/// `TLE_MAX_AGE` drops it.
 pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
     let mut tle: Option<(String, String)> = None;
     let mut fetched = std::time::Instant::now();
+    // when the pass was last computed, and when it has to be again
+    let mut pass_at: Option<std::time::Instant> = None;
+    let mut pass_due = RECOMPUTE;
     loop {
         if ctx.shutdown.is_cancelled() {
             return;
@@ -218,6 +301,7 @@ pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
                     tracing::info!("iss: TLE refreshed");
                     tle = Some(t);
                     fetched = std::time::Instant::now();
+                    pass_at = None;
                 }
                 Err(e) => {
                     tracing::warn!("iss: TLE fetch: {e:#}");
@@ -227,13 +311,13 @@ pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
                 }
             }
         }
-        let mut wait = RECOMPUTE;
-        match &tle {
-            // no TLE: stay silent so the role keeps `have: false` and renders
-            // its no-data icon rather than an empty ring
-            None => {}
-            Some((l1, l2)) => {
-                let now = chrono::Utc::now().timestamp();
+        let mut wait = TRACK_EVERY;
+        // no TLE: stay silent so the role keeps `have: false` and renders
+        // its no-data icon rather than an empty ring
+        if let Some((l1, l2)) = &tle {
+            let now = chrono::Utc::now().timestamp();
+            if pass_at.is_none_or(|at| at.elapsed() >= pass_due) {
+                pass_due = RECOMPUTE;
                 match next_pass(l1, l2, cfg.lat, cfg.lon, cfg.min_elevation, now) {
                     Ok(pass) => {
                         if let Some(p) = pass {
@@ -245,17 +329,26 @@ pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
                             );
                             // recompute right after the pass ends
                             let until_end = Duration::from_secs((p.end - now).max(1) as u64 + 5);
-                            wait = wait.min(until_end);
+                            pass_due = pass_due.min(until_end);
                         }
+                        pass_at = Some(std::time::Instant::now());
                         ctx.emit(Event::IssPass(pass));
                     }
                     Err(e) => tracing::warn!("iss: {e:#}"),
                 }
             }
+            // the pass first: the globe only shows once both are known
+            match ephemeris(l1, l2, cfg.lat, cfg.lon, now) {
+                Ok(track) => ctx.emit(Event::IssTrack(track)),
+                Err(e) => tracing::warn!("iss: track: {e:#}"),
+            }
+            if let Some(at) = pass_at {
+                wait = wait.min(pass_due.saturating_sub(at.elapsed()));
+            }
         }
         tokio::select! {
             _ = ctx.shutdown.cancelled() => return,
-            _ = tokio::time::sleep(wait) => {}
+            _ = tokio::time::sleep(wait.max(Duration::from_secs(1))) => {}
         }
     }
 }
@@ -322,5 +415,126 @@ mod tests {
         let obs = observer_ecef(52.37, 4.89);
         let up = [obs[0] * 1.06, obs[1] * 1.06, obs[2] * 1.06];
         assert!((topocentric_elevation(up, obs, 52.37, 4.89) - 90.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn the_ground_point_is_geodetic() {
+        let (lat, lon) = ground_point(observer_ecef(52.37, 4.89));
+        assert!((lat - 52.37).abs() < 1e-6 && (lon - 4.89).abs() < 1e-6);
+        // 400 km above it, the same point is underneath
+        let o = observer_ecef(-33.9, 151.2);
+        let (lat, lon) = ground_point([o[0] * 1.06, o[1] * 1.06, o[2] * 1.06]);
+        assert!(
+            (lat + 33.9).abs() < 0.15 && (lon - 151.2).abs() < 1e-6,
+            "{lat}"
+        );
+        let (lat, _) = ground_point([0.0, 0.0, 6_800.0]);
+        assert!((lat - 90.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_ephemeris_covers_an_hour_back_and_an_orbit_ahead() {
+        let (l1, l2) = parse_tle(TLE).unwrap();
+        let now = EPOCH + 3 * 3600;
+        let tr = ephemeris(&l1, &l2, 52.37, 4.89, now).unwrap();
+        assert_eq!((tr.t0, tr.step_secs), (now - 3600, 20));
+        assert_eq!(tr.points.len(), 481, "160 minutes in 20 s steps, both ends");
+        assert_eq!(tr.home, (52.37, 4.89));
+        assert!(tr.at(now - 3600).is_some() && tr.at(now + 6000).is_some());
+        assert!(tr.at(now + 6001).is_none());
+        // the track stays inside the orbit's inclination and reaches it
+        let max = tr.points.iter().map(|p| p.0.abs()).fold(0.0, f32::max);
+        assert!(max > 51.0 && max < 52.0, "{max}");
+        assert!(tr.points.iter().all(|p| p.1.abs() <= 180.0));
+        // consecutive points are 20 s of orbit apart: about 1.2° of arc
+        for w in tr.points.windows(2) {
+            let (a, b) = (
+                rackscreen_core::globe::unit(w[0].0 as f64, w[0].1 as f64),
+                rackscreen_core::globe::unit(w[1].0 as f64, w[1].1 as f64),
+            );
+            let arc = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+                .clamp(-1.0, 1.0)
+                .acos()
+                .to_degrees();
+            assert!(arc > 1.0 && arc < 1.4, "{arc}");
+        }
+        // the interpolated point is where SGP4 puts the station then
+        let t = now + 1234;
+        let r = position_teme(&l1, &l2, t).unwrap();
+        let (lat, lon) = ground_point(teme_to_ecef(r, gmst_rad(t as f64)));
+        let (ilat, ilon) = rackscreen_core::globe::lat_lon(tr.at(t).unwrap());
+        assert!((lat - ilat).abs() < 0.02 && (lon - ilon).abs() < 0.02);
+        // during a pass the track runs close by the observer
+        let pass = next_pass(&l1, &l2, 52.37, 4.89, 40.0, EPOCH)
+            .unwrap()
+            .expect("a high pass within a day");
+        let mid = (pass.start + pass.end) / 2;
+        let tr = ephemeris(&l1, &l2, 52.37, 4.89, mid).unwrap();
+        let (lat, lon) = rackscreen_core::globe::lat_lon(tr.at(mid).unwrap());
+        assert!(
+            (lat - 52.37).abs() < 5.0 && (lon - 4.89).abs() < 8.0,
+            "overhead at ({lat}, {lon})"
+        );
+    }
+
+    /// Every pass over Amsterdam in the fixture's first five days.
+    fn passes(days: i64) -> Vec<IssPass> {
+        let (l1, l2) = parse_tle(TLE).unwrap();
+        let mut out = Vec::new();
+        let mut from = EPOCH;
+        while from < EPOCH + days * 86_400 {
+            match next_pass(&l1, &l2, 52.37, 4.89, 10.0, from).unwrap() {
+                Some(p) => {
+                    from = p.end + 60;
+                    out.push(p);
+                }
+                None => from += HORIZON_SECS,
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_visible_window_is_the_dark_sunlit_stretch_above_ten_degrees() {
+        let (l1, l2) = parse_tle(TLE).unwrap();
+        let (el, k) = elements(&l1, &l2).unwrap();
+        let obs = observer_ecef(52.37, 4.89);
+        let all = passes(5);
+        assert!(all.len() > 15, "{} passes in five days", all.len());
+        let seen: Vec<_> = all.iter().filter(|p| p.vis.is_some()).collect();
+        assert!(!seen.is_empty(), "September evenings have visible passes");
+        assert!(seen.len() < all.len(), "daytime passes have none");
+        let holds = |t: i64| {
+            let r = propagate(&el, &k, t).unwrap();
+            let up = topocentric_elevation(teme_to_ecef(r, gmst_rad(t as f64)), obs, 52.37, 4.89);
+            up >= 10.0 && sun_elevation(52.37, 4.89, t) < -6.0 && sunlit(r, t)
+        };
+        for p in &all {
+            match p.vis {
+                Some((a, b)) => {
+                    assert!(a < b && b - a <= p.end - p.start + 10, "{p:?}");
+                    assert!(a >= p.start - 5 && b <= p.end + 5, "inside the 10° pass");
+                    assert!(holds(a) && holds(b - 5) && holds((a + b) / 2));
+                    assert!(!holds(a - 6) && !holds(b + 1), "and no longer: {p:?}");
+                }
+                None => {
+                    let mut t = p.start;
+                    while t <= p.end {
+                        assert!(!holds(t), "{p:?} is visible at {t}");
+                        t += 5;
+                    }
+                }
+            }
+            // a pass visible at its peak has a window around the peak
+            if p.visible {
+                assert!(p.vis.is_some(), "{p:?}");
+            }
+        }
+        // a higher threshold shortens the pass, not the window
+        let high = next_pass(&l1, &l2, 52.37, 4.89, 40.0, seen[0].start - 600).unwrap();
+        if let Some(h) = high.filter(|h| h.start < seen[0].end) {
+            let (a, b) = h.vis.expect("the same pass, still visible");
+            assert!(a <= h.start && b >= h.end.min(seen[0].vis.unwrap().1));
+        }
     }
 }

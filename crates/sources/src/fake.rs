@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rackscreen_core::electricity::Source;
 use rackscreen_core::event::{
-    App, AppHealth, AppSync, CiRun, CiStatus, CoverRef, Download, Event, IssPass, JfKind,
+    App, AppHealth, AppSync, CiRun, CiStatus, CoverRef, Download, Event, IssPass, IssTrack, JfKind,
     JfSession, JfStatus, LinkTarget, MusicSource, NodeLoad, Robustness, Torrent, Track,
 };
 use rackscreen_core::music::demo_cover;
@@ -472,7 +472,37 @@ impl FakeState {
             end: self.iss_start + ISS_PASS_SECS,
             max_elevation_deg: 62.0,
             visible: true,
+            vis: Some((self.iss_start, self.iss_start + ISS_PASS_SECS)),
         }))
+    }
+
+    /// A circular orbit at the ISS's inclination and period that crosses
+    /// the rack in the middle of the demo pass: the globe's ground track.
+    fn iss_track(&self) -> Event {
+        use std::f64::consts::{FRAC_PI_2, TAU};
+        let now = self.unix_now();
+        let overhead = self.iss_start + ISS_PASS_SECS / 2;
+        let inc = 51.6f64.to_radians();
+        let t0 = now - crate::iss::TRACK_BACK_SECS;
+        let step = crate::iss::TRACK_STEP_SECS as i64;
+        let n = (crate::iss::TRACK_BACK_SECS + crate::iss::TRACK_AHEAD_SECS) / step;
+        let points = (0..=n)
+            .map(|i| {
+                let dt = (t0 + i * step - overhead) as f64;
+                // the argument of latitude; a quarter turn is the northern peak
+                let u = FRAC_PI_2 + dt / 5_560.0 * TAU;
+                let lat = (inc.sin() * u.sin()).asin().to_degrees();
+                let along = (inc.cos() * u.sin()).atan2(u.cos()) - FRAC_PI_2;
+                let lon = FAKE_LON + (along - dt / 86_164.0 * TAU).to_degrees();
+                (lat as f32, ((lon + 540.0).rem_euclid(360.0) - 180.0) as f32)
+            })
+            .collect();
+        Event::IssTrack(IssTrack {
+            t0,
+            step_secs: crate::iss::TRACK_STEP_SECS,
+            points,
+            home: (FAKE_LAT as f32, FAKE_LON as f32),
+        })
     }
 
     fn github(&self) -> Event {
@@ -856,6 +886,7 @@ impl FakeState {
             self.rain(),
             self.sky(),
             self.iss(),
+            self.iss_track(),
             self.github(),
             self.ups(),
             self.net(),
@@ -1040,6 +1071,7 @@ impl FakeState {
         if self.ticks.is_multiple_of(60) {
             out.push(self.sky());
             out.push(self.iss());
+            out.push(self.iss_track());
             out.push(self.github());
         }
         out
@@ -1306,7 +1338,7 @@ impl FakeState {
             }
             FakeCmd::IssPassNow => {
                 self.iss_start = self.unix_now();
-                vec![self.iss()]
+                vec![self.iss(), self.iss_track()]
             }
         }
     }
@@ -1391,6 +1423,21 @@ mod tests {
             e,
             Event::IssPass(Some(p)) if p.start == 1_788_782_400 + 42 * 60 && p.visible
         )));
+        // the ground track covers now and crosses the rack mid-pass
+        let track = evs
+            .iter()
+            .find_map(|e| match e {
+                Event::IssTrack(t) => Some(t),
+                _ => None,
+            })
+            .expect("the globe's ephemeris");
+        assert!(track.at(1_788_782_400).is_some());
+        let (lat, lon) =
+            rackscreen_core::globe::lat_lon(track.at(1_788_782_400 + 45 * 60).unwrap());
+        assert!(
+            (lat - 51.6).abs() < 0.1 && (lon - FAKE_LON).abs() < 0.1,
+            "({lat}, {lon})"
+        );
         assert!(evs.iter().any(
             |e| matches!(e, Event::GithubActivity { days } if days.len() == 30 && days[29].1 == 28)
         ));
@@ -1498,7 +1545,8 @@ mod tests {
         ));
         assert!(matches!(
             s.command(FakeCmd::IssPassNow).as_slice(),
-            [Event::IssPass(Some(p))] if p.start == s.unix_now()
+            [Event::IssPass(Some(p)), Event::IssTrack(t)]
+                if p.start == s.unix_now() && t.at(s.unix_now()).is_some()
         ));
     }
 
