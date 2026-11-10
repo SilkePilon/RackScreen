@@ -320,9 +320,11 @@ fn full_model() -> Model {
             end: UNIX + 20 * 60 + 32,
             max_elevation_deg: 62.0,
             visible: true,
+            vis: None,
         })),
         0.0,
     );
+    m.apply(Event::IssTrack(iss_track(UNIX)), 0.0);
     let days = (0..30)
         .map(|i| (format!("d{i}"), [5u32, 12, 30, 0, 8, 25, 43, 28][i % 8]))
         .collect();
@@ -594,6 +596,89 @@ fn ha_temp(v: f32) -> HaEntity {
     }
 }
 
+const ISS_TLE: &str = include_str!("../../sources/tests/fixtures/iss.tle");
+
+/// The ISS's real ground track around `unix`, from the sources' fixture TLE.
+fn iss_track(unix: i64) -> rackscreen_core::event::IssTrack {
+    let (l1, l2) = rackscreen_sources::iss::parse_tle(ISS_TLE).unwrap();
+    rackscreen_sources::iss::ephemeris(&l1, &l2, 52.37, 4.89, unix).unwrap()
+}
+
+/// The ISS globe beyond its daytime countdown (`p2_iss`): the first pass
+/// over Amsterdam that can be seen by eye, half way through its visible
+/// stretch (night over Europe, the home dot), and no pass at all.
+#[test]
+fn iss_globe_states() {
+    let (l1, l2) = rackscreen_sources::iss::parse_tle(ISS_TLE).unwrap();
+    let mut from = UNIX;
+    let pass = loop {
+        let p = rackscreen_sources::iss::next_pass(&l1, &l2, 52.37, 4.89, 10.0, from)
+            .unwrap()
+            .expect("a pass every day");
+        if p.vis.is_some() {
+            break p;
+        }
+        from = p.end + 60;
+    };
+    let (a, b) = pass.vis.unwrap();
+    let mid = (a + b) / 2;
+    let mut m = full_model();
+    m.set_unix_now(mid);
+    m.apply(Event::IssPass(Some(pass)), 0.0);
+    m.apply(Event::IssTrack(iss_track(mid)), 0.0);
+    let during = render(&m, Role::Iss, 120.0);
+    check("p2_iss_pass", &during);
+    // an hour and a half earlier: the countdown in h:mm:ss, the ring empty
+    m.set_unix_now(pass.start - 5430);
+    m.apply(Event::IssTrack(iss_track(pass.start - 5430)), 0.0);
+    check("p2_iss_far", &render(&m, Role::Iss, 120.0));
+    m.apply(Event::IssPass(None), 0.0);
+    check("p2_iss_nopass", &render(&m, Role::Iss, 120.0));
+    // the home dot is white, where Amsterdam is: only during the pass
+    let white = |px: &Pixmap| {
+        (100..140)
+            .flat_map(|y| (100..200).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixel(px, x, y) == (255, 255, 255))
+            .count()
+    };
+    assert!(white(&during) > 20, "the station and the dot");
+}
+
+/// The globe is rasterised once per set of parameters: a second frame of
+/// the same second, a fade and the other side of a transition reuse it.
+#[test]
+fn the_globe_raster_is_reused_while_its_parameters_are_equal() {
+    let mut m = full_model();
+    let mut r = Renderer::new().unwrap();
+    let mut px = new_pixmap();
+    let mut ui = ScreenUi::new();
+    let first = m.scene_for_role(Role::Iss, 120.0, &mut ui);
+    r.render(&first, &mut px);
+    assert_eq!(r.globe_rasters(), 1);
+    let fresh = px.clone();
+    // the same second again, and darkened by a transition
+    let mut faded = m.scene_for_role(Role::Iss, 120.5, &mut ui);
+    assert_eq!(faded, first);
+    r.render(&faded, &mut px);
+    assert!(px.data() == fresh.data());
+    faded.fade = 0.4;
+    r.render(&faded, &mut px);
+    // another role in between, as in a crossfade
+    r.render(
+        &m.scene_for_role(Role::Cpu, 120.5, &mut ScreenUi::new()),
+        &mut px,
+    );
+    r.render(&first, &mut px);
+    assert!(px.data() == fresh.data());
+    assert_eq!(r.globe_rasters(), 1, "one raster for all of them");
+    // the next second moves the globe: one more
+    m.set_unix_now(UNIX + 1);
+    let next = m.scene_for_role(Role::Iss, 121.0, &mut ui);
+    r.render(&next, &mut px);
+    r.render(&next, &mut px);
+    assert_eq!(r.globe_rasters(), 2);
+}
+
 /// The printer's other states, and the two Home Assistant entity kinds.
 #[test]
 fn printer_and_home_assistant() {
@@ -817,10 +902,7 @@ fn warning_and_alternate_states() {
     );
     t.tick(0.0);
     check("p2_health_torrent", &render(&t, Role::Health, 120.0));
-    // the ISS overhead and a dry nowcast
-    let mut i = full_model();
-    i.set_unix_now(UNIX + 16 * 60);
-    check("p2_iss_pass", &render(&i, Role::Iss, 120.0));
+    // a dry nowcast
     let mut d = full_model();
     d.apply(
         Event::Rain {
@@ -1394,7 +1476,11 @@ fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
     let mut bad = Vec::new();
     for d in &s.items {
         let (what, color, alpha, min) = match d {
-            D::Clear(_) | D::World { .. } | D::Image { .. } | D::Cover { .. } => continue,
+            D::Clear(_) | D::World { .. } | D::Image { .. } | D::Cover { .. } | D::Globe { .. } => {
+                continue
+            }
+            D::Dashed { color, alpha, .. } => ("dashed", *color, *alpha, 0x2A),
+            D::IconOutline { color, alpha, .. } => ("outline", *color, *alpha, 0x2A),
             D::Arc { color, alpha, .. } => ("arc", *color, *alpha, 0x2A),
             D::RoundRect { color, alpha, .. } => ("rect", *color, *alpha, 0x2A),
             D::Polygon { color, alpha, .. } => ("polygon", *color, *alpha, 0x2A),

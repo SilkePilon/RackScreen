@@ -174,3 +174,127 @@ fn pipeline_per_frame() {
     println!("{:<12} {pushed}/{ITERATIONS}", "changed");
     assert!(pushed > 0, "the cpu screen never changed");
 }
+
+/// The ISS globe: decoding its maps (once per process), one raster of the
+/// globe alone, and a whole frame of the iss screen in a new second (globe,
+/// track, station, ring, pill, then the diff and pack of `flush`). The
+/// screen changes once a second, so this is its cost per second. The Pi's
+/// Cortex-A53 is 8 to 12 times slower than a desktop core.
+#[test]
+#[ignore]
+fn globe_raster() {
+    use rackscreen_core::event::{IssPass, IssTrack};
+    use rackscreen_render::frame::{brightness_lut, dirty_rects, pack_oriented, Orient};
+    const UNIX: i64 = 1_788_782_400;
+    let t = Instant::now();
+    let bytes = rackscreen_render::globe::map_bytes();
+    println!(
+        "{:<14} {:.3} ms, {} KB held",
+        "map decode",
+        t.elapsed().as_secs_f64() * 1000.0,
+        bytes / 1024
+    );
+    let mut px = new_pixmap();
+    // views round the Earth and the day: coasts, oceans, the terminator
+    let views: Vec<(f32, f32, f32, f32)> = (0..ITERATIONS)
+        .map(|i| {
+            let f = i as f32;
+            (
+                28.0 * (f * 0.37).sin(),
+                f * 7.3 - 180.0,
+                20.0 * (f * 0.11).cos(),
+                180.0 - f * 4.1,
+            )
+        })
+        .collect();
+    let mut times: Vec<f64> = views
+        .iter()
+        .map(|v| {
+            let t = Instant::now();
+            rackscreen_render::globe::draw_globe(&mut px, v.0, v.1, v.2, v.3, 95.0);
+            std::hint::black_box(px.data());
+            t.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    let mean = times.iter().sum::<f64>() / times.len() as f64;
+    println!(
+        "{:<14} {mean:.3} ms mean, {:.3} best, {:.3} worst",
+        "globe raster",
+        times[0],
+        times[times.len() - 1]
+    );
+
+    // the whole screen, one second apart: a 51.6° orbit for the track
+    let inc = 51.6f64.to_radians();
+    let points = (0..481)
+        .map(|i| {
+            let t = i as f64 * 20.0;
+            let u = t / 5_560.0 * std::f64::consts::TAU;
+            let lat = (inc.sin() * u.sin()).asin();
+            let lon = (inc.cos() * u.sin()).atan2(u.cos()) - t / 86_164.0 * std::f64::consts::TAU;
+            (
+                lat.to_degrees() as f32,
+                ((lon.to_degrees() + 540.0).rem_euclid(360.0) - 180.0) as f32,
+            )
+        })
+        .collect();
+    let mut m = bench_model();
+    m.apply(
+        Event::IssPass(Some(IssPass {
+            start: UNIX + 3000,
+            end: UNIX + 3400,
+            max_elevation_deg: 62.0,
+            visible: true,
+            vis: None,
+        })),
+        0.0,
+    );
+    m.apply(
+        Event::IssTrack(IssTrack {
+            t0: UNIX - 3600,
+            step_secs: 20,
+            points,
+            home: (52.37, 4.89),
+        }),
+        0.0,
+    );
+    let mut r = Renderer::new().unwrap();
+    let orient = Orient::new(270, false);
+    let lut = brightness_lut(1.0);
+    let (mut cur, mut prev) = (new_pixmap(), new_pixmap());
+    let mut ui = ScreenUi::new();
+    let (mut scene, mut render, mut flush, mut still) = (0.0, 0.0, 0.0, 0.0);
+    for i in 0..2 * ITERATIONS {
+        let now = i as f64;
+        m.set_unix_now(UNIX + i as i64);
+        let t0 = Instant::now();
+        let s = m.scene_for_role(Role::Iss, now, &mut ui);
+        let t1 = Instant::now();
+        r.render(&s, &mut cur);
+        let t2 = Instant::now();
+        let rects: Vec<_> = dirty_rects(&prev, &cur)
+            .into_iter()
+            .map(|rc| orient.map_rect(rc))
+            .collect();
+        std::hint::black_box(pack_oriented(&cur, &orient, &rects, &lut));
+        std::mem::swap(&mut prev, &mut cur);
+        let t3 = Instant::now();
+        // a later frame of the same second: the scene is built and compared
+        let again = m.scene_for_role(Role::Iss, now + 0.5, &mut ui);
+        assert!(again == s, "the screen is still within a second");
+        let t4 = Instant::now();
+        if i >= ITERATIONS {
+            scene += (t1 - t0).as_secs_f64() * 1000.0;
+            render += (t2 - t1).as_secs_f64() * 1000.0;
+            flush += (t3 - t2).as_secs_f64() * 1000.0;
+            still += (t4 - t3).as_secs_f64() * 1000.0;
+        }
+    }
+    let n = ITERATIONS as f64;
+    println!("{:<14} {:.3} ms", "iss scene", scene / n);
+    println!("{:<14} {:.3} ms", "iss render", render / n);
+    println!("{:<14} {:.3} ms", "iss flush", flush / n);
+    println!("{:<14} {:.4} ms", "skipped frame", still / n);
+    assert_eq!(r.globe_rasters(), 2 * ITERATIONS, "one raster per second");
+}
