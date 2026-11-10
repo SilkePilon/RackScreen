@@ -24,7 +24,8 @@ showable role draws the ISS globe screen instead.
      innertube client (no JS player needed) and the visitor data; read
      `streamingData.hlsManifestUrl`.
   3. GET the master playlist, pick the 640×360 H.264 variant (itag 230,
-     ~1 Mbit/s); its media playlist lists 5 s MPEG-TS segments.
+     ~1 Mbit/s); its media playlist lists 5 s MPEG-TS segments (video + AAC audio muxed;
+     the audio PID is dropped in the demuxer).
   URLs expire after ~6 h: re-resolve at 5 h or on HTTP 403/404.
 - On failure: back off 1/5/15/60 min; the role is unavailable meanwhile.
 
@@ -49,16 +50,27 @@ One task in `sources` (async fetch) feeding one decode thread:
 
 ## Live detection
 
-Per decoded frame (cheap, on a few dozen pixels of the full 640×360 picture,
-YUV planes directly):
+Findings from the stream (2026-11-11): the camera-switch slate keeps the HUD
+bar and the red LIVE badge (the teal "sen / SWITCHING CAMERA" card replaces
+only the picture), so HUD and badge alone cannot spot it. Night frames are
+near-black but also carry the HUD and a "LIVE · Night" label.
 
-- **HUD present**: the bottom info bar (y ≥ 300) is a dark translucent band
-  with the round mini-globe at x ≈ 20..90; live and replay have it, slate and
-  promos do not.
-- **Badge colour** at (18..62, 15..32): red = LIVE, orange = REPLAY.
-- **Slate**: teal gradient + large white "sen" in the middle.
-- State = Live only when HUD present and badge red, debounced (3 consecutive
-  checks at 1/s to change state).
+Per decoded frame (cheap, a few dozen to a few hundred samples of the full
+640×360 picture, YUV planes directly, at most once per second):
+
+- **Slate**: compare a coarse signature of the picture area above the HUD
+  (e.g. 16×9 cell means of Y/Cb/Cr) with the slate signature taken from the
+  `sen_slate.ts` fixture; the slate is a static teal gradient with a large
+  white "sen" in the middle. Close = slate.
+- **Badge colour** at (18..62, 15..32): red (Cr high, Cb ≈ 105+) = LIVE;
+  orange (Cr high, Cb low) or missing = not live (replay, promos).
+- **HUD present**: the bottom info bar (y ≥ 300) with the round mini-globe at
+  x ≈ 20..90; missing = promo/other content.
+- **Dark**: mean luma of the crop area very low = night (backup for the
+  orbit prediction).
+- State = Live only when not slate, badge red, HUD present and not dark;
+  debounced (2 consecutive checks to become Live, 1 to become not-live so
+  a slate is left quickly).
 - **Night**: predicted from the ISS ephemeris and sun (ISS in Earth's
   shadow), with a 45 s margin for the stream delay; no fetching at night.
 
