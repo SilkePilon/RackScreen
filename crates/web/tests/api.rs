@@ -303,6 +303,24 @@ async fn config_round_trip_masks_merges_and_asks_for_a_restart() {
     )
     .await;
     assert_eq!(body["ok"], true, "{body}");
+    // a role with its own time: accepted in range, refused out of it
+    let mut timed = cfg.clone();
+    timed["screens"][0]["roles"] = json!(["cpu", { "role": "mem", "secs": 30 }]);
+    let validate = |config: &Value| {
+        post_json(
+            "POST",
+            "/api/config/validate",
+            json!({ "config": config }),
+            true,
+            None,
+        )
+    };
+    let (_, _, body) = send(&f.app, validate(&timed)).await;
+    assert_eq!(body["ok"], true, "{body}");
+    timed["screens"][0]["roles"][1]["secs"] = json!(1);
+    let (_, _, body) = send(&f.app, validate(&timed)).await;
+    assert_eq!(body["ok"], false, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("mem"), "{body}");
     // the web block: a process restart, and the password takes effect
     let mut web = cfg.clone();
     web["web"]["password"] = json!("newpw");
