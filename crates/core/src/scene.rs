@@ -133,6 +133,8 @@ pub enum Drawable {
         frames: crate::gif::GifRef,
         frame: u16,
     },
+    /// A live video picture, copied over the whole screen.
+    Video(crate::video::VideoRef),
 }
 
 /// A shared world frame, compared by identity: all screens of one tick hold
@@ -217,12 +219,18 @@ impl From<Scene> for ScreenFrame {
 }
 
 pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
+    // `sen` keeps the widget state of whichever screen it draws (its own or
+    // the ISS globe's)
+    if role == Role::Sen {
+        return model.sen_scene(now, ui);
+    }
     ui.for_role(role);
     match role {
         Role::PowerMix => crate::p2::roles::power_mix::power_mix_scene(model, now, ui),
         Role::Music => crate::p2::roles::music::music_scene(model, now, ui),
         Role::Iss => crate::p2::roles::iss::iss_scene(model, now, ui),
         Role::Gif(index) => model.gif_scene(index, now, ui),
+        // `sen` returned above
         _ => {
             let screen = crate::p2::roles::screen(model, role, now)
                 .expect("every other role has a P2 builder");

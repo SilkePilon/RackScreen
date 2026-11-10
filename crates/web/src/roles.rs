@@ -23,6 +23,7 @@ pub fn group(role: Role) -> &'static str {
     match role {
         Role::PowerMix | Role::Renewable => "Energy",
         r if r.is_sky() => "Sky",
+        Role::Sen => "Sky",
         Role::GhActivity | Role::Ci => "GitHub",
         Role::Media | Role::Jellyfin | Role::Music => "Media",
         Role::Gif(_) => "GIFs",
@@ -89,6 +90,9 @@ pub fn description(role: Role) -> &'static str {
         Role::Ha(_) => {
             "A Home Assistant entity: a number with its sparkline, or a state such as on, open or home."
         }
+        Role::Sen => {
+            "Sen's live video of Earth from the ISS. Shown only while it is live and in daylight; skipped otherwise."
+        }
     }
 }
 
@@ -110,6 +114,15 @@ pub fn needs(cfg: &Config, role: Role) -> Option<&'static str> {
                     Role::Iss => (!cfg.iss.enabled).then_some("ISS on"),
                     _ => None,
                 }
+            }
+        }
+        // the stream needs nothing, but the night prediction and the globe
+        // it falls back to come from the ISS source
+        Role::Sen => {
+            if cfg.location().is_none() {
+                Some("Location")
+            } else {
+                (!cfg.iss.enabled).then_some("ISS on")
             }
         }
         Role::GhActivity | Role::Ci => {
@@ -241,6 +254,12 @@ mod tests {
         cfg.location.lon = Some(2.0);
         assert_eq!(needs(&cfg, Role::Weather), Some("Weather on"));
         assert_eq!(needs(&cfg, Role::Sun), None);
+        assert_eq!(by("sen").title, "Sen live");
+        assert_eq!(by("sen").group, "Sky");
+        assert_eq!(by("sen").needs, Some("Location"));
+        assert_eq!(needs(&cfg, Role::Sen), Some("ISS on"));
+        cfg.iss.enabled = true;
+        assert_eq!(needs(&cfg, Role::Sen), None);
         cfg.weather.enabled = true;
         assert_eq!(needs(&cfg, Role::Weather), None);
     }

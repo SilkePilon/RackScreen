@@ -5,6 +5,7 @@ use rackscreen_core::event::CoverRef;
 use rackscreen_core::gif::GifFrames;
 use rackscreen_core::scene::{Drawable, Scene};
 use rackscreen_core::shows::world::{WorldFrame, SCALE, WORLD_H};
+use rackscreen_core::video::VideoFrame;
 use tiny_skia::{FillRule, FilterQuality, Paint, Pattern, Pixmap, SpreadMode, Transform};
 
 use crate::icons::IconCache;
@@ -176,6 +177,7 @@ impl Painter {
             Drawable::Clear(c) => px.fill(skia_color(*c, 1.0)),
             Drawable::World { frame, x0 } => blit_world(px, &frame.0, *x0),
             Drawable::Image { frames, frame } => blit_image(px, &frames.0, *frame),
+            Drawable::Video(frame) => blit_video(px, &frame.0),
             Drawable::Cover {
                 cover,
                 x,
@@ -348,6 +350,16 @@ fn blit_world(px: &mut Pixmap, world: &WorldFrame, x0: u32) {
 /// left alone.
 fn blit_image(px: &mut Pixmap, frames: &GifFrames, frame: u16) {
     frames.blit(frame as usize, px.data_mut());
+}
+
+/// Copy a video picture over the whole pixmap. Pictures are opaque RGBA of
+/// the panel's size, which is what the pixmap holds (premultiplied by an
+/// alpha of 255); a pixmap of any other size (never built) is left alone.
+fn blit_video(px: &mut Pixmap, frame: &VideoFrame) {
+    let dst = px.data_mut();
+    if dst.len() == frame.rgba().len() {
+        dst.copy_from_slice(frame.rgba());
+    }
 }
 
 #[cfg(test)]
@@ -568,6 +580,38 @@ mod tests {
             blit_world_by_pixel(&mut b, &world, x0);
             assert!(a.data() == b.data(), "x0 {x0}");
         }
+    }
+
+    #[test]
+    fn video_copies_the_picture_over_everything() {
+        use rackscreen_core::video::{VideoFrame, VideoRef};
+        use std::sync::Arc;
+        let mut frame = VideoFrame::new();
+        for (i, p) in frame
+            .rgba_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .enumerate()
+        {
+            *p = [(i % 251) as u8, (i % 13) as u8, 77, 255];
+        }
+        let frame = VideoRef(Arc::new(frame));
+        let mut r = Renderer::new().unwrap();
+        let mut px = new_pixmap();
+        px.fill(tiny_skia::Color::WHITE);
+        // the scene is the picture alone: it needs no clear under it
+        let s = Scene {
+            items: vec![Drawable::Video(frame.clone())],
+            base_len: 0,
+            fade: 1.0,
+        };
+        r.render(&s, &mut px);
+        assert_eq!(px.data(), frame.0.rgba());
+        // a pixmap of another size is left alone
+        let mut small = Pixmap::new(8, 8).unwrap();
+        r.render(&s, &mut small);
+        assert!(small.data().iter().all(|b| *b == 0));
     }
 
     #[test]

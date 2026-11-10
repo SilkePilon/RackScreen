@@ -61,6 +61,7 @@ icons!(
     "ms-bedtime",
     "ms-gif_box",
     "ms-view_in_ar",
+    "ms-videocam",
     "ms-home",
     "ms-humidity_percentage",
     "ms-water_drop",

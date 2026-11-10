@@ -70,6 +70,8 @@ impl crate::model::Model {
             Role::Printer => !self.printer().have,
             Role::Ha(i) => !self.ha(i).is_some_and(|h| h.have),
             Role::Gif(i) => !matches!(self.gif(i), GifState::Ready(_)),
+            // without a picture it draws the ISS globe, with that role's states
+            Role::Sen => false,
         }
     }
 
@@ -158,10 +160,31 @@ impl crate::model::Model {
         }
     }
 
+    /// The SEN role: the live picture over the whole screen, nothing on top.
+    /// Without one (the stream is not live, and no other role could take the
+    /// screen) it is the ISS globe screen.
+    pub(crate) fn sen_scene(&self, now: Secs, ui: &mut ScreenUi) -> Scene {
+        match self.sen_frame() {
+            Some(frame) => {
+                ui.for_role(Role::Sen);
+                // the picture covers the screen: no clear under it
+                Scene {
+                    items: vec![Drawable::Video(frame.clone())],
+                    base_len: 0,
+                    fade: 1.0,
+                }
+            }
+            None => self.scene_for_role(Role::Iss, now, ui),
+        }
+    }
+
     /// Role scene without a transition (tests, goldens, calibrate).
     pub fn scene_for_role(&self, role: Role, now: Secs, ui: &mut ScreenUi) -> Scene {
         if let Role::Gif(index) = role {
             return self.gif_scene(index, now, ui);
+        }
+        if role == Role::Sen {
+            return self.sen_scene(now, ui);
         }
         if self.wants_connecting(role) {
             return connecting_scene(role.icon(), ui, now);
@@ -815,5 +838,223 @@ mod tests {
         let mut bare = Model::new(Thresholds::default());
         bare.apply(Event::IssPass(None), 0.0);
         assert!(!globe(&scene(&bare)));
+    }
+    mod sen {
+        use super::*;
+        use crate::event::{IssTrack, SenEvent};
+        use crate::model::{SEN_HOLD_SECS, SEN_WARMUP_SECS};
+        use crate::screens::Entry;
+        use crate::video::{VideoFrame, VideoRef};
+        use std::sync::Arc;
+
+        const UNIX: i64 = 1_790_000_000;
+
+        fn frame() -> VideoRef {
+            VideoRef(Arc::new(VideoFrame::new()))
+        }
+
+        /// A station that hangs over one spot: under the sun, or opposite it.
+        fn track(day: bool) -> IssTrack {
+            let (lat, lon) = crate::globe::subsolar(UNIX);
+            let point = if day {
+                (lat as f32, lon as f32)
+            } else {
+                (-lat as f32, (lon + 180.0) as f32)
+            };
+            IssTrack {
+                t0: UNIX - 3600,
+                step_secs: 20,
+                points: vec![point; 481],
+                home: (52.0, 5.0),
+            }
+        }
+
+        fn model(roles: &[(Role, Secs)]) -> Model {
+            let mut m = Model::new(Thresholds::default());
+            m.set_unix_now(UNIX);
+            m.apply(Event::IssTrack(track(true)), 0.0);
+            m.apply(Event::IssPass(None), 0.0);
+            m.set_screen_entries(vec![roles
+                .iter()
+                .map(|(r, s)| Entry::new(*r, *s))
+                .collect()]);
+            m
+        }
+
+        /// Frames at 15 fps from `from` to `to`, ticking the model at 30 Hz.
+        fn stream(m: &mut Model, from: Secs, to: Secs, frames: bool) {
+            let mut t = from;
+            let mut n = 0;
+            while t < to {
+                if frames && n % 2 == 0 {
+                    m.apply(Event::Sen(SenEvent::Frame(frame())), t);
+                }
+                m.tick(t);
+                n += 1;
+                t = from + n as f64 / 30.0;
+            }
+        }
+
+        fn video_of(s: &Scene) -> Option<VideoRef> {
+            match s.items.as_slice() {
+                [Drawable::Video(f)] => Some(f.clone()),
+                _ => None,
+            }
+        }
+
+        fn has_globe(s: &Scene) -> bool {
+            s.items.iter().any(|d| matches!(d, Drawable::Globe { .. }))
+        }
+
+        #[test]
+        fn sen_is_available_only_while_live_with_fresh_frames_by_day() {
+            let mut m = model(&[(Role::Cpu, 10.0), (Role::Sen, 10.0)]);
+            assert!(!m.role_available(Role::Sen), "nothing came yet");
+            assert!(Role::ALL
+                .iter()
+                .all(|r| *r == Role::Sen || m.role_available(*r)));
+            let f = frame();
+            m.apply(Event::Sen(SenEvent::Frame(f.clone())), 1.0);
+            m.tick(1.0);
+            assert!(!m.role_available(Role::Sen), "a frame, but not live");
+            m.apply(Event::Sen(SenEvent::Live(true)), 1.0);
+            assert!(m.role_available(Role::Sen));
+            assert_eq!(m.sen_frame(), Some(&f));
+            // the frames stop coming: not available once the last is stale
+            m.tick(1.0 + SEN_HOLD_SECS + 0.1);
+            assert!(!m.role_available(Role::Sen));
+            assert_eq!(m.sen_frame(), None);
+            m.apply(Event::Sen(SenEvent::Frame(frame())), 3.0);
+            m.tick(3.0);
+            assert!(m.role_available(Role::Sen), "they came back");
+            // the stream leaves live footage
+            m.apply(Event::Sen(SenEvent::Live(false)), 3.1);
+            assert!(!m.role_available(Role::Sen));
+            assert!(m.sen_frame().is_some(), "the last picture is still there");
+            // the station goes into the Earth's shadow
+            m.apply(Event::Sen(SenEvent::Live(true)), 3.2);
+            assert!(m.role_available(Role::Sen));
+            m.apply(Event::IssTrack(track(false)), 3.2);
+            assert!(!m.role_available(Role::Sen));
+            // stopped: nothing is held
+            m.apply(Event::Sen(SenEvent::Stopped), 3.3);
+            assert_eq!(m.sen(), &crate::model::SenState::default());
+        }
+
+        #[test]
+        fn the_stream_is_wanted_shortly_before_the_slot_and_while_shown() {
+            let mut m = model(&[(Role::Cpu, 20.0), (Role::Sen, 20.0)]);
+            m.tick(0.0);
+            assert!(!m.sen_wanted(0.0));
+            assert!(!m.sen_wanted(20.0 - SEN_WARMUP_SECS - 0.5));
+            assert!(m.sen_wanted(20.0 - SEN_WARMUP_SECS + 0.5), "warming up");
+            // the stream goes live in time: the screen changes to it
+            stream(&mut m, 12.5, 14.0, true);
+            m.apply(Event::Sen(SenEvent::Live(true)), 14.0);
+            stream(&mut m, 14.0, 21.0, true);
+            assert_eq!(m.current_role(0), Role::Sen);
+            assert!(m.sen_wanted(21.0), "on screen");
+            // and back to cpu after its dwell; then it is not wanted for a while
+            stream(&mut m, 21.0, 42.0, true);
+            assert_eq!(m.current_role(0), Role::Cpu);
+            assert!(!m.sen_wanted(42.0));
+        }
+
+        #[test]
+        fn a_stream_that_is_not_live_at_its_slot_is_skipped() {
+            let mut m = model(&[(Role::Cpu, 10.0), (Role::Sen, 10.0), (Role::Mem, 10.0)]);
+            assert!(m.sen_wanted(5.0), "it would be next");
+            // it runs but shows the slate: no frames, not live
+            stream(&mut m, 0.0, 11.0, false);
+            assert_eq!(m.current_role(0), Role::Mem, "sen was skipped");
+            assert!(!m.sen_wanted(11.0), "mem's dwell has just begun");
+        }
+
+        #[test]
+        fn sen_leaves_the_screen_as_soon_as_it_stops_being_live() {
+            let mut m = model(&[(Role::Sen, 60.0), (Role::Cpu, 10.0)]);
+            m.apply(Event::Sen(SenEvent::Live(true)), 0.0);
+            stream(&mut m, 0.0, 5.0, true);
+            assert_eq!(m.current_role(0), Role::Sen);
+            let mut ui = ScreenUi::new();
+            assert!(video_of(&m.scene(0, 5.0, &mut ui)).is_some());
+            assert!(m.screen(0).unwrap().transition(5.0).is_none());
+            // the slate comes up 5 s into a 60 s dwell
+            m.apply(Event::Sen(SenEvent::Live(false)), 5.0);
+            m.tick(5.0);
+            assert!(
+                m.screen(0).unwrap().transition(5.0).is_some(),
+                "leaving now"
+            );
+            // it fades out from the last picture, not from the globe
+            let s = m.scene(0, 5.1, &mut ui);
+            assert!(video_of(&s).is_some());
+            assert!(s.fade < 1.0);
+            stream(&mut m, 5.0, 6.0, false);
+            assert_eq!(m.current_role(0), Role::Cpu);
+            // while cpu shows and sen is not live, cpu stays past its dwell
+            stream(&mut m, 6.0, 30.0, false);
+            assert_eq!(m.current_role(0), Role::Cpu);
+        }
+
+        #[test]
+        fn a_screen_with_only_sen_shows_the_globe_until_the_stream_is_live() {
+            let mut m = model(&[(Role::Sen, 30.0)]);
+            let mut ui = ScreenUi::new();
+            m.tick(0.0);
+            assert!(m.sen_wanted(0.0), "it keeps looking for live footage");
+            let s = m.scene(0, 0.0, &mut ui);
+            assert!(has_globe(&s) && video_of(&s).is_none());
+            m.apply(Event::Sen(SenEvent::Live(true)), 1.0);
+            let f = frame();
+            m.apply(Event::Sen(SenEvent::Frame(f.clone())), 1.0);
+            m.tick(1.0);
+            let s = m.scene(0, 1.0, &mut ui);
+            assert_eq!(video_of(&s), Some(f), "the picture and nothing else");
+            assert_eq!(s.base_len, 0);
+            // the same frame again is the same scene: the workers skip it
+            assert_eq!(m.scene(0, 1.03, &mut ui), s);
+            // not live any more: the globe is back once the picture is stale
+            m.apply(Event::Sen(SenEvent::Live(false)), 2.0);
+            m.tick(1.0 + SEN_HOLD_SECS + 0.1);
+            assert!(has_globe(&m.scene(0, 3.0, &mut ui)));
+            // on the night side the stream is not wanted at all
+            m.apply(Event::IssTrack(track(false)), 3.0);
+            assert!(!m.sen_wanted(3.0));
+            assert!(has_globe(&m.scene(0, 3.0, &mut ui)));
+        }
+
+        #[test]
+        fn the_night_ends_a_stream_delay_after_the_station_leaves_the_shadow() {
+            use crate::model::SEN_STREAM_DELAY_SECS;
+            // in shadow until UNIX, sunlit after
+            let (lat, lon) = crate::globe::subsolar(UNIX);
+            let mut tr = track(true);
+            for (i, p) in tr.points.iter_mut().enumerate() {
+                if tr.t0 + i as i64 * 20 < UNIX {
+                    *p = (-lat as f32, (lon + 180.0) as f32);
+                }
+            }
+            let mut m = model(&[(Role::Sen, 30.0)]);
+            m.apply(Event::IssTrack(tr), 0.0);
+            m.set_unix_now(UNIX - 100);
+            assert!(!m.sen_daylight());
+            m.set_unix_now(UNIX + SEN_STREAM_DELAY_SECS - 25);
+            assert!(!m.sen_daylight(), "the stream still shows the night");
+            m.set_unix_now(UNIX + SEN_STREAM_DELAY_SECS + 25);
+            assert!(m.sen_daylight());
+            // without an ephemeris the picture decides
+            let bare = Model::new(Thresholds::default());
+            assert!(bare.sen_daylight());
+        }
+
+        #[test]
+        fn without_iss_data_the_fallback_is_the_iss_no_data_screen() {
+            let mut m = Model::new(Thresholds::default());
+            m.set_screen_entries(vec![vec![Entry::new(Role::Sen, 30.0)]]);
+            let s = for_role(&m, Role::Sen, 0.0);
+            assert_eq!(icon_of(&s), Some("ms-satellite_alt"));
+            assert!(!has_globe(&s));
+        }
     }
 }

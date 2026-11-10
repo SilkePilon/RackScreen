@@ -49,7 +49,7 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Printer => home::printer(model, now),
         // the icon follows the entity's device class
         Role::Ha(i) => return Some(home::ha(model, i, now)),
-        Role::PowerMix | Role::Music | Role::Iss | Role::Gif(_) => return None,
+        Role::PowerMix | Role::Music | Role::Iss | Role::Gif(_) | Role::Sen => return None,
     };
     screen.icon = role.icon();
     Some(screen)

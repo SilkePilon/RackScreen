@@ -1476,9 +1476,12 @@ fn floor_violations(s: &rackscreen_core::scene::Scene) -> Vec<String> {
     let mut bad = Vec::new();
     for d in &s.items {
         let (what, color, alpha, min) = match d {
-            D::Clear(_) | D::World { .. } | D::Image { .. } | D::Cover { .. } | D::Globe { .. } => {
-                continue
-            }
+            D::Clear(_)
+            | D::World { .. }
+            | D::Image { .. }
+            | D::Video(_)
+            | D::Cover { .. }
+            | D::Globe { .. } => continue,
             D::Dashed { color, alpha, .. } => ("dashed", *color, *alpha, 0x2A),
             D::IconOutline { color, alpha, .. } => ("outline", *color, *alpha, 0x2A),
             D::Arc { color, alpha, .. } => ("arc", *color, *alpha, 0x2A),

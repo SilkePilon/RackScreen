@@ -177,6 +177,25 @@ pub struct IssState {
     pub track: Option<IssTrack>,
 }
 
+/// The SEN live stream as the source last reported it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SenState {
+    /// The stream shows live Earth footage.
+    pub live: bool,
+    /// The newest picture, and when it arrived.
+    pub frame: Option<crate::video::VideoRef>,
+    pub frame_at: Secs,
+}
+
+/// A SEN picture older than this is not shown any more: the stream stalled
+/// or stopped being live.
+pub const SEN_HOLD_SECS: Secs = 1.5;
+/// The stream is started this long before a screen's `sen` slot.
+pub const SEN_WARMUP_SECS: Secs = 8.0;
+/// The stream is this far behind the station: the night starts and ends
+/// that much later on the stream.
+pub const SEN_STREAM_DELAY_SECS: i64 = 45;
+
 /// Library counts from the arr exporter; the download card state arrives in Task 5.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MediaState {
@@ -486,6 +505,9 @@ pub struct Model {
     show_frame: Option<(&'static str, u32, Arc<WorldFrame>)>,
     /// Decoded GIFs by index into the config's `gifs:` list.
     gifs: Vec<crate::gif::GifState>,
+    sen: SenState,
+    /// The time of the last `tick`.
+    now: Secs,
 }
 
 /// xorshift64: a whole PRNG in three shifts, so `core` keeps no rand dependency.
@@ -571,7 +593,46 @@ impl Model {
             show_wake: false,
             show_frame: None,
             gifs: Vec::new(),
+            sen: SenState::default(),
+            now: 0.0,
         }
+    }
+
+    pub fn sen(&self) -> &SenState {
+        &self.sen
+    }
+    /// The SEN picture to draw: the newest one while it is fresh. A little
+    /// after the last one it still shows, so a screen leaving the role fades
+    /// out from the picture.
+    pub fn sen_frame(&self) -> Option<&crate::video::VideoRef> {
+        self.sen
+            .frame
+            .as_ref()
+            .filter(|_| self.now - self.sen.frame_at <= SEN_HOLD_SECS)
+    }
+    /// The station is on the day side on the stream: out of the Earth's
+    /// shadow now and a stream delay ago. Without an ephemeris nothing is
+    /// known and the stream's own picture decides.
+    pub fn sen_daylight(&self) -> bool {
+        let Some(track) = &self.iss.track else {
+            return true;
+        };
+        let lit = |unix: i64| !track.in_shadow(unix).unwrap_or(false);
+        lit(self.unix_now) && lit(self.unix_now - SEN_STREAM_DELAY_SECS)
+    }
+    /// The SEN stream should be running: the station is on the day side and
+    /// a screen shows `sen`, is changing to it, or would within
+    /// `SEN_WARMUP_SECS` if the stream were live by then.
+    pub fn sen_wanted(&self, now: Secs) -> bool {
+        if !self.sen_daylight() {
+            return false;
+        }
+        let could_show = |r: Role| r == Role::Sen || self.role_available(r);
+        self.screens.iter().any(|s| {
+            s.current() == Role::Sen
+                || matches!(s.upcoming(now, could_show),
+                    Some((Role::Sen, left)) if left <= SEN_WARMUP_SECS)
+        })
     }
 
     /// The GIF at `index` of the config's `gifs:` list.
@@ -839,10 +900,14 @@ impl Model {
     }
 
     /// Whether `role` has something to show right now. A screen skips an entry
-    /// whose role cannot show, and leaves one that stops being able to. Every
-    /// role can show for now.
-    pub fn role_available(&self, _role: Role) -> bool {
-        true
+    /// whose role cannot show, and leaves one that stops being able to. Only
+    /// `sen` can be unavailable: it shows while the stream is live, its
+    /// pictures keep coming and the station is on the day side.
+    pub fn role_available(&self, role: Role) -> bool {
+        match role {
+            Role::Sen => self.sen.live && self.sen_frame().is_some() && self.sen_daylight(),
+            _ => true,
+        }
     }
     pub fn screen_count(&self) -> usize {
         self.screens.len()
@@ -1044,6 +1109,7 @@ impl Model {
     /// Advance the deploy day, each screen's cycle and the show schedule.
     /// Call once per frame, before `scene`.
     pub fn tick(&mut self, now: Secs) {
+        self.now = now;
         self.roll_deploy_day();
         // Role cycling pauses while a show runs (the dwells cover it anyway).
         let show_on = self.shows.current().is_some_and(|r| r.phase(now).is_some());
@@ -1392,6 +1458,14 @@ impl Model {
             Event::Gif { index, frames } => {
                 *self.gif_slot(index) = crate::gif::GifState::Ready(frames);
             }
+            Event::Sen(ev) => match ev {
+                crate::event::SenEvent::Frame(frame) => {
+                    self.sen.frame = Some(frame);
+                    self.sen.frame_at = now;
+                }
+                crate::event::SenEvent::Live(live) => self.sen.live = live,
+                crate::event::SenEvent::Stopped => self.sen = SenState::default(),
+            },
             Event::GifFailed { index, reason } => {
                 let slot = self.gif_slot(index);
                 // A GIF that plays keeps playing.

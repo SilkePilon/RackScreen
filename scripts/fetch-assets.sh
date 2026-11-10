@@ -16,7 +16,8 @@ MS_ICONS="air aq battery_charging_full bolt build commit dark_mode deployed_code
   music_note
   partly_cloudy_day rainy restart_alt rocket_launch satellite_alt speed swap_vert sync
   thermostat timer video_library wb_sunny bedtime gif_box
-  view_in_ar home humidity_percentage water_drop sensor_door lightbulb toggle_on"
+  view_in_ar home humidity_percentage water_drop sensor_door lightbulb toggle_on
+  videocam"
 for i in $MS_ICONS; do
   curl -fsSL "$MATERIAL/$i.svg" | sed 's/width="48" height="48"/width="24" height="24"/' > "assets/icons/ms-$i.svg"
   grep -q '<svg[^>]*width="24" height="24"' "assets/icons/ms-$i.svg" || { echo "bad svg: ms-$i"; exit 1; }

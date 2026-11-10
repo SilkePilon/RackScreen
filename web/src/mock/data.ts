@@ -60,6 +60,12 @@ export const ROLE_DEFS: R[] = [
   ["sun", "SUN", "Sky", "Sunrise, sunset and daylight left."],
   ["moon", "MOON", "Sky", "Moon phase and illumination."],
   ["iss", "ISS PASS IN", "Sky", "A globe that follows the ISS, with a countdown to the next pass."],
+  [
+    "sen",
+    "SEN LIVE",
+    "Sky",
+    "Sen's live video of Earth from the ISS, shown while it is live and in daylight.",
+  ],
   ["media", "MEDIA", "Media", "Library counts and the current download."],
   ["jellyfin", "NOW PLAYING", "Media", "What Jellyfin is playing."],
   ["music", "MUSIC", "Media", "Now playing from Spotify or Jellyfin."],
@@ -75,6 +81,7 @@ export function rolesFor(cfg: Config, secretSet: (p: string) => boolean): RoleIn
       return secretSet("electricity.token") ? null : "Electricity Maps token"
     if (["weather", "wind", "aqi", "rain", "sun", "moon", "iss"].includes(name))
       return loc ? null : "Location"
+    if (name === "sen") return !loc ? "Location" : cfg.iss.enabled ? null : "ISS on"
     if (name === "gh-activity" || name === "ci") return secretSet("github.token") ? null : "GitHub token"
     if (name === "deploys") return cfg.argocd.enabled ? null : "Argo CD"
     if (name === "jellyfin") return cfg.jellyfin.enabled && cfg.jellyfin.url ? null : "Jellyfin address"

@@ -628,4 +628,17 @@ pub enum Event {
         index: u16,
         reason: String,
     },
+    /// The SEN live stream: a frame, or a change of what it shows.
+    Sen(SenEvent),
+}
+
+/// What the SEN stream source reports.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SenEvent {
+    /// The next picture of live footage; only sent while the stream is live.
+    Frame(crate::video::VideoRef),
+    /// The stream shows live Earth footage (or stopped doing so).
+    Live(bool),
+    /// The stream is no longer being fetched: nothing is held any more.
+    Stopped,
 }
