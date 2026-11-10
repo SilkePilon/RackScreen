@@ -129,8 +129,41 @@ fn jf_episode() -> JfSession {
     }
 }
 
+/// The last frame of the SEN fixture segment, decoded once.
+fn sen_frame() -> rackscreen_core::video::VideoRef {
+    use rackscreen_core::event::SenEvent;
+    use rackscreen_sources::sen::player::{Player, Segment};
+    static FRAME: std::sync::OnceLock<rackscreen_core::video::VideoRef> =
+        std::sync::OnceLock::new();
+    FRAME
+        .get_or_init(|| {
+            let data = std::fs::read(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../sources/tests/fixtures/sen_live.ts"),
+            )
+            .unwrap();
+            let mut player = Player::new(false).unwrap();
+            let mut last = None;
+            player.play(&Segment { sq: 0, data }, &mut |_| true, &mut |e| {
+                if let SenEvent::Frame(f) = e {
+                    last = Some(f);
+                }
+            });
+            last.unwrap()
+        })
+        .clone()
+}
+
 fn full_model() -> Model {
     let mut m = Model::new(Thresholds::default());
+    m.apply(
+        Event::Sen(rackscreen_core::event::SenEvent::Frame(sen_frame())),
+        0.0,
+    );
+    m.apply(
+        Event::Sen(rackscreen_core::event::SenEvent::Live(true)),
+        0.0,
+    );
     m.set_unix_now(UNIX);
     m.set_utc_offset_secs(OFFSET);
     m.set_token_present(true);
@@ -964,6 +997,26 @@ fn gif_loading_playing_and_failed() {
     let mut px = new_pixmap();
     r.render(&m.scene_for_role(Role::Gif(0), 10.15, &mut ui), &mut px);
     check("p2_gif_playing", &px);
+}
+
+/// The SEN role in `full_model` is a real picture of the stream, decoded
+/// and cropped as on the panel, with nothing drawn over it. `p2_sen` is also
+/// the web UI's preview of the role.
+#[test]
+fn sen_is_the_live_picture_alone() {
+    let m = full_model();
+    let s = m.scene_for_role(Role::Sen, 0.0, &mut ScreenUi::new());
+    assert_eq!(s.items.len(), 1, "the picture alone");
+    let px = render(&m, Role::Sen, 0.0);
+    // the middle of the panel is Earth, not black
+    let (r, g, b) = pixel(&px, 120, 120);
+    assert!(r as u32 + g as u32 + b as u32 > 150, "{r} {g} {b}");
+    check("p2_sen", &px);
+    // not live: the ISS globe screen takes its place
+    let mut m = full_model();
+    m.apply(Event::Sen(rackscreen_core::event::SenEvent::Stopped), 0.0);
+    let globe = render(&m, Role::Sen, 120.0);
+    assert!(globe.data() == render(&m, Role::Iss, 120.0).data());
 }
 
 #[test]

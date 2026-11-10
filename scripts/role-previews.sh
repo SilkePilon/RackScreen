@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 src=crates/render/tests/goldens
 out=web/public/roles
 mkdir -p "$out"
-roles=(cpu mem pods health thermal storage power-mix renewable gh-activity weather wind aqi rain sun moon iss ups net deploys media traffic restarts uptime fans mains load ci jellyfin music printer)
+roles=(cpu mem pods health thermal storage power-mix renewable gh-activity weather wind aqi rain sun moon iss ups net deploys media traffic restarts uptime fans mains load ci jellyfin music printer sen)
 for r in "${roles[@]}"; do
   png="$src/p2_$r.png"
   [[ -f $png ]] || { echo "no golden for $r: $png" >&2; exit 1; }
