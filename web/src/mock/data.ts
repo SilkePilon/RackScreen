@@ -186,7 +186,7 @@ export function defaultConfig(): Config {
         hz,
       },
       {
-        roles: ["mem", "renewable", "weather"],
+        roles: ["mem", { role: "renewable", secs: 30 }, "weather"],
         cycle_secs: 15,
         spi: 0,
         cs: 1,

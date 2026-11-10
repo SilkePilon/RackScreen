@@ -9,6 +9,7 @@ import { parse, stringify } from "yaml"
 
 import { setLiveFactory, setLogStreamFactory, type LiveSocket, type LogSource } from "@/lib/live"
 import { setAt, getAt } from "@/lib/path"
+import { entryRole, entrySecs } from "@/lib/roles"
 import type {
   Config,
   GifHit,
@@ -91,25 +92,28 @@ function fullConfig(): Config {
 
 function screenNow(i: number, now: number) {
   const s = state.config.screens[i]
+  const names = s.roles.map(entryRole)
+  const dwell = s.roles.map((e) => entrySecs(e, s.cycle_secs) * 1000)
   const jump = state.jumps.get(i)
-  const period = s.cycle_secs * 1000
+  const jumped = jump ? names.indexOf(jump.role) : -1
   let idx: number
   let progress: number
-  if (jump && now - jump.at < period && s.roles.includes(jump.role)) {
-    idx = s.roles.indexOf(jump.role)
-    progress = (now - jump.at) / period
+  if (jump && jumped >= 0 && now - jump.at < dwell[jumped]) {
+    idx = jumped
+    progress = (now - jump.at) / dwell[idx]
   } else {
-    const offset = i * 3700
-    const k = Math.floor((now + offset) / period)
-    idx = k % s.roles.length
-    progress = ((now + offset) % period) / period
+    // walk one full cycle to the entry on screen now
+    let t = (now + i * 3700) % dwell.reduce((a, b) => a + b, 0)
+    idx = 0
+    while (t >= dwell[idx]) t -= dwell[idx++]
+    progress = t / dwell[idx]
   }
   let showing: Showing = "role"
   if (now < state.identifyUntil) showing = "identify"
   else if (now < state.patternUntil) showing = "pattern"
   else if (state.night === "on") showing = "night"
   else if (now < state.showUntil) showing = "show"
-  return { role: s.roles[idx], progress, showing }
+  return { role: names[idx], secs: dwell[idx] / 1000, progress, showing }
 }
 
 function status(): Status {
@@ -130,8 +134,8 @@ function status(): Status {
         index: i,
         role: n.role,
         title: titleOf(n.role),
-        roles: s.roles,
-        cycle_secs: s.cycle_secs,
+        roles: s.roles.map(entryRole),
+        cycle_secs: n.secs,
         cycle_progress: n.progress,
         showing: n.showing,
       }
@@ -210,16 +214,22 @@ function validate(c: Config): string | null {
   const known = new Set(ROLE_DEFS.map((r) => r[0]))
   for (const [i, s] of c.screens.entries()) {
     if (!s.roles.length) return `screen ${i + 1}: screen has no roles`
-    for (const r of s.roles) {
+    const names = s.roles.map(entryRole)
+    for (const r of names) {
       if (r.startsWith("gif:")) {
         if (!gifs.some((g) => `gif:${g.name}` === r))
           return `unknown GIF '${r}': add '${r.slice(4)}' under gifs:`
       } else if (!known.has(r)) return `unknown screen role '${r}'`
     }
     if (![0, 90, 180, 270].includes(s.rotate))
-      return `screen '${s.roles[0]}': rotate must be 0, 90, 180 or 270 (got ${s.rotate})`
+      return `screen '${names[0]}': rotate must be 0, 90, 180 or 270 (got ${s.rotate})`
     if (s.cycle_secs < 3 || s.cycle_secs > 300)
-      return `screen '${s.roles[0]}': cycle_secs must be between 3 and 300 (got ${s.cycle_secs})`
+      return `screen '${names[0]}': cycle_secs must be between 3 and 300 (got ${s.cycle_secs})`
+    for (const e of s.roles) {
+      const secs = entrySecs(e, s.cycle_secs)
+      if (secs < 3 || secs > 300)
+        return `screen ${i + 1}: ${entryRole(e)} secs must be between 3 and 300 (got ${secs})`
+    }
   }
   if (!["g", "pg", "pg-13", "r"].includes(c.gif_search?.rating ?? "g"))
     return `gif_search.rating must be g, pg, pg-13 or r (got ${c.gif_search.rating})`
@@ -376,7 +386,12 @@ const sysStart = Date.now()
 
 function usedGifNames() {
   return new Set(
-    state.config.screens.flatMap((s) => s.roles.filter((r) => r.startsWith("gif:")).map((r) => r.slice(4)))
+    state.config.screens.flatMap((s) =>
+      s.roles
+        .map(entryRole)
+        .filter((r) => r.startsWith("gif:"))
+        .map((r) => r.slice(4))
+    )
   )
 }
 
@@ -617,7 +632,7 @@ async function handle(method: string, path: string, body: unknown, headers: Head
     case "POST /control/role": {
       const screen = Number(b.screen)
       const s = state.config.screens[screen]
-      if (!s || !s.roles.includes(String(b.role)))
+      if (!s || !s.roles.map(entryRole).includes(String(b.role)))
         return json(400, { error: `screen ${screen + 1} has no role '${b.role}'` })
       state.jumps.set(screen, { role: String(b.role), at: now })
       return json(200, { ok: true })
@@ -641,8 +656,9 @@ async function handle(method: string, path: string, body: unknown, headers: Head
         if (!s) return json(409, { error: `There is no screen ${i + 1}.` })
         if (s.roles.length < 2 && screens.length === 1)
           return json(409, { error: `Screen ${i + 1} shows one role, so it has nothing to change to.` })
+        const names = s.roles.map(entryRole)
         const cur = screenNow(i, now).role
-        const next = s.roles[(s.roles.indexOf(cur) + 1) % s.roles.length]
+        const next = names[(names.indexOf(cur) + 1) % names.length]
         state.jumps.set(i, { role: next, at: now + i * 700 })
       }
       pushLog(

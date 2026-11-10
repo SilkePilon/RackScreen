@@ -39,8 +39,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDraft } from "@/lib/draft"
 import { useRoles, useStatus } from "@/lib/queries"
-import { PRESETS } from "@/lib/roles"
-import type { RoleInfo, ScreenCfg, ScreenStatus } from "@/lib/types"
+import { entryRole, entrySecs, PRESETS, withSecs } from "@/lib/roles"
+import type { RoleEntry, RoleInfo, ScreenCfg, ScreenStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export default function Screens() {
@@ -63,8 +63,8 @@ export default function Screens() {
     <PageBody>
       <Presets />
       <PageIntro title="Screens">
-        Pick a screen in the rack, then choose what it cycles through. Each role shows for a few seconds; drag to
-        reorder.
+        Pick a screen in the rack, then choose what it cycles through. Each role shows for the default time unless
+        you give it its own; drag to reorder.
       </PageIntro>
       <div className="flex flex-col gap-4">
         <Rack count={n} selected={selected} onSelect={select} />
@@ -255,21 +255,23 @@ function ScreenEditor({ index, screen }: { index: number; screen: ScreenCfg }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const setRoles = (r: string[]) => d.set(`${base}.roles`, r)
+  const names = screen.roles.map(entryRole)
+  const setRoles = (r: RoleEntry[]) => d.set(`${base}.roles`, r)
   const onDragEnd = (e: DragEndEvent) => {
     setDragging(false)
     if (!e.over || e.active.id === e.over.id) return
-    const from = screen.roles.indexOf(String(e.active.id))
-    const to = screen.roles.indexOf(String(e.over.id))
+    const from = names.indexOf(String(e.active.id))
+    const to = names.indexOf(String(e.over.id))
     setRoles(arrayMove(screen.roles, from, to))
   }
   const info = (r: string) => roles.data?.find((x) => x.name === r)
-  const needs = screen.roles
+  const needs = names
     .map((r) => ({ r, info: info(r) }))
     .filter((x): x is { r: string; info: RoleInfo & { needs: string } } => !!x.info?.needs)
   const rolesDirty = d.isDirty(`${base}.roles`)
   const cycleDirty = d.isDirty(`${base}.cycle_secs`)
-  const total = screen.roles.length * screen.cycle_secs
+  const segments = screen.roles.map((e) => ({ name: entryRole(e), secs: entrySecs(e, screen.cycle_secs) }))
+  const total = segments.reduce((sum, x) => sum + x.secs, 0)
 
   return (
     <section
@@ -292,7 +294,7 @@ function ScreenEditor({ index, screen }: { index: number; screen: ScreenCfg }) {
         <div className="flex items-center gap-2 max-sm:w-full">
           {cycleDirty && <ResetButton onClick={() => d.reset(`${base}.cycle_secs`)} />}
           <label htmlFor={`cycle-${index}`} className="text-[13px] text-muted-foreground max-sm:flex-1">
-            Each role
+            Default time
           </label>
           <NumberInput
             id={`cycle-${index}`}
@@ -314,27 +316,33 @@ function ScreenEditor({ index, screen }: { index: number; screen: ScreenCfg }) {
         onDragEnd={onDragEnd}
         modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
       >
-        <SortableContext items={screen.roles} strategy={horizontalListSortingStrategy}>
+        <SortableContext items={names} strategy={horizontalListSortingStrategy}>
           <ol
             className="scrollbar-thin flex gap-5 overflow-x-auto px-5 pt-6 pb-4 sm:gap-7"
             aria-label={`Roles on screen ${index + 1}, in order`}
           >
-            {screen.roles.map((r, i) => (
-              <Tile
-                key={r}
-                name={r}
-                position={i}
-                info={info(r)}
-                loading={roles.isPending}
-                last={i === screen.roles.length - 1}
-                live={live?.showing === "role" && live.role === r}
-                highlighted={hover === r}
-                dragging={dragging}
-                onHover={setHover}
-                canRemove={screen.roles.length > 1}
-                onRemove={() => setRoles(screen.roles.filter((x) => x !== r))}
-              />
-            ))}
+            {screen.roles.map((e, i) => {
+              const r = entryRole(e)
+              return (
+                <Tile
+                  key={r}
+                  name={r}
+                  position={i}
+                  info={info(r)}
+                  loading={roles.isPending}
+                  last={i === screen.roles.length - 1}
+                  live={live?.showing === "role" && live.role === r}
+                  highlighted={hover === r}
+                  dragging={dragging}
+                  onHover={setHover}
+                  secs={typeof e === "string" ? null : (e.secs ?? null)}
+                  defaultSecs={screen.cycle_secs}
+                  onSecs={(v) => setRoles(screen.roles.map((x, k) => (k === i ? withSecs(x, v) : x)))}
+                  canRemove={screen.roles.length > 1}
+                  onRemove={() => setRoles(screen.roles.filter((_, k) => k !== i))}
+                />
+              )
+            })}
             <li className="flex w-20 shrink-0 flex-col items-center gap-2 sm:w-24">
               <button
                 type="button"
@@ -351,8 +359,7 @@ function ScreenEditor({ index, screen }: { index: number; screen: ScreenCfg }) {
       </DndContext>
 
       <Timeline
-        roles={screen.roles}
-        cycleSecs={screen.cycle_secs}
+        segments={segments}
         live={live}
         hover={hover}
         onHover={setHover}
@@ -378,7 +385,7 @@ function ScreenEditor({ index, screen }: { index: number; screen: ScreenCfg }) {
         open={gallery}
         onOpenChange={setGallery}
         screen={index}
-        taken={screen.roles}
+        taken={names}
         onAdd={(r) => setRoles([...screen.roles, r])}
       />
     </section>
@@ -395,6 +402,9 @@ function Tile({
   highlighted,
   dragging,
   onHover,
+  secs,
+  defaultSecs,
+  onSecs,
   canRemove,
   onRemove,
 }: {
@@ -407,12 +417,17 @@ function Tile({
   highlighted: boolean
   dragging: boolean
   onHover: (r: string | null) => void
+  /** This role's own seconds on screen; null uses the screen's default. */
+  secs: number | null
+  defaultSecs: number
+  onSecs: (v: number | null) => void
   canRemove: boolean
   onRemove: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: name })
   const title = roleTitle(name, info)
   const unknown = !loading && !info
+  const secsId = React.useId()
   return (
     <li
       ref={setNodeRef}
@@ -485,6 +500,20 @@ function Tile({
             {unknown ? "Unknown role" : title}
           </span>
         )}
+        <label htmlFor={secsId} className="sr-only">
+          Seconds on screen for {title}, empty for the default
+        </label>
+        <NumberInput
+          id={secsId}
+          value={secs}
+          onChange={onSecs}
+          nullable
+          placeholder={String(defaultSecs)}
+          min={3}
+          max={300}
+          unit="s"
+          className="mt-1.5 h-7 w-[4.5rem]"
+        />
         <span
           className={cn(
             "flex h-4 items-center gap-1 text-[10px] font-medium tracking-wide uppercase",
@@ -500,42 +529,43 @@ function Tile({
   )
 }
 
-/** One segment per role: how the screen spends a full cycle. */
+/** One segment per role, as long as its time on screen: how the screen spends a full cycle. */
 function Timeline({
-  roles,
-  cycleSecs,
+  segments,
   live,
   hover,
   onHover,
   label,
 }: {
-  roles: string[]
-  cycleSecs: number
+  segments: { name: string; secs: number }[]
   live?: ScreenStatus
   hover: string | null
   onHover: (r: string | null) => void
   label: (r: string) => string
 }) {
-  const total = roles.length * cycleSecs
+  const ends = segments.reduce<number[]>((acc, x) => [...acc, (acc.at(-1) ?? 0) + x.secs], [])
+  const total = ends.at(-1) ?? 0
   return (
     <div className="flex flex-col gap-1.5 px-5 pb-5">
       <div className="flex h-2 gap-0.5 overflow-hidden rounded-full" role="list" aria-label="Cycle timeline">
-        {roles.map((r, i) => {
+        {segments.map(({ name: r, secs }, i) => {
           const on = live?.showing === "role" && live.role === r
+          const span = `${ends[i] - secs}–${ends[i]} s`
           return (
             <Tooltip key={r}>
               <TooltipTrigger asChild>
                 <div
                   role="listitem"
-                  aria-label={`${label(r)}: ${i * cycleSecs}–${(i + 1) * cycleSecs} s`}
+                  aria-label={`${label(r)}: ${span}`}
                   onMouseEnter={() => onHover(r)}
                   onMouseLeave={() => onHover(null)}
+                  style={{ flexGrow: secs }}
                   className={cn(
-                    "relative flex-1 overflow-hidden bg-muted transition-colors duration-150",
+                    "relative basis-0 overflow-hidden bg-muted transition-colors duration-150",
                     hover === r && "bg-primary/50",
                   )}
                 >
-                  {on && roles.length > 1 && (
+                  {on && segments.length > 1 && (
                     <div
                       className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-[1500ms] ease-linear"
                       style={{ width: `${Math.round(live.cycle_progress * 100)}%` }}
@@ -544,7 +574,7 @@ function Timeline({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                {label(r)} · {i * cycleSecs}–{(i + 1) * cycleSecs} s
+                {label(r)} · {span}
               </TooltipContent>
             </Tooltip>
           )

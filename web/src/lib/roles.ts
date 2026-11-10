@@ -1,4 +1,4 @@
-import type { RoleInfo } from "@/lib/types"
+import type { RoleEntry, RoleInfo } from "@/lib/types"
 
 const ACRONYMS = new Set(["CPU", "ISS", "UPS", "CI", "GIF", "24H"])
 
@@ -19,6 +19,17 @@ export function roleLabel(name: string, roles?: RoleInfo[]): string {
   const r = roles?.find((x) => x.name === name)
   return r ? prettyTitle(r.title) : name
 }
+
+/** The role name of a screen's role entry. */
+export const entryRole = (e: RoleEntry): string => (typeof e === "string" ? e : e.role)
+
+/** The entry's seconds on screen: its own, else the screen's `cycle_secs`. */
+export const entrySecs = (e: RoleEntry, cycleSecs: number): number =>
+  (typeof e === "string" ? null : e.secs) ?? cycleSecs
+
+/** The entry with its own seconds, or bare (the screen's default) for null. */
+export const withSecs = (e: RoleEntry, secs: number | null): RoleEntry =>
+  secs === null ? entryRole(e) : { role: entryRole(e), secs }
 
 export const PRESETS: { id: string; title: string; description: string; rows: string[][] }[] = [
   {

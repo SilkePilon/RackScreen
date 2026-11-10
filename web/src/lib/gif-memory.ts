@@ -4,6 +4,7 @@
 
 import { useDraft } from "@/lib/draft"
 import { useGifMemory } from "@/lib/queries"
+import { entryRole } from "@/lib/roles"
 import type { Config, GifMemory, GifMemoryRow } from "@/lib/types"
 
 /** rackscreen_core::gif::{PACKED_FRAME_MAX, MAX_FRAMES}, until the server answers. */
@@ -39,7 +40,12 @@ export function rememberFrames(url: string, frames: number | null) {
 
 function usedNames(c: Config | null) {
   return new Set(
-    (c?.screens ?? []).flatMap((s) => s.roles.filter((r) => r.startsWith("gif:")).map((r) => r.slice(4)))
+    (c?.screens ?? []).flatMap((s) =>
+      s.roles
+        .map(entryRole)
+        .filter((r) => r.startsWith("gif:"))
+        .map((r) => r.slice(4))
+    )
   )
 }
 

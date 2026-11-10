@@ -114,7 +114,7 @@ function PanelCard({ s, sampledAt }: { s: ScreenStatus; sampledAt: number }) {
             </Badge>
           ) : s.roles.length > 1 ? (
             <span>
-              {s.roles.indexOf(s.role) + 1} of {s.roles.length} · every {s.cycle_secs} s
+              {s.roles.indexOf(s.role) + 1} of {s.roles.length} · {s.cycle_secs} s
             </span>
           ) : (
             <span>Single role</span>

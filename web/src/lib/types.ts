@@ -155,8 +155,11 @@ export interface GifSearchCfg {
   tenor_key: Secret
   rating: GifRating
 }
+/** A role name, or a role with its own seconds on screen (3 to 300). */
+export type RoleEntry = string | { role: string; secs?: number | null }
 export interface ScreenCfg {
-  roles: string[]
+  roles: RoleEntry[]
+  /** Seconds on screen for each entry without its own. */
   cycle_secs: number
   spi: number
   cs: number
@@ -274,6 +277,7 @@ export interface ScreenStatus {
   role: string
   title: string
   roles: string[]
+  /** The current role's seconds on screen. */
   cycle_secs: number
   cycle_progress: number
   showing: Showing
