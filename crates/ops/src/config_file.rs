@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 pub use rackscreen_app::config::Config;
+use rackscreen_app::config::RoleEntry;
 use rackscreen_core::theme::Role;
 
 use crate::paths::{is_root, service_user};
@@ -70,7 +71,7 @@ impl Preset {
 }
 
 pub fn set_screen_roles(cfg: &mut Config, index: usize, roles: &[Role], cycle_secs: u64) {
-    let names: Vec<String> = roles.iter().map(|r| cfg.role_name(*r)).collect();
+    let names: Vec<RoleEntry> = roles.iter().map(|r| cfg.role_name(*r).into()).collect();
     if let Some(s) = cfg.screens.get_mut(index) {
         s.roles = names;
         s.cycle_secs = cycle_secs.clamp(3, 300);
@@ -113,20 +114,23 @@ mod tests {
         });
         let before = c.clone();
         apply_preset(&mut c, Preset::Electricity);
-        assert_eq!(c.screens[0].roles, vec!["power-mix".to_string()]);
+        assert_eq!(c.screens[0].roles, vec![RoleEntry::from("power-mix")]);
         assert_eq!(c.screens[0].cycle_secs, 15);
-        assert_eq!(c.screens[1].roles, vec!["renewable".to_string()]);
+        assert_eq!(c.screens[1].roles, vec![RoleEntry::from("renewable")]);
         assert_eq!(c.screens[2], before.screens[2], "past the grid roles");
         assert_eq!(c.screens[3], before.screens[3]);
-        assert_eq!(c.screens[4].roles, vec!["thermal".to_string()]);
+        assert_eq!(c.screens[4].roles, vec![RoleEntry::from("thermal")]);
         apply_preset(&mut c, Preset::Mixed);
         assert_eq!(
             c.screens[1].roles,
-            vec!["mem".to_string(), "renewable".into()]
+            vec![RoleEntry::from("mem"), RoleEntry::from("renewable")]
         );
-        assert_eq!(c.screens[3].roles, vec!["health".to_string()]);
+        assert_eq!(c.screens[3].roles, vec![RoleEntry::from("health")]);
         set_screen_roles(&mut c, 0, &[Role::Cpu, Role::Mem], 1000);
-        assert_eq!(c.screens[0].roles, vec!["cpu".to_string(), "mem".into()]);
+        assert_eq!(
+            c.screens[0].roles,
+            vec![RoleEntry::from("cpu"), RoleEntry::from("mem")]
+        );
         assert_eq!(c.screens[0].cycle_secs, 300);
         set_screen_roles(&mut c, 99, &[Role::Cpu], 15);
     }
@@ -142,7 +146,7 @@ mod tests {
         set_screen_roles(&mut c, 1, &[Role::Gif(0), Role::Cpu], 15);
         assert_eq!(
             c.screens[1].roles,
-            vec!["gif:party".to_string(), "cpu".into()]
+            vec![RoleEntry::from("gif:party"), RoleEntry::from("cpu")]
         );
         c.validate().unwrap();
     }
@@ -165,6 +169,9 @@ mod tests {
         assert_eq!(rows[3], vec![Role::Iss, Role::GhActivity]);
         let mut c = Config::default();
         apply_preset(&mut c, Preset::Sky);
-        assert_eq!(c.screens[3].roles, vec!["iss", "gh-activity"]);
+        assert_eq!(
+            c.screens[3].roles,
+            vec![RoleEntry::from("iss"), RoleEntry::from("gh-activity")]
+        );
     }
 }

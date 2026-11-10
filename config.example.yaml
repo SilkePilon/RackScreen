@@ -137,7 +137,8 @@ transitions:
   random: false            # a random style (and direction) for every transition
   # shows: { style: wipe, direction: right, secs: 0.6 }   # the shows' own; default: the same as above
 
-# Each screen cycles through its `roles` list, `cycle_secs` seconds each.
+# Each screen cycles through its `roles` list, `cycle_secs` seconds each; an
+# entry like `{ role: iss, secs: 30 }` keeps its own time (3 to 300 s).
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,

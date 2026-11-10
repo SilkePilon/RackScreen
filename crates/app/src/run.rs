@@ -8,9 +8,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rackscreen_core::model::Thresholds;
 use rackscreen_core::night::parse_hhmm;
+use rackscreen_core::screens::Entry;
 use rackscreen_core::shows::schedule::ShowScheduler;
 use rackscreen_core::shows::world::{gap_px, Layout};
-use rackscreen_core::theme::Role;
 use rackscreen_sources::SourceCtx;
 use tokio_util::sync::CancellationToken;
 
@@ -151,9 +151,8 @@ impl Monitor {
             })
             .collect();
         // Each screen cycles through its configured role list.
-        let screens_roles: Vec<Vec<Role>> =
-            panels.handles.iter().map(|h| h.roles.clone()).collect();
-        let cycle_secs: Vec<f64> = panels.handles.iter().map(|h| h.cycle_secs as f64).collect();
+        let screen_entries: Vec<Vec<Entry>> =
+            panels.handles.iter().map(|h| h.entries.clone()).collect();
 
         // render loop
         let night = NightWindow {
@@ -164,8 +163,7 @@ impl Monitor {
         let render = RenderLoop {
             rx,
             screens: slots,
-            screens_roles,
-            cycle_secs,
+            screen_entries,
             thresholds: Thresholds {
                 hot_cpu: cfg.thresholds.hot_cpu,
                 hot_mem: cfg.thresholds.hot_mem,
@@ -220,7 +218,6 @@ impl Monitor {
                 .iter()
                 .map(|e| e.name.clone())
                 .collect(),
-            cycle_secs_cfg: cfg.screens.iter().map(|s| s.cycle_secs).collect(),
         };
         if let Some(h) = &hub {
             // a restart with fewer screens drops the frames of the rest

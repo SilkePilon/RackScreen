@@ -245,6 +245,7 @@ pub struct ScreenStatus {
     pub role: String,
     pub title: String,
     pub roles: Vec<String>,
+    /// The current role's dwell; `cycle_progress` runs over it.
     pub cycle_secs: u64,
     pub cycle_progress: f64,
     /// `role`, `show`, `night`, `pattern` or `identify`.

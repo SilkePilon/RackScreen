@@ -16,6 +16,7 @@ use rackscreen_core::event::{Event, LinkTarget};
 use rackscreen_core::model::{Model, Thresholds};
 use rackscreen_core::night::is_night;
 use rackscreen_core::p2::status::night_scene;
+use rackscreen_core::screens::Entry;
 use rackscreen_core::shows::schedule::{Request, ShowScheduler};
 use rackscreen_core::shows::world::Layout;
 use rackscreen_core::theme::Role;
@@ -288,10 +289,8 @@ impl Drop for ShutdownGuard {
 pub struct RenderLoop {
     pub rx: Receiver<Event>,
     pub screens: Vec<ScreenSlot>,
-    /// Role list per physical screen, same order as `screens`.
-    pub screens_roles: Vec<Vec<Role>>,
-    /// Dwell per screen before cycling to its next role.
-    pub cycle_secs: Vec<Secs>,
+    /// Each physical screen's cycle (roles and their dwells), same order as `screens`.
+    pub screen_entries: Vec<Vec<Entry>>,
     pub thresholds: Thresholds,
     pub night: NightWindow,
     pub fps: u32,
@@ -339,8 +338,6 @@ pub struct RenderLoop {
     pub gif_names: Vec<String>,
     /// Names of the config's `homeassistant.entities`, for `Role::Ha(i)`.
     pub ha_names: Vec<String>,
-    /// Each screen's configured dwell, for the status.
-    pub cycle_secs_cfg: Vec<u64>,
 }
 
 /// How often the Spotify token file is looked for, so a login made in
@@ -411,7 +408,7 @@ impl RenderLoop {
         let mut force_full = true;
         let start = Instant::now();
         let mut model = Model::new(self.thresholds);
-        model.set_screens(self.screens_roles.clone(), self.cycle_secs.clone());
+        model.set_screen_entries(self.screen_entries.clone());
         model.set_one_at_a_time(self.one_at_a_time);
         model.set_transitions(self.transitions);
         // A fresh seed per boot, so the screens do not cycle in the same order
@@ -723,9 +720,10 @@ impl RenderLoop {
             .map(|(i, name)| {
                 let i = i.min(u16::MAX as usize) as u16;
                 let used = self
-                    .screens_roles
+                    .screen_entries
                     .iter()
-                    .any(|roles| roles.contains(&Role::Gif(i)));
+                    .flatten()
+                    .any(|e| e.role == Role::Gif(i));
                 gif_status(name, used, model.gif(i))
             })
             .collect()
@@ -750,8 +748,7 @@ impl RenderLoop {
         let screens = self
             .screens
             .iter()
-            .enumerate()
-            .map(|(i, s)| {
+            .map(|s| {
                 let st = model.screen(s.index);
                 let role = model.current_role(s.index);
                 ScreenStatus {
@@ -764,7 +761,7 @@ impl RenderLoop {
                             .map(|e| self.role_name(e.role))
                             .collect()
                     }),
-                    cycle_secs: self.cycle_secs_cfg.get(i).copied().unwrap_or(15),
+                    cycle_secs: st.map_or(0, |st| st.cycle_secs().round() as u64),
                     cycle_progress: st.map_or(0.0, |st| st.progress(now)),
                     showing,
                 }

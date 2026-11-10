@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use rackscreen_core::anim::Secs;
+use rackscreen_core::screens::Entry;
 use rackscreen_core::theme::Role;
 use serde::{Deserialize, Serialize};
 
@@ -570,7 +572,8 @@ pub struct ScreenCfg {
     #[serde(default, skip_serializing)]
     pub role: Option<String>,
     #[serde(default)]
-    pub roles: Vec<String>,
+    pub roles: Vec<RoleEntry>,
+    /// Seconds on screen for each entry without its own `secs`.
     #[serde(default = "default_cycle")]
     pub cycle_secs: u64,
     pub spi: u8,
@@ -583,6 +586,66 @@ pub struct ScreenCfg {
     pub hflip: bool,
     #[serde(default = "default_hz")]
     pub hz: u32,
+}
+
+/// One `roles:` entry: a bare name, or `{ role, secs }` for a role with its
+/// own time on screen. Written back bare when it has no `secs`, so older
+/// configs round-trip unchanged.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(from = "RawRoleEntry", into = "RawRoleEntry")]
+pub struct RoleEntry {
+    pub role: String,
+    /// Seconds on screen; `None` is the screen's `cycle_secs`.
+    pub secs: Option<u64>,
+}
+
+impl RoleEntry {
+    /// This entry's dwell on a screen whose default is `cycle_secs`.
+    pub fn secs_or(&self, cycle_secs: u64) -> u64 {
+        self.secs.unwrap_or(cycle_secs)
+    }
+}
+
+impl From<&str> for RoleEntry {
+    fn from(role: &str) -> Self {
+        role.to_string().into()
+    }
+}
+
+impl From<String> for RoleEntry {
+    fn from(role: String) -> Self {
+        RoleEntry { role, secs: None }
+    }
+}
+
+/// The YAML and JSON shape of a `RoleEntry`.
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum RawRoleEntry {
+    Name(String),
+    Timed {
+        role: String,
+        #[serde(default)]
+        secs: Option<u64>,
+    },
+}
+
+impl From<RawRoleEntry> for RoleEntry {
+    fn from(raw: RawRoleEntry) -> Self {
+        match raw {
+            RawRoleEntry::Name(role) => RoleEntry { role, secs: None },
+            RawRoleEntry::Timed { role, secs } => RoleEntry { role, secs },
+        }
+    }
+}
+
+impl From<RoleEntry> for RawRoleEntry {
+    fn from(e: RoleEntry) -> Self {
+        match e.secs {
+            None => RawRoleEntry::Name(e.role),
+            secs => RawRoleEntry::Timed { role: e.role, secs },
+        }
+    }
 }
 
 fn default_hz() -> u32 {
@@ -611,7 +674,8 @@ impl ScreenCfg {
         let index = |i: usize| u16::try_from(i).ok();
         self.roles
             .iter()
-            .map(|r| {
+            .map(|e| {
+                let r = &e.role;
                 if let Some(name) = r.strip_prefix(GIF_ROLE_PREFIX) {
                     gifs.iter()
                         .position(|g| g.name == name)
@@ -879,12 +943,15 @@ impl Config {
         for (i, s) in self.screens.iter_mut().enumerate() {
             if let Some(r) = s.role.take() {
                 if s.roles.is_empty() {
-                    s.roles = vec![r];
+                    s.roles = vec![r.into()];
                 }
             }
             let mut dropped: Vec<&str> = Vec::new();
-            s.roles.retain(|r| {
-                let Some(gone) = REMOVED_ROLES.iter().find(|g| r.eq_ignore_ascii_case(g)) else {
+            s.roles.retain(|e| {
+                let Some(gone) = REMOVED_ROLES
+                    .iter()
+                    .find(|g| e.role.eq_ignore_ascii_case(g))
+                else {
                     return true;
                 };
                 if !dropped.contains(gone) {
@@ -975,6 +1042,16 @@ impl Config {
     /// A screen's roles, `gif:<name>` resolved against `gifs:`.
     pub fn screen_roles(&self, screen: &ScreenCfg) -> Result<Vec<Role>> {
         screen.roles_in(&self.gifs, &self.homeassistant.entities)
+    }
+
+    /// A screen's cycle: each role with its seconds on screen.
+    pub fn screen_entries(&self, screen: &ScreenCfg) -> Result<Vec<Entry>> {
+        let roles = self.screen_roles(screen)?;
+        Ok(roles
+            .into_iter()
+            .zip(&screen.roles)
+            .map(|(role, e)| Entry::new(role, e.secs_or(screen.cycle_secs) as Secs))
+            .collect())
     }
 
     /// The name a role has in this config: `gif:<name>` for a GIF.
@@ -1099,7 +1176,7 @@ impl Config {
             "gif_search.rating must be g, pg, pg-13 or r (got {})",
             self.gif_search.rating
         );
-        for s in &self.screens {
+        for (i, s) in self.screens.iter().enumerate() {
             let roles = self.screen_roles(s)?;
             let name = self.role_name(roles[0]);
             anyhow::ensure!(
@@ -1114,6 +1191,16 @@ impl Config {
                 name,
                 s.cycle_secs
             );
+            for e in &s.roles {
+                if let Some(secs) = e.secs {
+                    anyhow::ensure!(
+                        (3..=300).contains(&secs),
+                        "screen {}: {} secs must be between 3 and 300 (got {secs})",
+                        i + 1,
+                        e.role
+                    );
+                }
+            }
         }
         anyhow::ensure!(
             !self.electricity.enabled || !self.electricity.zone.trim().is_empty(),
@@ -1478,7 +1565,7 @@ mod tests {
     fn legacy_role_key_upgrades_to_roles() {
         let c = Config::from_yaml("screens:\n  - { role: cpu, spi: 0, cs: 0, dc: 6, rst: 5 }\n")
             .unwrap();
-        assert_eq!(c.screens[0].roles, vec!["cpu".to_string()]);
+        assert_eq!(c.screens[0].roles, vec![RoleEntry::from("cpu")]);
         assert_eq!(c.screens[0].role, None);
         assert_eq!(c.screens[0].cycle_secs, 15);
         c.validate().unwrap();
@@ -1506,6 +1593,60 @@ mod tests {
     }
 
     #[test]
+    fn role_entries_mix_bare_names_and_own_times() {
+        let c = Config::from_yaml(
+            "screens:\n  - { roles: [cpu, { role: iss, secs: 30 }, { role: mem }], cycle_secs: 10, spi: 0, cs: 0, dc: 6, rst: 5 }\n",
+        )
+        .unwrap();
+        c.validate().unwrap();
+        let roles = &c.screens[0].roles;
+        assert_eq!(roles[0], RoleEntry::from("cpu"));
+        assert_eq!(roles[1].secs, Some(30));
+        assert_eq!(roles[2], RoleEntry::from("mem"), "a map without secs");
+        assert_eq!(
+            c.screen_entries(&c.screens[0]).unwrap(),
+            vec![
+                Entry::new(Role::Cpu, 10.0),
+                Entry::new(Role::Iss, 30.0),
+                Entry::new(Role::Mem, 10.0),
+            ]
+        );
+        // bare unless timed, in YAML and in the JSON the web UI gets
+        let text = c.to_yaml().unwrap();
+        assert!(text.contains("- cpu\n"), "{text}");
+        assert!(text.contains("- mem\n"), "{text}");
+        assert!(text.contains("role: iss"), "{text}");
+        assert_eq!(Config::from_yaml(&text).unwrap(), c);
+        assert_eq!(
+            serde_json::to_value(roles).unwrap(),
+            serde_json::json!(["cpu", { "role": "iss", "secs": 30 }, "mem"])
+        );
+    }
+
+    #[test]
+    fn out_of_range_role_secs_name_the_screen_and_role() {
+        for secs in [2u64, 301] {
+            let mut c = Config::default();
+            c.screens[1].roles[0].secs = Some(secs);
+            let role = c.screens[1].roles[0].role.clone();
+            let err = c.validate().unwrap_err().to_string();
+            assert!(err.contains("screen 2") && err.contains(&role), "{err}");
+            assert!(err.contains(&secs.to_string()), "{err}");
+        }
+        let mut c = Config::default();
+        c.screens[1].roles[0].secs = Some(3);
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn existing_configs_round_trip_byte_identically() {
+        let c = Config::default();
+        let text = c.to_yaml().unwrap();
+        assert_eq!(Config::from_yaml(&text).unwrap().to_yaml().unwrap(), text);
+        assert!(!text.contains("role:"), "{text}");
+    }
+
+    #[test]
     fn unknown_role_in_list_rejected() {
         let c =
             Config::from_yaml("screens:\n  - { roles: [nope], spi: 0, cs: 0, dc: 6, rst: 5 }\n")
@@ -1520,14 +1661,17 @@ mod tests {
             "screens:\n  - { roles: [cpu, face, mem], spi: 0, cs: 0, dc: 6, rst: 5 }\n",
         )
         .unwrap();
-        assert_eq!(c.screens[0].roles, vec!["cpu".to_string(), "mem".into()]);
+        assert_eq!(
+            c.screens[0].roles,
+            vec![RoleEntry::from("cpu"), RoleEntry::from("mem")]
+        );
         assert_eq!(c.screens[0].roles().unwrap(), vec![Role::Cpu, Role::Mem]);
         // any case, on any screen
         let c = Config::from_yaml(
             "screens:\n  - { roles: [cpu], spi: 0, cs: 0, dc: 6, rst: 5 }\n  - { roles: [mem, Face], spi: 0, cs: 1, dc: 6, rst: 5 }\n",
         )
         .unwrap();
-        assert_eq!(c.screens[1].roles, vec!["mem".to_string()]);
+        assert_eq!(c.screens[1].roles, vec![RoleEntry::from("mem")]);
         // a legacy single `role: face` too
         let e = Config::from_yaml("screens:\n  - { role: face, spi: 0, cs: 0, dc: 6, rst: 5 }\n")
             .unwrap_err()
@@ -1565,7 +1709,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             c.screens[0].roles,
-            vec!["power-mix".to_string(), "renewable".into()]
+            vec![RoleEntry::from("power-mix"), RoleEntry::from("renewable")]
         );
         assert_eq!(
             c.screens[0].roles().unwrap(),

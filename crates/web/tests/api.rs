@@ -7,7 +7,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
-use rackscreen_app::config::Config;
+use rackscreen_app::config::{Config, RoleEntry};
 use rackscreen_app::hub::{Hub, SupervisorCmd};
 use rackscreen_app::logs::LogSink;
 use rackscreen_web::{router, AppState};
@@ -277,7 +277,7 @@ async fn config_round_trip_masks_merges_and_asks_for_a_restart() {
     assert!(body["error"].as_str().unwrap().contains("foo"), "{body}");
     assert_eq!(
         Config::load_or_default(&f.hub.config_path).unwrap().screens[0].roles,
-        vec!["cpu"]
+        vec![RoleEntry::from("cpu")]
     );
     let (_, _, body) = send(
         &f.app,

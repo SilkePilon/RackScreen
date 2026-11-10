@@ -376,7 +376,7 @@ Shows go in and out through the same style, or their own under *Shows use*; a di
 
 Besides these, a screen can show a GIF: the role `gif:<name>` plays the GIF called `<name>` in the `gifs:` list; see [GIF role](#gif-role). GIFs appear in the role picker after the built-in roles.
 
-In the config each screen has a `roles` list and a `cycle_secs`; the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade to black and then show a dim moon until morning, when the moon fades out and the screens come back on their own. The panels stay on all night.
+In the config each screen has a `roles` list and a `cycle_secs` (the default time per role; an entry `{ role: iss, secs: 30 }` sets its own); the old single `role` key is still read and upgraded on load. At night (`night.start` to `night.end`) the panels fade to black and then show a dim moon until morning, when the moon fades out and the screens come back on their own. The panels stay on all night.
 
 ## Electricity mode
 
@@ -626,7 +626,8 @@ transitions:
   random: false            # a random style (and direction) for every transition
   # shows: { style: wipe, direction: right, secs: 0.6 }   # the shows' own; default: the same as above
 
-# Each screen cycles through its `roles` list, `cycle_secs` seconds each.
+# Each screen cycles through its `roles` list, `cycle_secs` seconds each; an
+# entry like `{ role: iss, secs: 30 }` keeps its own time (3 to 300 s).
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,

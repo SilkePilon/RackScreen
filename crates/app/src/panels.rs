@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use anyhow::{Context, Result};
+use rackscreen_core::screens::Entry;
 use rackscreen_core::theme::Role;
 #[cfg(feature = "pi")]
 use rackscreen_display::Display;
@@ -26,10 +27,8 @@ use rackscreen_render::frame::Orient;
 use crate::config::Config;
 
 pub struct PanelHandle {
-    /// Every role this screen cycles through, in order; never empty.
-    pub roles: Vec<Role>,
-    /// Dwell per role before cycling to the next one.
-    pub cycle_secs: u64,
+    /// Every role this screen cycles through with its dwell, in order; never empty.
+    pub entries: Vec<Entry>,
     pub index: usize,
     pub orient: Orient,
     pub mailbox: Mailbox,
@@ -38,7 +37,7 @@ pub struct PanelHandle {
 impl PanelHandle {
     /// The role shown first, used where a single role identifies the screen.
     pub fn first_role(&self) -> Role {
-        self.roles.first().copied().unwrap_or(Role::Cpu)
+        self.entries.first().map_or(Role::Cpu, |e| e.role)
     }
 }
 
@@ -139,13 +138,12 @@ pub fn open_panels(
                 .recv()
                 .context("simulator window thread stopped before opening the window")??;
             for (i, (scr, panel)) in cfg.screens.iter().zip(sim_panels).enumerate() {
-                let roles = cfg.screen_roles(scr)?;
-                let name = cfg.role_name(roles[0]);
+                let entries = cfg.screen_entries(scr)?;
+                let name = cfg.role_name(entries[0].role);
                 let mb = Mailbox::new();
                 let p = building.get();
                 p.handles.push(PanelHandle {
-                    roles,
-                    cycle_secs: scr.cycle_secs,
+                    entries,
                     index: i,
                     orient: Orient::identity(),
                     mailbox: mb.clone(),
@@ -175,8 +173,8 @@ pub fn open_panels(
         {
             let _ = (sim_grid, key_tx);
             for (i, scr) in cfg.screens.iter().enumerate() {
-                let roles = cfg.screen_roles(scr)?;
-                let name = cfg.role_name(roles[0]);
+                let entries = cfg.screen_entries(scr)?;
+                let name = cfg.role_name(entries[0].role);
                 let pins = rackscreen_display::gc9a01::Pins {
                     bus: scr.spi,
                     cs: scr.cs,
@@ -190,8 +188,7 @@ pub fn open_panels(
                 let mb = Mailbox::new();
                 let p = building.get();
                 p.handles.push(PanelHandle {
-                    roles,
-                    cycle_secs: scr.cycle_secs,
+                    entries,
                     index: i,
                     orient: Orient::new(scr.rotate, scr.hflip),
                     mailbox: mb.clone(),
