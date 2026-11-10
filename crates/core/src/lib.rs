@@ -19,3 +19,4 @@ pub mod sky;
 pub mod theme;
 pub mod tiles;
 pub mod transition;
+pub mod video;

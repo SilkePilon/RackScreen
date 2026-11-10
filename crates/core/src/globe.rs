@@ -84,6 +84,31 @@ pub fn subsolar(unix: i64) -> (f64, f64) {
     (dec.to_degrees(), lon)
 }
 
+/// The station's height above the ground as a share of the Earth's radius
+/// (about 420 km); the ephemeris carries ground points only.
+const ISS_ALTITUDE: f64 = 420.0 / 6371.0;
+
+/// Whether a station above ground point `iss` is in the Earth's shadow with
+/// the sun over `sun` (both unit vectors): on the night side of the centre
+/// and inside the shadow cylinder.
+pub fn in_shadow(iss: V3, sun: V3) -> bool {
+    let along = dot(iss, sun);
+    if along >= 0.0 {
+        return false;
+    }
+    let r = 1.0 + ISS_ALTITUDE;
+    r * (1.0 - along * along).max(0.0).sqrt() < 1.0
+}
+
+impl IssTrack {
+    /// Whether the station is in the Earth's shadow at `unix`; `None`
+    /// outside the ephemeris.
+    pub fn in_shadow(&self, unix: i64) -> Option<bool> {
+        let (lat, lon) = subsolar(unix);
+        Some(in_shadow(self.at(unix)?, unit(lat, lon)))
+    }
+}
+
 /// The globe is centred this far west of the station, and on this share of
 /// its latitude, so the station sits right of centre with its way ahead in
 /// view and the poles never tip far over.
@@ -234,6 +259,37 @@ mod tests {
         assert!(tr.at(1_180).is_some());
         assert!(tr.at(1_181).is_none());
         assert!(tr.at(999).is_none());
+    }
+
+    #[test]
+    fn the_shadow_starts_well_past_the_terminator() {
+        let sun = unit(0.0, 0.0);
+        assert!(!in_shadow(unit(0.0, 0.0), sun), "noon");
+        assert!(!in_shadow(unit(0.0, 89.0), sun), "day side");
+        // at 420 km the station sees the sun until about 20° past the terminator
+        assert!(!in_shadow(unit(0.0, 105.0), sun));
+        assert!(in_shadow(unit(0.0, 115.0), sun));
+        assert!(in_shadow(unit(0.0, 180.0), sun), "midnight");
+        assert!(in_shadow(unit(60.0, 180.0), sun));
+        assert!(
+            !in_shadow(unit(75.0, 180.0), sun),
+            "over the pole's twilight"
+        );
+    }
+
+    #[test]
+    fn a_track_spends_about_a_third_of_an_orbit_in_shadow() {
+        let tr = orbit(1_790_000_000, 300);
+        let total = (tr.points.len() as i64 - 1) * tr.step_secs as i64;
+        let dark = (0..total)
+            .step_by(10)
+            .filter(|dt| tr.in_shadow(tr.t0 + dt).unwrap())
+            .count() as f64
+            * 10.0
+            / total as f64;
+        assert!((0.2..0.45).contains(&dark), "{dark}");
+        assert_eq!(tr.in_shadow(tr.t0 - 1), None);
+        assert_eq!(tr.in_shadow(tr.t0 + total + 100), None);
     }
 
     #[test]
