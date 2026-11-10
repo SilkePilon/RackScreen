@@ -48,7 +48,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | <img src=".github/media/screens/rain.gif" alt="RAIN role" width="200"> | <img src=".github/media/screens/sun.gif" alt="SUN role" width="200"> |
 | **`rain`** — minutes until rain, the next two hours as five-minute bars | **`sun`** — the next event (Sunrise or Sunset) and its countdown in the pill, and how far the day or night has run |
 | <img src=".github/media/screens/moon.gif" alt="MOON role" width="200"> | <img src=".github/media/screens/iss.gif" alt="ISS role" width="200"> |
-| **`moon`** — the illuminated fraction, the phase, days to full and new moon | **`iss`** — a countdown to the next ISS pass with its start, duration and height |
+| **`moon`** — the illuminated fraction, the phase, days to full and new moon | **`iss`** — the Earth as a globe that follows the ISS along its track, lit by the real sun, with a countdown to the next pass |
 | <img src=".github/media/screens/ups.gif" alt="UPS role" width="200"> | <img src=".github/media/screens/net.gif" alt="NET role" width="200"> |
 | **`ups`** — battery charge, on mains or on battery, runtime and load | **`net`** — total traffic, download and upload in the pill, download as a sparkline |
 | <img src=".github/media/screens/deploys.gif" alt="DEPLOYS role" width="200"> | <img src=".github/media/screens/media.gif" alt="MEDIA role" width="200"> |
@@ -347,7 +347,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-nine ro
 | `rain` | Buienradar | minutes to rain (or mm/h while raining), card the next two hours |
 | `sun` | computed | the next sunset or sunrise, ring the day or night so far, pill the next event (Sunrise/Sunset) and the countdown |
 | `moon` | computed | ring the illuminated fraction, pill the phase, card days to full and new |
-| `iss` | Celestrak + SGP4 | a countdown to the next pass, pill visibility and height, card start and duration |
+| `iss` | Celestrak + SGP4 | a globe following the station with day, night and city lights, its ground track (solid behind, dashed ahead), ring filling over the 90 minutes before a pass, pill countdown and height |
 | `ups` | Prometheus (nut-exporter) | ring the charge, pill mains or battery, card runtime and load |
 | `net` | Prometheus (node-exporter) | ring the total, pill down and up, card a download sparkline |
 | `deploys` | Argo CD | syncs today, a segment per application, card syncs per hour |
@@ -399,7 +399,7 @@ The mix colours and the source icons are the ones from the Electricity Maps web 
 - **Weather, wind and air quality** come from [Open-Meteo](https://open-meteo.com), free and without a key; turn on `weather enabled`. One forecast call and one air-quality call every `weather poll secs` (600 by default). The weather tile shows the day's low and high at the two ends of its ring and the next 12 hours as a curve; wind slides a compass strip to the direction; air quality draws the last 24 hours.
 - **Rain** is the [Buienradar](https://www.buienradar.nl) two-hour nowcast, five-minute slots, free and without a key, for the Netherlands and Belgium; turn on `rain enabled`. The big number counts down to the first wet slot (or shows mm/h while it rains), and the card has the next two hours as bars.
 - **Sun and moon** are computed on the Pi from the location and the clock, nothing to configure. The moon card counts the days to the next full and new moon.
-- **ISS** fetches the station's orbital elements from [Celestrak](https://celestrak.org) once a day and predicts the next pass above `iss min elevation °` (10 by default); turn on `iss enabled`. A pass is marked visible when the sky is dark and the station is still sunlit; during a pass the tile shows its height overhead.
+- **ISS** fetches the station's orbital elements from [Celestrak](https://celestrak.org) once a day and predicts the next pass above `iss min elevation °` (10 by default); turn on `iss enabled`. The screen shows the Earth from above the station: where it has been and where it is heading, with the day and night sides as they are right now. The ring fills over the 90 minutes before a pass and the pill counts down to it ("Overhead" during one). While the station can be seen by eye (at least 10° up, a dark sky at home, the station still in sunlight) a white dot marks home on the globe.
 
 The rain nowcast is decoded on the Dutch clock whatever the Pi is set to: Buienradar covers NL and BE and stamps its slots in `Europe/Amsterdam`, so the bars line up with "now" on a Pi left on UTC as well. The sun tile does use the Pi's own zone, so still set it once with `sudo timedatectl set-timezone Europe/Amsterdam`.
 

@@ -62,7 +62,7 @@ pub fn description(role: Role) -> &'static str {
             "The next sunrise or sunset and its countdown, how far the day or night has run."
         }
         Role::Moon => "The illuminated fraction, the phase, days to full and new moon.",
-        Role::Iss => "A countdown to the next ISS pass with its start, duration and height.",
+        Role::Iss => "A globe that follows the ISS along its track, with a countdown to the next pass.",
         Role::Ups => "Battery charge, on mains or on battery, runtime and load (nut-exporter).",
         Role::Net => "Total traffic, download and upload in the pill, download as a sparkline.",
         Role::Deploys => "Argo CD syncs today, one segment per application, syncs per hour.",

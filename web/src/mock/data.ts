@@ -59,7 +59,7 @@ export const ROLE_DEFS: R[] = [
   ["rain", "RAIN", "Sky", "Rain expected in the next two hours."],
   ["sun", "SUN", "Sky", "Sunrise, sunset and daylight left."],
   ["moon", "MOON", "Sky", "Moon phase and illumination."],
-  ["iss", "ISS PASS IN", "Sky", "Countdown to the next visible ISS pass."],
+  ["iss", "ISS PASS IN", "Sky", "A globe that follows the ISS, with a countdown to the next pass."],
   ["media", "MEDIA", "Media", "Library counts and the current download."],
   ["jellyfin", "NOW PLAYING", "Media", "What Jellyfin is playing."],
   ["music", "MUSIC", "Media", "Now playing from Spotify or Jellyfin."],

@@ -202,7 +202,7 @@ export const SETTINGS: Record<string, SettingMeta> = {
   },
   "iss.enabled": {
     title: "ISS passes",
-    description: "Countdown to the next ISS pass, computed from the Celestrak TLE.",
+    description: "A globe that follows the ISS and a countdown to the next pass, computed from the Celestrak TLE.",
     page: S,
     section: "ISS",
     def: false,
