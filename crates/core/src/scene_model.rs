@@ -55,7 +55,8 @@ impl crate::model::Model {
             Role::Aqi => !(link.weather && self.air().have),
             Role::Rain => !(link.rain && self.rain().have),
             Role::Sun | Role::Moon => !self.sky().have,
-            Role::Iss => !self.iss().have,
+            // the globe needs the ephemeris to reach now; the pass alone draws nothing
+            Role::Iss => !(self.iss().have && self.iss_position().is_some()),
             Role::Traffic => !(link.prom && self.traffic().have),
             Role::Restarts => !(link.prom && self.restarts().have),
             Role::Uptime => !(link.prom && self.uptime().have),
@@ -782,5 +783,37 @@ mod tests {
         let s = m.scene(0, 5.15, &mut ui);
         assert!(image_of(&s).is_some(), "fading out");
         assert!(s.fade < 1.0);
+    }
+
+    #[test]
+    fn the_iss_globe_waits_for_a_pass_answer_and_an_ephemeris_that_reaches_now() {
+        use crate::event::IssTrack;
+        let globe = |s: &Scene| s.items.iter().any(|d| matches!(d, Drawable::Globe { .. }));
+        let scene = |m: &Model| m.scene_for_role(Role::Iss, 0.0, &mut ScreenUi::new());
+        let mut m = Model::new(Thresholds::default());
+        m.set_location_present(true);
+        m.set_unix_now(10_000);
+        let track = IssTrack {
+            t0: 10_000 - 3600,
+            step_secs: 20,
+            points: (0..481).map(|i| (i as f32 * 0.1, i as f32 * 0.2)).collect(),
+            home: (52.0, 5.0),
+        };
+        m.apply(Event::IssTrack(track), 0.0);
+        assert!(!globe(&scene(&m)), "no pass answer yet: still waiting");
+        m.apply(Event::IssPass(None), 0.0);
+        let s = scene(&m);
+        assert!(globe(&s), "no pass in 24 h still shows the globe");
+        assert!(s
+            .items
+            .iter()
+            .any(|d| matches!(d, Drawable::Run { text, .. } if text == "No pass in 24 h")));
+        // the clock ran past the ephemeris (the source stopped): waiting again
+        m.set_unix_now(10_000 + 6001);
+        assert!(!globe(&scene(&m)));
+        // a pass alone, with no ephemeris, is not enough either
+        let mut bare = Model::new(Thresholds::default());
+        bare.apply(Event::IssPass(None), 0.0);
+        assert!(!globe(&scene(&bare)));
     }
 }

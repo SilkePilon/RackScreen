@@ -111,6 +111,43 @@ impl IconCache {
             px.fill_path(path, &p, FillRule::Winding, ts, None);
         }
     }
+
+    /// Stroke the outline of `name`'s filled shape so that `width` px of it
+    /// shows outside the icon drawn at the same place and size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_outline(
+        &self,
+        px: &mut Pixmap,
+        name: &str,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        width: f32,
+        color: Color,
+        alpha: f32,
+    ) {
+        if alpha <= 0.0 || width <= 0.0 || size <= 0.0 {
+            return;
+        }
+        let Some(icon) = self.icons.get(name) else {
+            return;
+        };
+        let k = size / icon.units;
+        let ts = Transform::from_translate(cx, cy)
+            .pre_scale(k, k)
+            .pre_translate(-icon.units / 2.0, -icon.units / 2.0);
+        // half of the stroke lies inside the shape, under the icon
+        let stroke = Stroke {
+            width: 2.0 * width / k,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            ..Stroke::default()
+        };
+        let p = paint(color, alpha);
+        for path in &icon.fills {
+            px.stroke_path(path, &p, &stroke, ts, None);
+        }
+    }
 }
 
 #[cfg(test)]

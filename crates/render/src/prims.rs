@@ -113,6 +113,27 @@ pub fn stroke(px: &mut Pixmap, path: &Path, width: f32, c: Color, alpha: f32) {
     );
 }
 
+/// Stroke `path` as round-capped dashes `on` long, `off` apart.
+pub fn stroke_dashed(
+    px: &mut Pixmap,
+    path: &Path,
+    width: f32,
+    on: f32,
+    off: f32,
+    c: Color,
+    alpha: f32,
+) {
+    if alpha <= 0.0 || width <= 0.0 {
+        return;
+    }
+    let mut st = stroke_round(width);
+    st.dash = tiny_skia::StrokeDash::new(vec![on, off], 0.0);
+    if st.dash.is_none() {
+        return;
+    }
+    px.stroke_path(path, &paint(c, alpha), &st, Transform::identity(), None);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

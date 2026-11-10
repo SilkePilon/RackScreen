@@ -1,12 +1,11 @@
-//! Sky roles with a forecast: weather and the ISS pass.
+//! The weather role: the condition, the day's range and the next rain.
 
 use crate::anim::Secs;
-use crate::format::{fmt_hhmm, fmt_mmss};
 use crate::model::Model;
 use crate::p2::chart::Card;
 use crate::p2::ring::RingSpec;
 use crate::p2::screen::P2Screen;
-use crate::theme::p2::{AMBER, CYAN, TEXT, TEXT2, TEXT3};
+use crate::theme::p2::{AMBER, CYAN, TEXT2};
 
 /// A short name for a WMO weather code (the screen's `title`).
 pub fn condition(code: u16) -> &'static str {
@@ -83,68 +82,13 @@ pub fn weather(model: &Model, _now: Secs) -> P2Screen {
     s
 }
 
-pub fn iss(model: &Model, _now: Secs) -> P2Screen {
-    let unix = model.unix_now();
-    let offset = model.utc_offset_secs() as i64;
-    let visible = |v: bool, el: f32| {
-        if v {
-            (format!("Visible · max {el:.0}°"), CYAN)
-        } else {
-            (format!("Not visible · max {el:.0}°"), TEXT2)
-        }
-    };
-    match model.iss().pass {
-        Some(p) if unix < p.start => {
-            let until = p.start - unix;
-            let mut s = P2Screen::new("ISS PASS IN", fmt_mmss(until));
-            s.hero_scale = 0.82;
-            s.ring = RingSpec::fill(1.0 - (until as f32 / 5400.0).clamp(0.0, 1.0), CYAN);
-            s.pill = Some(visible(p.visible, p.max_elevation_deg));
-            s.card = Some(Card::Stats(vec![
-                (fmt_hhmm(p.start + offset), "start".into(), TEXT),
-                (
-                    format!("{} min", (p.end - p.start + 30) / 60),
-                    "duration".into(),
-                    TEXT,
-                ),
-            ]));
-            s
-        }
-        Some(p) if unix < p.end => {
-            let mut s = P2Screen::new("ISS OVERHEAD", format!("{:.0}", p.max_elevation_deg));
-            s.unit = Some("°".into());
-            s.ring = RingSpec::fill(1.0, CYAN);
-            s.pill = Some(if p.visible {
-                ("Visible now".into(), CYAN)
-            } else {
-                ("Not visible".into(), TEXT2)
-            });
-            s.card = Some(Card::Stats(vec![
-                (fmt_mmss(p.end - unix), "ends in".into(), TEXT),
-                (
-                    format!("{} min", (p.end - p.start + 30) / 60),
-                    "duration".into(),
-                    TEXT,
-                ),
-            ]));
-            s
-        }
-        _ => {
-            let mut s = P2Screen::new("ISS PASS IN", "—");
-            s.hero_color = TEXT3;
-            s.pill = Some(("No pass in 24 h".into(), TEXT2));
-            s
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{Event, IssPass};
+    use crate::event::Event;
     use crate::model::Thresholds;
     use crate::p2::ring::RingKind;
-    use crate::theme::p2::{AMBER, CYAN, TEXT2, TEXT3};
+    use crate::theme::p2::{AMBER, CYAN, TEXT2};
 
     fn weather_model(code: u16, temp: f32, precip: Vec<f32>) -> Model {
         let mut m = Model::new(Thresholds::default());
@@ -255,62 +199,5 @@ mod tests {
         assert_eq!(s.pill, Some(("Dry next 12 h".into(), TEXT2)));
         let s = weather(&weather_model(123, 10.0, vec![0.0, 0.0, 1.0]), 0.0);
         assert_eq!(s.pill, Some(("Rain 16:00".into(), CYAN)));
-    }
-
-    fn iss_model(unix: i64, pass: Option<IssPass>) -> Model {
-        let mut m = Model::new(Thresholds::default());
-        m.set_unix_now(unix);
-        m.set_utc_offset_secs(7200);
-        m.apply(Event::IssPass(pass), 0.0);
-        m
-    }
-
-    #[test]
-    fn iss_counts_down_shows_the_pass_and_rests() {
-        let pass = IssPass {
-            start: 10_000,
-            end: 10_372,
-            max_elevation_deg: 62.0,
-            visible: true,
-        };
-        let s = iss(&iss_model(10_000 - 14 * 60 - 32, Some(pass)), 0.0);
-        assert_eq!(
-            (s.title.as_str(), s.hero.as_str(), s.hero_scale),
-            ("ISS PASS IN", "14:32", 0.82)
-        );
-        assert!(
-            matches!(s.ring.kind, RingKind::Fill { frac, color } if (frac - (1.0 - 872.0 / 5400.0)).abs() < 1e-4 && color == CYAN)
-        );
-        assert_eq!(s.pill, Some(("Visible · max 62°".into(), CYAN)));
-        assert!(
-            matches!(&s.card, Some(Card::Stats(items)) if items[0] == ("04:46".to_string(), "start".to_string(), TEXT) && items[1] == ("6 min".to_string(), "duration".to_string(), TEXT))
-        );
-        let during = iss(&iss_model(10_100, Some(pass)), 0.0);
-        assert_eq!(
-            (
-                during.title.as_str(),
-                during.hero.as_str(),
-                during.unit.as_deref()
-            ),
-            ("ISS OVERHEAD", "62", Some("°"))
-        );
-        assert!(matches!(during.ring.kind, RingKind::Fill { frac, .. } if frac == 1.0));
-        assert_eq!(during.pill, Some(("Visible now".into(), CYAN)));
-        let dim = iss(
-            &iss_model(
-                5_000,
-                Some(IssPass {
-                    visible: false,
-                    ..pass
-                }),
-            ),
-            0.0,
-        );
-        assert_eq!(dim.pill, Some(("Not visible · max 62°".into(), TEXT2)));
-        let none = iss(&iss_model(0, None), 0.0);
-        assert_eq!((none.hero.as_str(), none.hero_color), ("—", TEXT3));
-        assert!(matches!(none.ring.kind, RingKind::Empty));
-        assert_eq!(none.pill, Some(("No pass in 24 h".into(), TEXT2)));
-        assert!(none.card.is_none());
     }
 }

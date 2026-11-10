@@ -10,6 +10,7 @@ use tiny_skia::{FillRule, FilterQuality, Paint, Pattern, Pixmap, SpreadMode, Tra
 use crate::icons::IconCache;
 use crate::prims::{
     arc_points, ellipse_path, fill, polygon_path, polyline_path, rounded_rect, skia_color, stroke,
+    stroke_dashed,
 };
 use crate::text::TextRenderer;
 
@@ -30,9 +31,15 @@ impl Renderer {
                 icons: IconCache::new()?,
                 text: TextRenderer::new()?,
                 covers: Vec::new(),
+                globes: 0,
             },
             base: Vec::new(),
         })
+    }
+
+    /// How many globes have been rasterised (not reused from the base).
+    pub fn globe_rasters(&self) -> u32 {
+        self.painter.globes
     }
 
     pub fn render(&mut self, scene: &Scene, px: &mut Pixmap) {
@@ -54,10 +61,17 @@ impl Renderer {
                     for d in base {
                         self.painter.draw_item(px, d);
                     }
-                    if self.base.len() >= BASE_CACHE {
-                        self.base.remove(0);
-                    }
-                    self.base.push((base.to_vec(), px.clone()));
+                    // the oldest entry's buffer takes the new raster: a base
+                    // that changes every second allocates nothing
+                    let old = (self.base.len() >= BASE_CACHE).then(|| self.base.remove(0).1);
+                    let raster = match old {
+                        Some(mut raster) if raster.data().len() == px.data().len() => {
+                            raster.data_mut().copy_from_slice(px.data());
+                            raster
+                        }
+                        _ => px.clone(),
+                    };
+                    self.base.push((base.to_vec(), raster));
                 }
             }
             n
@@ -80,6 +94,8 @@ struct Painter {
     text: TextRenderer,
     /// Premultiplied pixmaps of the last few covers, newest last.
     covers: Vec<(CoverRef, Pixmap)>,
+    /// Globes rasterised so far (the costly drawable; tests count them).
+    globes: u32,
 }
 
 /// Covers kept as pixmaps: one per music source plus the last played.
@@ -238,6 +254,40 @@ impl Painter {
                 if let Some(p) = polyline_path(points) {
                     stroke(px, &p, *width, *color, *alpha);
                 }
+            }
+            Drawable::Dashed {
+                points,
+                width,
+                on,
+                off,
+                color,
+                alpha,
+            } => {
+                if let Some(p) = polyline_path(points) {
+                    stroke_dashed(px, &p, *width, *on, *off, *color, *alpha);
+                }
+            }
+            Drawable::IconOutline {
+                name,
+                cx,
+                cy,
+                size,
+                width,
+                color,
+                alpha,
+            } => {
+                self.icons
+                    .draw_outline(px, name, *cx, *cy, *size, *width, *color, *alpha);
+            }
+            Drawable::Globe {
+                cam_lat,
+                cam_lon,
+                sun_lat,
+                sun_lon,
+                r,
+            } => {
+                self.globes += 1;
+                crate::globe::draw_globe(px, *cam_lat, *cam_lon, *sun_lat, *sun_lon, *r);
             }
             Drawable::Run {
                 x,

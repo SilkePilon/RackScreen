@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::anim::{Easing, Secs, Smooth};
 use crate::p2::marquee::Marquee;
 use crate::p2::roll::Roll;
+use crate::scene::Drawable;
 use crate::theme::{Color, Role};
 
 pub type UiKey = (&'static str, u32);
@@ -46,6 +47,9 @@ pub struct ScreenUi {
     fades: HashMap<UiKey, ColorFade>,
     /// When each key was first asked for (`since`).
     starts: HashMap<UiKey, Secs>,
+    /// Drawables that are costly to build and change rarely, with the key
+    /// they were built for (`memo`).
+    memo: Option<((i64, i64), Vec<Drawable>)>,
     /// The outgoing role's state while a transition runs.
     out: Option<Box<ScreenUi>>,
 }
@@ -106,6 +110,15 @@ impl ScreenUi {
     /// clock that starts when something first shows.
     pub fn since(&mut self, key: UiKey, now: Secs) -> Secs {
         *self.starts.entry(key).or_insert(now)
+    }
+
+    /// The drawables `build` made for `key`, built again only when the key
+    /// changes: a scene is composed every frame, most of them unchanged.
+    pub fn memo(&mut self, key: (i64, i64), build: impl FnOnce() -> Vec<Drawable>) -> &[Drawable] {
+        if !matches!(&self.memo, Some((k, _)) if *k == key) {
+            self.memo = Some((key, build()));
+        }
+        &self.memo.as_ref().expect("set above").1
     }
 
     pub fn glide(&mut self, key: UiKey, target: f32, now: Secs) -> f32 {

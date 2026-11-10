@@ -70,6 +70,38 @@ pub enum Drawable {
         color: Color,
         alpha: f32,
     },
+    /// A `Polyline` drawn as round-capped dashes, `on` px long and `off` px
+    /// apart along the path.
+    Dashed {
+        points: Vec<(f32, f32)>,
+        width: f32,
+        on: f32,
+        off: f32,
+        color: Color,
+        alpha: f32,
+    },
+    /// The outline of an icon's shape, `width` px outside it: drawn under
+    /// the same `Icon` it keeps the icon readable on a busy background.
+    IconOutline {
+        name: &'static str,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        width: f32,
+        color: Color,
+        alpha: f32,
+    },
+    /// The Earth as an orthographic globe of radius `r` at the screen
+    /// centre, seen from above `(cam_lat, cam_lon)` and lit by a sun above
+    /// `(sun_lat, sun_lon)`; degrees. Costly to rasterise: keep it in the
+    /// scene's base so its raster is reused while the parameters are equal.
+    Globe {
+        cam_lat: f32,
+        cam_lon: f32,
+        sun_lat: f32,
+        sun_lon: f32,
+        r: f32,
+    },
     /// Text placed by core: left edge `x`, baseline `baseline`.
     Run {
         x: f32,
@@ -189,6 +221,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Sc
     match role {
         Role::PowerMix => crate::p2::roles::power_mix::power_mix_scene(model, now, ui),
         Role::Music => crate::p2::roles::music::music_scene(model, now, ui),
+        Role::Iss => crate::p2::roles::iss::iss_scene(model, now, ui),
         Role::Gif(index) => model.gif_scene(index, now, ui),
         _ => {
             let screen = crate::p2::roles::screen(model, role, now)

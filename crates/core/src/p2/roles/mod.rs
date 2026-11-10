@@ -3,6 +3,7 @@
 pub mod cluster;
 pub mod github;
 pub mod home;
+pub mod iss;
 pub mod media;
 pub mod music;
 pub mod power_mix;
@@ -16,7 +17,7 @@ use crate::p2::screen::P2Screen;
 use crate::theme::Role;
 
 /// The P2 screen for a role with live data. `None` for roles that still draw
-/// their legacy scene, and for power-mix and music, which draw themselves.
+/// their legacy scene, and for power-mix, music and iss, which draw themselves.
 pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
     let mut screen = match role {
         Role::Cpu => cluster::cpu(model, now),
@@ -26,7 +27,6 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Health => cluster::health(model, now),
         Role::Deploys => cluster::deploys(model, now),
         Role::Weather => sky::weather(model, now),
-        Role::Iss => sky::iss(model, now),
         Role::GhActivity => github::github(model, now),
         Role::Thermal => system::thermal(model, now),
         Role::Net => system::net(model, now),
@@ -49,7 +49,7 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Printer => home::printer(model, now),
         // the icon follows the entity's device class
         Role::Ha(i) => return Some(home::ha(model, i, now)),
-        Role::PowerMix | Role::Music | Role::Gif(_) => return None,
+        Role::PowerMix | Role::Music | Role::Iss | Role::Gif(_) => return None,
     };
     screen.icon = role.icon();
     Some(screen)
@@ -82,7 +82,6 @@ mod tests {
             ("999", None, 1.0, false),      // pods, deploys, contributions
             ("16/16", None, 0.82, false),   // cluster
             ("-12", Some("°"), 1.0, false), // weather below zero
-            ("59:59", None, 0.82, false),   // iss
             ("1000", None, 1.0, true),      // net Mb/s
             ("120", None, 1.0, true),       // wind, aqi, rain minutes
             ("23:59", None, 0.82, false),   // sun
