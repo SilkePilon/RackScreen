@@ -142,7 +142,8 @@ transitions:
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,
-#        printer, gif:<name> (a GIF from the gifs: list),
+#        printer, sen (live video of Earth from the ISS),
+#        gif:<name> (a GIF from the gifs: list),
 #        ha:<name> (an entity from homeassistant.entities)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.

@@ -25,7 +25,7 @@
 
 ---
 
-RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, two from [Electricity Maps](https://app.electricitymaps.com), seven from the sky over your house, two from GitHub, one from a Jellyfin server and one, the music screen, from Spotify and Jellyfin, so the same rack can show pods on one panel and the grid's power mix on the next.
+RackScreen drives four GC9A01 240x240 round displays from a Raspberry Pi 3B+ and turns them into a live picture of your Kubernetes cluster and your grid. Each panel is one tile: a small icon in the gap of a round-capped ring, one big number, a status pill and a small card with the chart that suits the data (a sparkline, bars, a stacked bar, a compass). Values glide into place and only the digits that change roll; nothing wobbles while idle. A screen can cycle through several roles, crossfading via black in 0.4 s. Sixteen roles come from the cluster, two from [Electricity Maps](https://app.electricitymaps.com), seven from the sky over your house, two from GitHub, one from a Jellyfin server, one, the music screen, from Spotify and Jellyfin, and one is live video of the Earth from the ISS, so the same rack can show pods on one panel and the grid's power mix on the next.
 
 ## Screens
 
@@ -63,6 +63,8 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill | **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card |
 | <img src=".github/media/screens/music.gif" alt="MUSIC role" width="200"> | <img src=".github/media/screens/printer.gif" alt="3D PRINTER role" width="200"> |
 | **`music`** — the album cover, the track's progress on the ring (green Spotify, violet Jellyfin), time left in the pill, song, artist and device in the card | **`printer`** — a Bambu Lab print: progress on the ring in the filament's colour, time left in the pill, job, layer and temperatures in the card |
+| <img src=".github/media/screens/sen.gif" alt="SEN LIVE role" width="200"> |  |
+| **`sen`** — [Sen](https://www.sen.com/live)'s live video of the Earth from the ISS, 15 fps over the whole panel; shown only while it is live and in daylight, skipped otherwise |  |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -328,7 +330,7 @@ Everything else is plain Tailscale: `tailscale status` over SSH shows the same s
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Twenty-nine roles exist:
+Every screen shows one or more **roles** and cycles through them. Thirty-two roles exist:
 
 | Role | Data source | Tile |
 |---|---|---|
@@ -363,6 +365,7 @@ Every screen shows one or more **roles** and cycles through them. Twenty-nine ro
 | `printer` | Bambu Lab (local or cloud MQTT) | print progress in %, ring in the filament colour (green when done, red when failed), pill time left / paused / done N ago, card job, layer and nozzle/bed temperatures |
 | `ha:<name>` | Home Assistant | a number with its unit and a 30-minute sparkline, or a state as a word (On, Open, Away); the icon follows the device class |
 | `music` | Spotify + Jellyfin | album cover, ring the track's progress (green Spotify, violet Jellyfin, dim when paused), pill time left / paused / played N ago, card song, artist and device |
+| `sen` | Sen's ISS stream (YouTube) | the live picture of the Earth, full panel, nothing drawn over it; skipped at night, during camera switches and replays |
 
 The **Screens** page of the web UI edits them: drag roles to reorder, add from the picker, set the cycle interval, or apply a preset: cluster (`cpu`, `mem`, `pods`, `health`), electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
@@ -463,6 +466,16 @@ screens:
 ```
 
 `label` replaces the entity's friendly name in the pill, `attribute` shows an attribute instead of the state, and `unit` replaces the entity's unit. Only entities a screen shows are polled. A refused token says "Check token", a wrong id "Entity not found".
+
+## SEN live role
+
+`sen` shows [Sen](https://www.sen.com/live)'s live 4K view of the Earth from the International Space Station, the same stream as on sen.com and YouTube, at 15 frames a second over the whole panel with nothing drawn over it. There is nothing to configure: add `sen` to a screen. Give it more time than a tile, for example `{ role: sen, secs: 60 }`.
+
+Only real live footage is shown. The stream also carries the night side (black), a "switching camera" card and replays; then the role is skipped: a screen goes on to its next role, and leaves `sen` right away if it was showing. A screen that has nothing else to show draws the `iss` globe until the live picture is back. The station's night (about a third of every 92-minute orbit) is predicted from its orbit, so turn on `iss enabled` and set the location (see [Sky roles](#sky-roles)); the globe needs both too.
+
+The stream costs nothing while no screen shows it. It starts about 8 seconds before the role's turn (when it is not live by then, the turn is skipped) and stops 10 seconds after the last screen left it, which frees the decoder and its buffers. The Pi takes the 640×360 variant (about 0.2 Mbit/s for a calm view, up to 1 Mbit/s), decodes it with [OpenH264](https://www.openh264.org) and shows the 280×280 square above the stream's info bar. When YouTube cannot be reached the role is skipped and tried again after 1, 5, 15 and then every 60 minutes; the log says why.
+
+The simulator (`--source fake`) plays a recorded five seconds of the stream in a loop instead.
 
 ## GIF role
 
@@ -631,7 +644,8 @@ transitions:
 # Roles: cpu, mem, pods, health, thermal, storage, power-mix, renewable, gh-activity,
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,
-#        printer, gif:<name> (a GIF from the gifs: list),
+#        printer, sen (live video of Earth from the ISS),
+#        gif:<name> (a GIF from the gifs: list),
 #        ha:<name> (an entity from homeassistant.entities)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
 # are 40, 50 and 66.7 MHz. 50 MHz ran clean on all four panels; 66.7 MHz glitched.

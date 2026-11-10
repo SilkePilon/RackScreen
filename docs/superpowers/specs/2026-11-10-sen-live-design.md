@@ -100,3 +100,35 @@ Per decoded frame (cheap, a few dozen to a few hundred samples of the full
 - Detector on fixture frames: live, replay, slate, promo, night-black.
 - Scheduler integration: unavailable sen is skipped; leave request.
 - Pi: RSS and CPU while shown, while warming, while stopped.
+
+## As built (2026-11-11)
+
+Where the implementation differs from the plan above, and why:
+
+- **Segments without the playlist.** The media playlist lists the whole hour
+  (720 segments, 870 KB; 10 KB gzipped, so the HTTP client now accepts gzip)
+  and is read once per start, keeping only its last 8 KB. After that the next
+  segment's URL is the newest one with `/sq/<n>/` counted up: the URLs differ
+  in nothing else, and the server holds a request for a segment that does not
+  exist yet until it does (measured: `sq+1` answered after 2.6 s, `sq+2` after
+  5 s, `sq+5` a 404). A 404 reads the playlist again, a 403 resolves again.
+- **Every shown frame is classified**, not one a second: a check is 15 µs on
+  the desktop, and this way no slate or night frame is ever handed out. Live
+  takes 15 live pictures in a row (one second), leaving takes one.
+- **Probing.** While the picture is not live the rest of a segment is not
+  decoded (one keyframe per segment is looked at) and only every third
+  segment is fetched.
+- **Frame hold.** The model shows the last picture for 1.5 s after it
+  arrived, so a screen leaving the role fades out from the picture and not
+  from the globe; a stalled stream makes the role unavailable the same way.
+- **Night** is computed in core from the ISS ephemeris and the subsolar point
+  with a fixed 420 km altitude (`IssTrack::in_shadow`); without an ephemeris
+  the stream runs and the dark check decides.
+- **Frame buffers**: a pool of up to four (the model, the render workers'
+  last scene, one in flight), reused once nobody else holds them.
+- **Live page**: the visitor data is about 550 characters; the page is
+  scanned while it downloads and dropped once both values are found.
+- Measured on the desktop (release, 360p fixture): 0.28 ms demux + decode per
+  picture, 0.10 ms crop + convert and 0.015 ms classify per shown frame;
+  about 8 MB RSS while running, back to the start value when stopped.
+  `cargo run --release -p rackscreen-sources --example sen -- bench|live|run`.

@@ -3,6 +3,8 @@
 //!
 //!     cargo run -p rackscreen-app --example gifs -- .github/media/screens .github/media/shows
 //!
+//! A third argument makes only the screen GIF of that name (`sen`, `all`).
+//!
 //! A show GIF is the four panels side by side, 240 px circles 32 px apart on the
 //! default layout (25 mm gaps), played once from start to end at 12 fps.
 //!
@@ -160,7 +162,11 @@ fn clips() -> Vec<Clip> {
                 ],
                 _ => Vec::new(),
             };
-            Clip::role(role, script)
+            Clip {
+                // video does not shrink in a GIF: one pass of the segment
+                secs: if role == Role::Sen { 5.0 } else { 8.0 },
+                ..Clip::role(role, script)
+            }
         })
         .collect();
     out.push(Clip {
@@ -189,11 +195,18 @@ fn main() -> Result<()> {
     fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
     let shows_dir = PathBuf::from(std::env::args().nth(2).unwrap_or_else(|| SHOWS_DIR.into()));
     fs::create_dir_all(&shows_dir).with_context(|| format!("create {}", shows_dir.display()))?;
+    let only = std::env::args().nth(3);
     let mut renderer = Renderer::new()?;
     for clip in clips() {
+        if only.as_deref().is_some_and(|name| name != clip.name) {
+            continue;
+        }
         let path = dir.join(format!("{}.gif", clip.name));
         let frames = record(&mut renderer, &clip, &path)?;
         report(&path, frames, frames as Secs / FPS)?;
+    }
+    if only.is_some() {
+        return Ok(());
     }
     for def in rackscreen_core::shows::SHOWS {
         let path = shows_dir.join(format!("{}.gif", def.id));
@@ -260,6 +273,29 @@ fn record_show(
     Ok(frames)
 }
 
+/// The simulator's recorded SEN segment as panel frames, 15 a second.
+fn sen_frames() -> Result<Vec<rackscreen_core::video::VideoRef>> {
+    use rackscreen_core::event::SenEvent;
+    use rackscreen_sources::sen::player::{Player, Segment};
+    let mut player = Player::new(false)?;
+    let mut frames = Vec::new();
+    // the second pass is live from its first picture: a whole loop
+    for sq in 0..2 {
+        frames.clear();
+        let seg = Segment {
+            sq,
+            data: rackscreen_sources::fake::SEN_DEMO_SEGMENT.to_vec(),
+        };
+        player.play(&seg, &mut |_| true, &mut |e| {
+            if let SenEvent::Frame(f) = e {
+                frames.push(f);
+            }
+        });
+    }
+    anyhow::ensure!(!frames.is_empty(), "the demo segment gave no frames");
+    Ok(frames)
+}
+
 /// Play one clip and write it out. Returns the number of frames written.
 fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     let mut model = Model::new(Thresholds::default());
@@ -283,6 +319,18 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
     for ev in fake.initial() {
         model.apply(ev, 0.0);
     }
+
+    // The sen role plays the recorded segment, as the simulator does.
+    let sen = if clip.roles.contains(&Role::Sen) {
+        model.apply(
+            Event::Sen(rackscreen_core::event::SenEvent::Live(true)),
+            0.0,
+        );
+        sen_frames()?
+    } else {
+        Vec::new()
+    };
+    let mut sen_at = usize::MAX;
 
     let warmup_frames = (clip.warmup * FPS).round() as u64;
     let clip_frames = (clip.secs * FPS).round() as u64;
@@ -321,6 +369,17 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
                     }
                 }
                 Step::Event(ev) => model.apply(ev.clone(), now),
+            }
+        }
+        if !sen.is_empty() {
+            let at = (now * 15.0) as usize % sen.len();
+            if at != sen_at {
+                sen_at = at;
+                let frame = sen[at].clone();
+                model.apply(
+                    Event::Sen(rackscreen_core::event::SenEvent::Frame(frame)),
+                    now,
+                );
             }
         }
         model.set_unix_now(UNIX_START + now as i64);
