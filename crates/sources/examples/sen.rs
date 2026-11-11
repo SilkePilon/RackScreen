@@ -335,8 +335,38 @@ fn run(secs: u64) {
     println!("the stream did not stop");
 }
 
+/// Classify every shown picture of each segment and print the verdicts per
+/// segment: calibration against a stretch of real stream.
+fn classify_files(paths: &[&str]) {
+    for path in paths {
+        let Ok(data) = std::fs::read(path) else {
+            eprintln!("{path}: unreadable");
+            continue;
+        };
+        let mut dec = H264::new().expect("decoder");
+        let mut demux = Demuxer::new();
+        let mut counts = std::collections::BTreeMap::<String, u32>::new();
+        let mut n = 0u32;
+        demux.begin();
+        while let Some(au) = demux.next(&data) {
+            dec.decode(&au, |_, p| {
+                n += 1;
+                if n.is_multiple_of(2) {
+                    *counts.entry(format!("{:?}", classify(p))).or_default() += 1;
+                }
+            });
+        }
+        let line: Vec<String> = counts.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        println!("{path}: {}", line.join(" "));
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("classify") {
+        let files: Vec<&str> = args[1..].iter().map(String::as_str).collect();
+        return classify_files(&files);
+    }
     match args
         .iter()
         .map(String::as_str)
@@ -350,6 +380,6 @@ fn main() {
         ["dump", segment, out] => dump(segment, out),
         ["run"] => run(15),
         ["run", secs] => run(secs.parse().unwrap_or(15)),
-        _ => eprintln!("usage: sen bench [segment.ts] | sen live [seconds] | sen run [seconds] | sen dump <segment.ts> <dir>"),
+        _ => eprintln!("usage: sen bench [segment.ts] | sen live [seconds] | sen run [seconds] | sen dump <segment.ts> <dir> | sen classify <segment.ts>..."),
     }
 }

@@ -333,6 +333,23 @@ pub(crate) mod tests {
         }
     }
 
+    /// Real non-live footage from the stream (2026-11-11): recorded footage
+    /// during a loss of signal (orange "REPLAY" badge) and a promo (teal
+    /// "Trailer" badge). Neither may be shown.
+    #[test]
+    fn replay_and_trailer_footage_is_not_live() {
+        for ts in [
+            &include_bytes!("../../tests/fixtures/sen_replay.ts")[..],
+            &include_bytes!("../../tests/fixtures/sen_trailer.ts")[..],
+        ] {
+            let pics = pictures(ts, 15);
+            assert!(pics.len() >= 3, "{} pictures", pics.len());
+            for p in &pics {
+                assert_eq!(classify(&p.planes()), Verdict::NoBadge);
+            }
+        }
+    }
+
     #[test]
     fn the_slate_fixture_is_the_slate() {
         for p in &pictures(SLATE_TS, 15) {
