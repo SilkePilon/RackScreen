@@ -463,6 +463,13 @@ pub fn draw_globe(px: &mut Pixmap, cam_lat: f32, cam_lon: f32, sun_lat: f32, sun
 }
 
 /// How much memory the decoded maps hold (the lights are read in place).
+/// Decode the class map now. The first globe otherwise does it on a render
+/// thread, holding up that frame and every other screen that starts a
+/// globe meanwhile; call this from a thread of its own at startup.
+pub fn warm() {
+    classes();
+}
+
 pub fn map_bytes() -> usize {
     classes().len()
 }

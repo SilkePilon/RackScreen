@@ -11,6 +11,7 @@ use rackscreen_core::night::parse_hhmm;
 use rackscreen_core::screens::Entry;
 use rackscreen_core::shows::schedule::ShowScheduler;
 use rackscreen_core::shows::world::{gap_px, Layout};
+use rackscreen_core::theme::Role;
 use rackscreen_sources::SourceCtx;
 use tokio_util::sync::CancellationToken;
 
@@ -133,6 +134,16 @@ impl Monitor {
         // GIFs are pasted links, real in every source mode.
         spawn_gif_source(&runtime, cfg, &ctx);
         let sen_demand = spawn_sen_source(&runtime, cfg, &ctx, matches!(source, SourceKind::Fake));
+        // The globe's map is decoded on first use; do it now, off the render
+        // threads, when a screen will draw the globe (sen falls back to it).
+        if cfg.uses_role(Role::Iss) || cfg.uses_role(Role::Sen) {
+            let warm = std::thread::Builder::new()
+                .name("globe-warm".into())
+                .spawn(rackscreen_render::globe::warm);
+            if let Err(e) = warm {
+                tracing::debug!("globe warm-up thread: {e}");
+            }
+        }
 
         // displays
         let panels = open_panels(cfg, opts.sim, opts.sim_grid, key_tx)?;
@@ -305,7 +316,7 @@ fn spawn_sen_source(
     ctx: &SourceCtx,
     fake: bool,
 ) -> Option<tokio::sync::watch::Sender<bool>> {
-    if !cfg.uses_role(rackscreen_core::theme::Role::Sen) {
+    if !cfg.uses_role(Role::Sen) {
         return None;
     }
     let feed = if fake {
