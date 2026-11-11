@@ -106,7 +106,7 @@ Per decoded frame (cheap, a few dozen to a few hundred samples of the full
 Where the implementation differs from the plan above, and why:
 
 - **Segments without the playlist.** The media playlist lists the whole hour
-  (720 segments, 870 KB; 10 KB gzipped, so the HTTP client now accepts gzip)
+  (720 segments, 870 KB; 10 KB gzipped)
   and is read once per start, keeping only its last 8 KB. After that the next
   segment's URL is the newest one with `/sq/<n>/` counted up: the URLs differ
   in nothing else, and the server holds a request for a segment that does not
@@ -115,6 +115,17 @@ Where the implementation differs from the plan above, and why:
 - **Every shown frame is classified**, not one a second: a check is 15 µs on
   the desktop, and this way no slate or night frame is ever handed out. Live
   takes 15 live pictures in a row (one second), leaving takes one.
+- **Leaving live.** The slate and a missing badge end it on the first
+  picture; a dark picture or a missing info bar only after four looked-at
+  pictures in a row (0.25 s), and those pictures are held back meanwhile.
+- **Info bar.** Found by its three cyan labels at the right (their summed Cr
+  is 30 to 55 under the digits next to them, day, night and slate alike). A
+  brightness step at the bar's top edge misread 102 live pictures in 22 real
+  segments over dark ocean with clouds.
+- **HTTP.** The stream has its own client, bound to IPv4 (the URLs are bound
+  to the resolving address, and a dual-stack network could split the
+  requests over two families), with redirects held to the stream's hosts.
+  It asks for gzip itself; the shared client is unchanged.
 - **Probing.** While the picture is not live the rest of a segment is not
   decoded (one keyframe per segment is looked at) and only every third
   segment is fetched.

@@ -85,6 +85,11 @@ struct Clip {
     whole_round: bool,
     /// Seconds into the clip, and what happens then.
     script: Vec<(Secs, Step)>,
+    /// Keep every n-th frame (each shown n times as long) and drop this
+    /// many low bits of every colour channel: video does not shrink in a
+    /// GIF otherwise. 1 and 0 for the drawn roles.
+    every: u64,
+    drop_bits: u32,
 }
 
 impl Clip {
@@ -97,6 +102,8 @@ impl Clip {
             warmup: WARMUP,
             whole_round: false,
             script,
+            every: 1,
+            drop_bits: 0,
         }
     }
 }
@@ -162,10 +169,16 @@ fn clips() -> Vec<Clip> {
                 ],
                 _ => Vec::new(),
             };
-            Clip {
-                // video does not shrink in a GIF: one pass of the segment
-                secs: if role == Role::Sen { 5.0 } else { 8.0 },
-                ..Clip::role(role, script)
+            if role == Role::Sen {
+                // one pass of the recorded segment, at 5 fps in few colours
+                Clip {
+                    secs: 5.0,
+                    every: 4,
+                    drop_bits: 3,
+                    ..Clip::role(role, script)
+                }
+            } else {
+                Clip::role(role, script)
             }
         })
         .collect();
@@ -186,6 +199,8 @@ fn clips() -> Vec<Clip> {
         warmup: ALL_WARMUP,
         whole_round: true,
         script: Vec::new(),
+        every: 1,
+        drop_bits: 0,
     });
     out
 }
@@ -402,9 +417,22 @@ fn record(renderer: &mut Renderer, clip: &Clip, path: &Path) -> Result<u64> {
                 Some(_) => {}
             }
         }
+        if !(f - warmup_frames).is_multiple_of(clip.every) {
+            continue;
+        }
         renderer.render(&model.scene(0, now, &mut ui), &mut px);
         round_mask(&mut px);
-        out.push(&px, DELAY)?;
+        if clip.drop_bits > 0 {
+            let keep = 0xFFu8 << clip.drop_bits;
+            for p in px.data_mut().as_chunks_mut::<4>().0 {
+                if p[3] == 255 {
+                    for c in &mut p[..3] {
+                        *c &= keep;
+                    }
+                }
+            }
+        }
+        out.push(&px, DELAY * clip.every as u16)?;
     }
     anyhow::ensure!(!clip.whole_round, "{}: the round never closed", clip.name);
     out.finish()?;

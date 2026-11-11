@@ -64,7 +64,7 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | <img src=".github/media/screens/music.gif" alt="MUSIC role" width="200"> | <img src=".github/media/screens/printer.gif" alt="3D PRINTER role" width="200"> |
 | **`music`** — the album cover, the track's progress on the ring (green Spotify, violet Jellyfin), time left in the pill, song, artist and device in the card | **`printer`** — a Bambu Lab print: progress on the ring in the filament's colour, time left in the pill, job, layer and temperatures in the card |
 | <img src=".github/media/screens/sen.gif" alt="SEN LIVE role" width="200"> |  |
-| **`sen`** — [Sen](https://www.sen.com/live)'s live video of the Earth from the ISS, 15 fps over the whole panel; shown only while it is live and in daylight, skipped otherwise |  |
+| **`sen`** — [Sen](https://www.sen.com/live)'s live video of the Earth from the ISS, 15 fps over the whole panel (5 fps in this GIF); shown only while it is live and in daylight, skipped otherwise |  |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
