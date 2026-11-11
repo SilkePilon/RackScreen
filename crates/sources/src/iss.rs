@@ -13,6 +13,8 @@ use crate::http::client;
 use crate::SourceCtx;
 
 const TLE_URL: &str = "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE";
+/// ARISS publishes the same ISS TLE; asked when Celestrak refuses.
+const TLE_FALLBACK_URL: &str = "https://live.ariss.org/iss.txt";
 pub const EARTH_RADIUS_KM: f64 = 6_371.0;
 const WGS84_A: f64 = 6_378.137;
 const WGS84_F: f64 = 1.0 / 298.257_223_563;
@@ -297,9 +299,19 @@ pub fn next_pass(
 }
 
 async fn fetch_tle() -> Result<(String, String)> {
-    let resp = client().get(TLE_URL).send().await.context("request")?;
+    match fetch_tle_from(TLE_URL).await {
+        Ok(tle) => Ok(tle),
+        Err(first) => fetch_tle_from(TLE_FALLBACK_URL)
+            .await
+            .with_context(|| format!("celestrak: {first:#}; ariss")),
+    }
+}
+
+async fn fetch_tle_from(url: &str) -> Result<(String, String)> {
+    let resp = client().get(url).send().await.context("request")?;
     let status = resp.status();
-    let body = resp.text().await.context("body")?;
+    let body = crate::http::read_capped(resp, 64 * 1024, "the TLE").await?;
+    let body = String::from_utf8_lossy(&body);
     if !status.is_success() {
         return Err(HttpStatus {
             status: status.as_u16(),
@@ -307,7 +319,10 @@ async fn fetch_tle() -> Result<(String, String)> {
         }
         .into());
     }
-    parse_tle(&body)
+    let tle = parse_tle(&body)?;
+    // a TLE the propagator refuses is no TLE
+    elements(&tle.0, &tle.1)?;
+    Ok(tle)
 }
 
 /// Refresh the TLE, then recompute the next pass and the ground track on
@@ -434,6 +449,16 @@ mod tests {
             read_tle_cache(&path).is_none(),
             "an unparsable cache is ignored"
         );
+    }
+
+    #[test]
+    fn the_ariss_tle_format_propagates() {
+        // ARISS writes the drag exponent as "00000-0" where Celestrak has "00000+0"
+        let text = "ISS (ZARYA)\n1 25544U 98067A   26314.17503267  .00009346  00000-0  17575-3 0  9997\n2 25544  51.6322 297.6644 0007292   8.9462 351.1656 15.49289712594382\n";
+        let (l1, l2) = parse_tle(text).unwrap();
+        let r = position_teme(&l1, &l2, 1_794_355_200).unwrap();
+        let alt = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt() - EARTH_RADIUS_KM;
+        assert!((380.0..450.0).contains(&alt), "{alt}");
     }
 
     #[test]
