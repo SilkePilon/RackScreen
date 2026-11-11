@@ -237,3 +237,18 @@ and rejoined correctly.
 Pushing video costs almost nothing on SPI0, where the controller's DMA does
 the transfer; on SPI1 the CPU polls for the whole wire time. Put `sen` on a
 panel of SPI0 (the Pi config now has it on panel 2).
+
+### Production run (v0.20.6, 2026-11-11 06:58-07:40, real config, untouched)
+
+`sen` 60 s in panel 2's cycle of eleven roles, the other panels cycling as
+usual. 15 slots came up in the ISS day pass:
+- 07:00 live, then REPLAY at 07:00:24: left, stream stopped 10 s later.
+- 07:02-07:09: the replay went on; each slot warmed the stream up for 18 s,
+  saw no live footage and was skipped (never shown).
+- 07:10-07:36: nine slots live within 5-6 s of the warm-up start, ~45 s of
+  15 fps video each, decode thread 6.4-8.1 %, 0.20-0.26 ms a picture.
+- 07:31:21 camera-switch slate: left at once. 07:36:22 dusk (Dark): left.
+- 07:37:58 last warm-up near the predicted night: not live, skipped.
+- The stream URL was resolved once (07:00) and reused for every slot.
+Whole process over the 42 min: 48.5 % of one core with all four panels
+cycling (GIFs included), RSS 64.7 MB (peak 68 MB), 15 threads.
