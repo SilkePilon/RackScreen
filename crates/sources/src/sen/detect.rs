@@ -184,12 +184,19 @@ pub fn classify(p: &Planes) -> Verdict {
     }
 }
 
-/// Debounce: `need` live pictures in a row to go live, one of anything else
-/// to leave, so a slate is left at once.
+/// Pictures in a row that look dark or lack the info bar before a live
+/// stream stops counting as live: a quarter second at 15 looks a second.
+/// One such picture is often a dark stretch of ocean or the bar fading.
+pub const DOUBTS_TO_LEAVE: u32 = 4;
+
+/// Debounce: `need` live pictures in a row to go live. The slate and a
+/// missing badge end it at once (they are unmistakable); a dark picture or
+/// a missing info bar only after `DOUBTS_TO_LEAVE` in a row.
 pub struct Detector {
     live: bool,
     streak: u32,
     need: u32,
+    doubts: u32,
 }
 
 impl Detector {
@@ -198,6 +205,7 @@ impl Detector {
             live: false,
             streak: 0,
             need: need.max(1),
+            doubts: 0,
         }
     }
     pub fn live(&self) -> bool {
@@ -206,14 +214,27 @@ impl Detector {
     /// Take a verdict in; returns the new state when it changed.
     pub fn update(&mut self, v: Verdict) -> Option<bool> {
         let was = self.live;
-        if v == Verdict::Live {
-            self.streak = self.streak.saturating_add(1);
-            self.live = self.streak >= self.need;
-        } else {
-            self.streak = 0;
-            self.live = false;
+        match v {
+            Verdict::Live => {
+                self.doubts = 0;
+                self.streak = self.streak.saturating_add(1);
+                self.live = self.live || self.streak >= self.need;
+            }
+            Verdict::Dark | Verdict::NoHud if self.live => {
+                self.doubts += 1;
+                if self.doubts >= DOUBTS_TO_LEAVE {
+                    self.leave();
+                }
+            }
+            _ => self.leave(),
         }
         (self.live != was).then_some(self.live)
+    }
+
+    fn leave(&mut self) {
+        self.live = false;
+        self.streak = 0;
+        self.doubts = 0;
     }
 }
 
@@ -398,7 +419,35 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn going_live_takes_two_checks_and_leaving_one() {
+    fn a_dark_or_barless_picture_needs_company_to_end_live() {
+        for doubt in [Verdict::Dark, Verdict::NoHud] {
+            let mut d = Detector::new(2);
+            d.update(Verdict::Live);
+            assert_eq!(d.update(Verdict::Live), Some(true));
+            // one, two, three: still live; live footage clears the count
+            for _ in 0..DOUBTS_TO_LEAVE - 1 {
+                assert_eq!(d.update(doubt), None);
+            }
+            assert_eq!(d.update(Verdict::Live), None);
+            assert!(d.live());
+            for _ in 0..DOUBTS_TO_LEAVE - 1 {
+                assert_eq!(d.update(doubt), None);
+            }
+            assert_eq!(d.update(doubt), Some(false), "four in a row");
+            // and going live again takes the full run of live pictures
+            assert_eq!(d.update(Verdict::Live), None);
+            assert_eq!(d.update(Verdict::Live), Some(true));
+            // the slate and a missing badge end it at once, also mid-doubt
+            assert_eq!(d.update(doubt), None);
+            assert_eq!(d.update(Verdict::Slate), Some(false));
+            d.update(Verdict::Live);
+            d.update(Verdict::Live);
+            assert_eq!(d.update(Verdict::NoBadge), Some(false));
+        }
+    }
+
+    #[test]
+    fn going_live_takes_two_checks_and_leaving_the_slate_one() {
         let mut d = Detector::new(2);
         assert!(!d.live());
         assert_eq!(d.update(Verdict::Live), None);

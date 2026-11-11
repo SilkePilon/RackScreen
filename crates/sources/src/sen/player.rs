@@ -106,11 +106,12 @@ impl Player {
         self.verdict
     }
 
-    /// Nothing live is in sight: the last picture was not live footage.
-    /// The rest of such a segment is skipped, and the fetcher may skip
-    /// segments, until a segment starts with live footage again.
+    /// Nothing live is in sight: the stream is not live and the last
+    /// picture was not live footage. The rest of such a segment is skipped,
+    /// and the fetcher may skip segments, until a segment starts with live
+    /// footage again.
     pub fn probing(&self) -> bool {
-        self.verdict.is_some_and(|v| v != Verdict::Live)
+        !self.detector.live() && self.verdict.is_some_and(|v| v != Verdict::Live)
     }
 
     /// Play one segment: `emit` gets a frame for every shown picture while
@@ -158,7 +159,8 @@ impl Player {
                 if change == Some(false) {
                     emit(SenEvent::Live(false));
                 }
-                if detector.live() {
+                // a doubtful picture of a live stream is held back, not shown
+                if detector.live() && v == Verdict::Live {
                     if let Some(frame) = convert(map, pool, planes) {
                         emit(SenEvent::Frame(frame));
                     }
@@ -170,7 +172,7 @@ impl Player {
             });
             // not live footage: nothing in the rest of this segment is
             // shown, and the next one starts with a keyframe to look at
-            if looked.is_some_and(|v| v != Verdict::Live) {
+            if !self.detector.live() && looked.is_some_and(|v| v != Verdict::Live) {
                 self.dec.discontinuity();
                 self.pacer.reset();
                 self.last_sq = None;
@@ -271,6 +273,25 @@ mod tests {
         let back = play(&mut p, 4, LIVE);
         assert!(back.contains(&SenEvent::Live(true)));
         assert!(frames(&back) > 50);
+    }
+
+    #[test]
+    fn the_night_ends_live_after_a_few_dark_pictures_and_none_is_shown() {
+        use super::super::detect::DOUBTS_TO_LEAVE;
+        let night: &[u8] = include_bytes!("../../tests/fixtures/sen_night.ts");
+        let mut p = Player::new(false).unwrap();
+        play(&mut p, 1, LIVE);
+        let before = p.pictures;
+        let events = play(&mut p, 2, night);
+        // the live segment's last picture, then nothing until live ends
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(matches!(events[0], SenEvent::Frame(_)));
+        assert_eq!(events[1], SenEvent::Live(false));
+        // it took DOUBTS_TO_LEAVE looks, and the rest of the segment is skipped
+        let looked = (p.pictures - before).div_ceil(SHOW_EVERY);
+        assert_eq!(looked, 1 + DOUBTS_TO_LEAVE as u64);
+        assert!(!p.live() && p.probing());
+        assert_eq!(p.verdict(), Some(Verdict::Dark));
     }
 
     #[test]
