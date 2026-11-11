@@ -132,10 +132,7 @@ impl Demuxer {
         // a repeated counter is a duplicate packet, anything else but +1 a loss
         match self.cc.replace(cc) {
             Some(prev) if prev == cc => return None,
-            Some(prev) if (prev + 1) & 0x0F != cc => {
-                self.open = false;
-                self.cur.clear();
-            }
+            Some(prev) if (prev + 1) & 0x0F != cc => self.drop_open(),
             _ => {}
         }
         let mut done = None;
@@ -151,12 +148,11 @@ impl Demuxer {
                     self.cur_pts = pts;
                     self.cur.extend_from_slice(body);
                 }
-                None => self.open = false,
+                None => self.drop_open(),
             }
         } else if self.open {
             if self.cur.len() + payload.len() > MAX_AU {
-                self.open = false;
-                self.cur.clear();
+                self.drop_open();
             } else {
                 self.cur.extend_from_slice(payload);
             }
@@ -168,10 +164,16 @@ impl Demuxer {
     fn lose(&mut self, p: &[u8]) {
         let pid = ((p[1] as u16 & 0x1F) << 8) | p[2] as u16;
         if Some(pid) == self.video_pid {
-            self.open = false;
-            self.cur.clear();
+            self.drop_open();
             self.cc = None;
         }
+    }
+
+    /// Forget the PES being collected, its time included.
+    fn drop_open(&mut self) {
+        self.open = false;
+        self.cur.clear();
+        self.cur_pts = None;
     }
 }
 
@@ -351,6 +353,22 @@ mod tests {
         let _ = units(&LIVE[1..]);
         assert!(units(&[0x47; 5000]).is_empty());
         assert!(units(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_gap_forgets_the_open_unit_and_its_time() {
+        let mut d = Demuxer::new();
+        d.begin();
+        // far enough in to have a unit open
+        let mut n = 0;
+        while d.next_packet(LIVE).is_some_and(|p| {
+            d.packet(p);
+            n += 1;
+            n < 20
+        }) {}
+        assert!(d.open && d.cur_pts.is_some() && !d.cur.is_empty());
+        d.drop_open();
+        assert!(!d.open && d.cur_pts.is_none() && d.cur.is_empty());
     }
 
     #[test]
