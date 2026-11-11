@@ -214,3 +214,15 @@ During the 10 fps run a real loss of signal switched the stream to REPLAY
 04:06:30. Detector calibration on an hour of real stream (360 segments):
 292 live, 38 night, 15 REPLAY, 5 Trailer, 7 with the slate; no replay or
 trailer picture accepted, no sampled live one refused.
+
+### Video push (v0.20.5/v0.20.6)
+
+Video frames are diffed against what the panel shows, ignoring changes of
+at most one RGB565 step, in fine row bands (up to 16 rects, only inside the
+circle); `prev` mirrors the panel by copying only what was sent. Replaying
+real segments through the real code (`cargo run --release -p
+rackscreen-render --example pushsim -- seg.ts...`): 41-77 % of a full push
+against 92-98 % for the exact diff. On the Pi (05:19-05:27, 15 fps, SPI1):
+a fully live minute pushed 63.9 KB a frame (86-97 KB before), a dark
+sunrise minute 3.8 KB; slates and a replay in the same window were left
+and rejoined correctly.
