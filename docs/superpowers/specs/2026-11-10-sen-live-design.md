@@ -182,3 +182,15 @@ the board's decoder where there is one:
 - **Not done.** The decoder is not drained with `V4L2_DEC_CMD_STOP` when
   the stream stops: the pictures left in it are not wanted, so the queues
   are stopped and the device is closed.
+
+## Measured on the Pi 3B+ (2026-11-11, v0.20.2)
+
+- Hardware decoding (V4L2, bcm2835-codec): `sen-decode` thread 6.8 % of one
+  core at 30 decoded / 15 shown pictures per second, 0.27 ms per picture.
+  OpenH264 in software was 26 %; reading the decoder's uncached buffers in
+  place was 61 % before shown pictures were copied out first.
+- RSS 59 MB with the stream running (58 MB without).
+- The larger cost is pushing 15 full frames a second over SPI: about 28 % of
+  one core on the SPI1 (aux, polled) bus that panel 4 uses; a `sen` panel on
+  SPI0 costs much less.
+- ISS globe: one raster about 21 ms, every 2 s.
