@@ -143,22 +143,26 @@ fn badge_is_red(pic: &Pic) -> bool {
     cr >= 160 && (105..=140).contains(&cb)
 }
 
-/// The info bar darkens the picture from y = 304 down: a step along the
-/// whole width. Where the picture is too dark to show a step the bar cannot
-/// be ruled out, so it counts as there (the dark check has the last word).
+/// The three cyan labels at the right of the info bar ("TIME UTC" and the
+/// two under it) and the white digits next to each.
+const LABEL_X: (usize, usize) = (480, 512);
+const DIGITS_X: (usize, usize) = (524, 560);
+const LABEL_ROWS: [(usize, usize); 3] = [(316, 322), (328, 334), (340, 346)];
+/// The labels' summed Cr is at least this far under the digits': 30 to 55
+/// on every picture with the bar (day, night, slate), about 0 without it.
+const LABEL_CR_GAP: u32 = 18;
+
+/// The info bar is there: its labels are cyan (low Cr) next to neutral
+/// digits, whatever the picture behind the bar looks like. (A step in
+/// brightness at the bar's top edge is not reliable: over dark ocean with
+/// clouds the picture differs more across the edge than the bar dims it.)
 fn has_hud(pic: &Pic) -> bool {
-    let (mut seen, mut stepped) = (0, 0);
-    for x in (100..620).step_by(40) {
-        let above = pic.luma(x, x + 40, 296, 302, 2);
-        let below = pic.luma(x, x + 40, 304, 309, 2);
-        if above >= 32 {
-            seen += 1;
-            if below * 4 < above * 3 {
-                stepped += 1;
-            }
-        }
+    let (mut labels, mut digits) = (0, 0);
+    for (y0, y1) in LABEL_ROWS {
+        labels += pic.chroma(LABEL_X.0, LABEL_X.1, y0, y1, 1).1;
+        digits += pic.chroma(DIGITS_X.0, DIGITS_X.1, y0, y1, 1).1;
     }
-    seen < 6 || stepped * 5 >= seen * 4
+    labels + LABEL_CR_GAP <= digits
 }
 
 fn is_dark(pic: &Pic) -> bool {
@@ -312,6 +316,18 @@ pub(crate) mod tests {
     fn the_live_fixture_is_live() {
         let pics = pictures(LIVE, 15);
         assert_eq!(pics.len(), 10);
+        for p in &pics {
+            assert_eq!(classify(&p.planes()), Verdict::Live);
+        }
+    }
+
+    /// Dark ocean with bright clouds across the bar's edge: the picture
+    /// that an edge-step check for the info bar took for a promo.
+    #[test]
+    fn live_footage_of_dark_ocean_is_live() {
+        let ocean: &[u8] = include_bytes!("../../tests/fixtures/sen_live_ocean.ts");
+        let pics = pictures(ocean, 2);
+        assert!(pics.len() >= 3, "{} pictures", pics.len());
         for p in &pics {
             assert_eq!(classify(&p.planes()), Verdict::Live);
         }
