@@ -704,8 +704,8 @@ fn the_globe_raster_is_reused_while_its_parameters_are_equal() {
     r.render(&first, &mut px);
     assert!(px.data() == fresh.data());
     assert_eq!(r.globe_rasters(), 1, "one raster for all of them");
-    // the next second moves the globe: one more
-    m.set_unix_now(UNIX + 1);
+    // the next globe step (2 s) moves the globe: one more
+    m.set_unix_now(UNIX + 2);
     let next = m.scene_for_role(Role::Iss, 121.0, &mut ui);
     r.render(&next, &mut px);
     r.render(&next, &mut px);

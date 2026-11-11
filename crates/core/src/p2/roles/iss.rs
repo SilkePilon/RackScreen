@@ -1,7 +1,8 @@
 //! The ISS screen: the Earth as a globe that follows the station, its
 //! ground track, the standard ring filling toward the next pass and a pill
-//! with the countdown. Everything on the globe is derived from the clock in
-//! whole seconds, so the screen changes at most once a second.
+//! with the countdown. The globe and what moves with it step every
+//! `GLOBE_STEP_SECS` (the station crosses about 0.1 px a second, so the
+//! steps do not show); the countdown changes once a second.
 
 use crate::anim::Secs;
 use crate::event::{IssPass, IssTrack};
@@ -175,15 +176,20 @@ fn home_dot(track: &IssTrack, unix: i64, alpha: f32) -> Vec<Drawable> {
     vec![dot(HOME_R + 1.0, INK, 0.9), dot(HOME_R, WHITE, 1.0)]
 }
 
+/// The globe is redrawn at most this often; each redraw is a whole-globe
+/// raster (about 20 ms on the Pi 3B+).
+pub const GLOBE_STEP_SECS: i64 = 2;
+
 pub fn iss_scene(model: &Model, now: Secs, ui: &mut ScreenUi) -> Scene {
     let unix = model.unix_now();
+    let globe_unix = unix - unix.rem_euclid(GLOBE_STEP_SECS);
     let state = model.iss();
     let pass = state.pass.as_ref();
     let mut scene = Scene::new();
-    // the globe changes once a second at most, and with it the base
+    // the globe changes once a step at most, and with it the base
     let layer: Vec<Drawable> = match &state.track {
         Some(track) => ui
-            .memo((unix, track.t0), || globe_layer(track, unix))
+            .memo((globe_unix, track.t0), || globe_layer(track, globe_unix))
             .to_vec(),
         None => Vec::new(),
     };
@@ -216,7 +222,7 @@ pub fn iss_scene(model: &Model, now: Secs, ui: &mut ScreenUi) -> Scene {
     let alpha = ui.glide_with(("home", 0), target, now, HOME_FADE_SECS);
     if alpha > 0.01 {
         if let Some(track) = &state.track {
-            scene.items.extend(home_dot(track, unix, alpha));
+            scene.items.extend(home_dot(track, globe_unix, alpha));
         }
     }
     let (text, color) = pill_text(pass, unix);
@@ -488,9 +494,9 @@ mod tests {
         let a = iss_scene(&m, 10.0, &mut ui);
         let b = iss_scene(&m, 10.9, &mut ui);
         assert_eq!(a, b, "same second, same scene: the frame is skipped");
-        m.set_unix_now(UNIX + 1);
+        m.set_unix_now(UNIX + GLOBE_STEP_SECS);
         let c = iss_scene(&m, 11.0, &mut ui);
-        assert_ne!(globe(&a), globe(&c), "the next second moves the globe");
+        assert_ne!(globe(&a), globe(&c), "the next step moves the globe");
         // a fresh screen state builds the same thing
         assert_eq!(c, iss_scene(&m, 11.0, &mut ScreenUi::new()));
     }
