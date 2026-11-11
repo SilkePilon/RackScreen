@@ -610,14 +610,14 @@ impl Model {
             .as_ref()
             .filter(|_| self.now - self.sen.frame_at <= SEN_HOLD_SECS)
     }
-    /// The station is on the day side on the stream: out of the Earth's
-    /// shadow now and a stream delay ago. Without an ephemeris nothing is
-    /// known and the stream's own picture decides.
+    /// The stream shows the day side: the ground under the station is lit
+    /// now and a stream delay ago. Without an ephemeris nothing is known and
+    /// the stream's own picture decides.
     pub fn sen_daylight(&self) -> bool {
         let Some(track) = &self.iss.track else {
             return true;
         };
-        let lit = |unix: i64| !track.in_shadow(unix).unwrap_or(false);
+        let lit = |unix: i64| track.ground_lit(unix).unwrap_or(true);
         lit(self.unix_now) && lit(self.unix_now - SEN_STREAM_DELAY_SECS)
     }
     /// The SEN stream should be running: the station is on the day side and

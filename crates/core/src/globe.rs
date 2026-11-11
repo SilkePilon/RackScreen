@@ -107,7 +107,21 @@ impl IssTrack {
         let (lat, lon) = subsolar(unix);
         Some(in_shadow(self.at(unix)?, unit(lat, lon)))
     }
+
+    /// Whether the ground under the station is lit at `unix` (sun above
+    /// `GROUND_LIT_MIN_ELEVATION_DEG` there); `None` outside the ephemeris.
+    /// The cameras look down at the ground, which goes dark well before the
+    /// station itself enters the shadow.
+    pub fn ground_lit(&self, unix: i64) -> Option<bool> {
+        let (lat, lon) = subsolar(unix);
+        let min = GROUND_LIT_MIN_ELEVATION_DEG.to_radians().sin();
+        Some(dot(self.at(unix)?, unit(lat, lon)) > min)
+    }
 }
+
+/// Below this sun elevation at the station's ground point the view down is
+/// too dark to show (late civil twilight).
+pub const GROUND_LIT_MIN_ELEVATION_DEG: f64 = -4.0;
 
 /// The globe is centred this far west of the station, and on this share of
 /// its latitude, so the station sits right of centre with its way ahead in
@@ -275,6 +289,25 @@ mod tests {
             !in_shadow(unit(75.0, 180.0), sun),
             "over the pole's twilight"
         );
+    }
+
+    #[test]
+    fn the_ground_goes_dark_before_the_station_does() {
+        let t = 1_790_000_000;
+        let (lat, lon) = subsolar(t);
+        let at = |dlon: f64| IssTrack {
+            t0: t,
+            step_secs: 20,
+            points: vec![(lat as f32, (lon + dlon) as f32); 2],
+            home: (0.0, 0.0),
+        };
+        assert_eq!(at(60.0).ground_lit(t), Some(true));
+        assert_eq!(at(92.0).ground_lit(t), Some(true), "sun just set");
+        // 100° past the subsolar point: the station is still sunlit, the
+        // ground below is in deep twilight
+        assert_eq!(at(100.0).in_shadow(t), Some(false));
+        assert_eq!(at(100.0).ground_lit(t), Some(false));
+        assert_eq!(at(100.0).ground_lit(t + 60), None);
     }
 
     #[test]
