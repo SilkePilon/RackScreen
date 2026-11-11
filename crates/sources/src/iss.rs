@@ -24,6 +24,10 @@ const HORIZON_SECS: i64 = 24 * 3600;
 /// the fetch keeps failing.
 const TLE_REFRESH: Duration = Duration::from_secs(24 * 3600);
 const TLE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+/// A failed TLE fetch is tried again after this long, then after
+/// `TLE_RETRY_MAX`: asking again sooner only prolongs a Celestrak block.
+const TLE_RETRY: Duration = Duration::from_secs(15 * 60);
+const TLE_RETRY_MAX: Duration = Duration::from_secs(2 * 3600);
 /// Passes are recomputed this often, and right after one ends.
 const RECOMPUTE: Duration = Duration::from_secs(600);
 /// The observer counts as dark below this sun elevation (civil twilight).
@@ -46,6 +50,35 @@ pub struct IssConfig {
     pub lat: f64,
     pub lon: f64,
     pub min_elevation: f32,
+    /// Where the last TLE is kept, so a restart does not fetch it again
+    /// (Celestrak refuses clients that ask for the same data too often).
+    pub cache: Option<std::path::PathBuf>,
+}
+
+/// The TLE cache file under the service's state directory.
+pub fn tle_cache_path_in(state_dir: &std::path::Path) -> std::path::PathBuf {
+    state_dir.join("rackscreen").join("iss.tle")
+}
+
+/// The cached TLE and how old it is, when the file is there and parses.
+pub fn read_tle_cache(path: &std::path::Path) -> Option<((String, String), Duration)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let age = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .unwrap_or(Duration::ZERO);
+    Some((parse_tle(&text).ok()?, age))
+}
+
+/// Keep the TLE for the next start: a temp file renamed into place.
+pub fn write_tle_cache(path: &std::path::Path, tle: &(String, String)) -> Result<()> {
+    let dir = path.parent().context("cache path has no parent")?;
+    std::fs::create_dir_all(dir).context("create the cache directory")?;
+    let tmp = path.with_extension("tle.tmp");
+    std::fs::write(&tmp, format!("ISS (ZARYA)\n{}\n{}\n", tle.0, tle.1)).context("write")?;
+    std::fs::rename(&tmp, path).context("rename")?;
+    Ok(())
 }
 
 /// The two element lines out of a Celestrak TLE response.
@@ -287,6 +320,19 @@ async fn fetch_tle() -> Result<(String, String)> {
 pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
     let mut tle: Option<(String, String)> = None;
     let mut fetched = std::time::Instant::now();
+    if let Some((cached, age)) = cfg.cache.as_deref().and_then(read_tle_cache) {
+        if age < TLE_MAX_AGE {
+            tracing::info!("iss: TLE from the cache, {} h old", age.as_secs() / 3600);
+            tle = Some(cached);
+            // an old cache is refreshed now; a fresh one when it is a day old
+            fetched = std::time::Instant::now()
+                .checked_sub(age)
+                .unwrap_or_else(std::time::Instant::now);
+        }
+    }
+    // after a failed fetch: when to try again, and the wait after that
+    let mut retry_at: Option<std::time::Instant> = None;
+    let mut retry_wait = TLE_RETRY;
     // when the pass was last computed, and when it has to be again
     let mut pass_at: Option<std::time::Instant> = None;
     let mut pass_due = RECOMPUTE;
@@ -295,16 +341,28 @@ pub async fn run_iss(cfg: IssConfig, ctx: SourceCtx) {
             return;
         }
         let stale = tle.is_none() || fetched.elapsed() >= TLE_REFRESH;
-        if stale {
+        if stale && retry_at.is_none_or(|at| at.elapsed() > Duration::ZERO) {
             match fetch_tle().await {
                 Ok(t) => {
                     tracing::info!("iss: TLE refreshed");
+                    if let Some(path) = &cfg.cache {
+                        if let Err(e) = write_tle_cache(path, &t) {
+                            tracing::debug!("iss: TLE cache: {e:#}");
+                        }
+                    }
                     tle = Some(t);
                     fetched = std::time::Instant::now();
                     pass_at = None;
+                    retry_at = None;
+                    retry_wait = TLE_RETRY;
                 }
                 Err(e) => {
-                    tracing::warn!("iss: TLE fetch: {e:#}");
+                    tracing::warn!(
+                        "iss: TLE fetch: {e:#}; next try in {} min",
+                        retry_wait.as_secs() / 60
+                    );
+                    retry_at = Some(std::time::Instant::now() + retry_wait);
+                    retry_wait = (retry_wait * 2).min(TLE_RETRY_MAX);
                     if fetched.elapsed() >= TLE_MAX_AGE {
                         tle = None;
                     }
@@ -360,6 +418,23 @@ mod tests {
     const TLE: &str = include_str!("../tests/fixtures/iss.tle");
     /// 2026-09-07T12:00Z, the TLE epoch.
     const EPOCH: i64 = 1_788_782_400;
+
+    #[test]
+    fn the_tle_cache_round_trips_and_knows_its_age() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = tle_cache_path_in(dir.path());
+        assert!(read_tle_cache(&path).is_none(), "no file yet");
+        let tle = parse_tle(include_str!("../tests/fixtures/iss.tle")).unwrap();
+        write_tle_cache(&path, &tle).unwrap();
+        let (back, age) = read_tle_cache(&path).unwrap();
+        assert_eq!(back, tle);
+        assert!(age < Duration::from_secs(60));
+        std::fs::write(&path, "garbage").unwrap();
+        assert!(
+            read_tle_cache(&path).is_none(),
+            "an unparsable cache is ignored"
+        );
+    }
 
     #[test]
     fn parses_the_two_lines() {

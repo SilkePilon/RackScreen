@@ -499,6 +499,8 @@ fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: 
                 lat,
                 lon,
                 min_elevation: cfg.iss.min_elevation,
+                cache: crate::play::state_dir()
+                    .map(|d| rackscreen_sources::iss::tle_cache_path_in(&d)),
             },
             ctx.clone(),
         ));

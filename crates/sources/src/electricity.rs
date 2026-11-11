@@ -59,7 +59,7 @@ pub fn parse_power_breakdown(json: &str) -> Result<PowerBreakdown> {
 /// A non-2xx answer from Electricity Maps, kept typed so the poller can tell a
 /// rejected token from a network hiccup.
 #[derive(Debug, thiserror::Error)]
-#[error("electricity maps HTTP {status}: {body}")]
+#[error("HTTP {status}: {body}")]
 pub struct HttpStatus {
     pub status: u16,
     pub body: String,
