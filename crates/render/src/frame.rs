@@ -244,6 +244,12 @@ pub fn merge_rects(rects: Vec<Rect>, w: u32, h: u32) -> Vec<Rect> {
     merge_rects_max(rects, w, h, MAX_RECTS, FULL_FRACTION)
 }
 
+/// `merge_rects` for a frame merged with one still waiting to be sent: as
+/// many rects as a video frame may have, so its fine bands survive.
+pub fn merge_pending(rects: Vec<Rect>, w: u32, h: u32) -> Vec<Rect> {
+    merge_rects_max(rects, w, h, VIDEO_MAX_RECTS, VIDEO_FULL_FRACTION)
+}
+
 /// `merge_rects` with its limits given.
 fn merge_rects_max(
     mut rects: Vec<Rect>,

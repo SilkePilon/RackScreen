@@ -5,7 +5,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use anyhow::Result;
-use rackscreen_render::frame::{merge_rects, round_rects};
+use rackscreen_render::frame::{merge_pending, round_rects};
 
 pub use rackscreen_render::frame::Rect;
 
@@ -150,7 +150,7 @@ impl Mailbox {
             Some(old) => {
                 let mut all = rects.to_vec();
                 all.extend(old.rects);
-                merge_rects(all, full.w, full.h)
+                merge_pending(all, full.w, full.h)
             }
             None => rects.to_vec(),
         };
