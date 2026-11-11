@@ -12,6 +12,7 @@ pub mod detect;
 pub mod player;
 pub mod resolve;
 pub mod ts;
+pub mod v4l2;
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
