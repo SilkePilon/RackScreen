@@ -52,6 +52,8 @@ iss:
   min_elevation: 10        # degrees above the horizon that count as a pass
 # sen:
 #   fps: 15                # SEN live pictures a second: 10, 15 or 30
+#                          # (video costs ~2 %/fps of a core on an spi: 1 panel,
+#                          # almost nothing on spi: 0, which has DMA)
 
 github:
   enabled: false           # fine-grained token: read access to contributions, events and Actions

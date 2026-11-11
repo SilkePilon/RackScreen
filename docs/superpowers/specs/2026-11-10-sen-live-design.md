@@ -226,3 +226,14 @@ against 92-98 % for the exact diff. On the Pi (05:19-05:27, 15 fps, SPI1):
 a fully live minute pushed 63.9 KB a frame (86-97 KB before), a dark
 sunrise minute 3.8 KB; slates and a replay in the same window were left
 and rejoined correctly.
+
+### SPI0 vs SPI1 (controlled, 2026-11-11 05:41-05:46, other panels static)
+
+| `sen` on | process CPU | that bus's thread |
+|---|---|---|
+| panel 2, SPI0 (DMA) | 30 % | < 3 % |
+| panel 4, SPI1 (aux, polled) | 40 % | 28.8 % |
+
+Pushing video costs almost nothing on SPI0, where the controller's DMA does
+the transfer; on SPI1 the CPU polls for the whole wire time. Put `sen` on a
+panel of SPI0 (the Pi config now has it on panel 2).
