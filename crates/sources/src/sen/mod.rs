@@ -49,6 +49,10 @@ const QUEUE: usize = 2;
 const PROBE_STEP: u64 = 3;
 /// Failed requests in a row before the stream gives up and backs off.
 const MAX_ERRORS: u32 = 6;
+/// The decoder's numbers go to the log this long after a stream started and
+/// then at this interval.
+const STATS_FIRST: Duration = Duration::from_secs(30);
+const STATS_EVERY: Duration = Duration::from_secs(300);
 
 const MAX_PAGE: usize = 4 * 1024 * 1024;
 const MAX_PLAYER: usize = 1024 * 1024;
@@ -280,6 +284,84 @@ impl Shared {
     }
 }
 
+/// CPU time this thread has used.
+fn thread_cpu() -> Option<Duration> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: the call only writes the timespec it is given.
+        if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } == 0 {
+            return Some(Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32));
+        }
+    }
+    None
+}
+
+/// What the decoder did over a stretch of time, for the log: which one it
+/// is, how many pictures, the time in the decoder per picture and the share
+/// of one core the whole decode thread used.
+fn stats_line(
+    name: &str,
+    then: decode::Stats,
+    now: decode::Stats,
+    wall: Duration,
+    cpu: Option<Duration>,
+) -> String {
+    let pictures = now.pictures.saturating_sub(then.pictures);
+    let busy = now.busy.saturating_sub(then.busy);
+    let each = busy.as_secs_f64() * 1000.0 / pictures.max(1) as f64;
+    let mut line = format!(
+        "decoder {name}: {pictures} pictures in {:.0} s, {each:.2} ms each",
+        wall.as_secs_f64()
+    );
+    if let Some(cpu) = cpu {
+        let share = 100.0 * cpu.as_secs_f64() / wall.as_secs_f64().max(0.001);
+        line.push_str(&format!(", thread cpu {share:.1} %"));
+    }
+    line
+}
+
+/// Writes the decoder's numbers to the log now and then.
+struct Meter {
+    at: Instant,
+    every: Duration,
+    stats: decode::Stats,
+    cpu: Option<Duration>,
+}
+
+impl Meter {
+    fn new() -> Meter {
+        Meter {
+            at: Instant::now(),
+            every: STATS_FIRST,
+            stats: decode::Stats::default(),
+            cpu: thread_cpu(),
+        }
+    }
+
+    fn tick(&mut self, player: &Player) {
+        let wall = self.at.elapsed();
+        if wall < self.every {
+            return;
+        }
+        let (name, stats) = player.decoder();
+        let cpu = thread_cpu();
+        let used = cpu
+            .zip(self.cpu)
+            .map(|(now, then)| now.saturating_sub(then));
+        tracing::info!("sen: {}", stats_line(name, self.stats, stats, wall, used));
+        *self = Meter {
+            at: Instant::now(),
+            every: STATS_EVERY,
+            stats,
+            cpu,
+        };
+    }
+}
+
 /// Counts the streams started, so a decode thread knows at its end whether
 /// it still is the newest.
 type Generation = Arc<AtomicU64>;
@@ -290,6 +372,7 @@ type Generation = Arc<AtomicU64>;
 fn decode_thread(shared: Arc<Shared>, ctx: SourceCtx, generation: Generation, id: u64) {
     match Player::new(true) {
         Ok(mut player) => {
+            let mut meter = Meter::new();
             while let Some(seg) = shared.next() {
                 let was_live = player.live();
                 let done = player.play(&seg, &mut |d| shared.wait(d), &mut |e| {
@@ -303,6 +386,7 @@ fn decode_thread(shared: Arc<Shared>, ctx: SourceCtx, generation: Generation, id
                         player.verdict()
                     );
                 }
+                meter.tick(&player);
                 if !done {
                     break;
                 }
@@ -585,6 +669,7 @@ pub async fn probe(secs: u64, mut report: impl FnMut(String)) -> Result<()> {
     let newest = newest_segment(&client, &media_url).await?;
     report(format!("newest segment {}", newest.sq));
     let mut player = Player::new(false).map_err(|e| anyhow!("{e:#}"))?;
+    report(format!("decoder {}", player.decoder().0));
     let segments = secs.div_ceil(SEGMENT.as_secs()).max(1);
     // start a little behind the edge so the first requests do not wait
     let first = newest.sq.saturating_sub(segments.saturating_sub(1));
@@ -618,6 +703,12 @@ pub async fn probe(secs: u64, mut report: impl FnMut(String)) -> Result<()> {
             }
         ));
     }
+    let (name, stats) = player.decoder();
+    report(format!(
+        "decoder {name} at the end: {} pictures, {:.2} ms each",
+        stats.pictures,
+        stats.busy.as_secs_f64() * 1000.0 / stats.pictures.max(1) as f64
+    ));
     Ok(())
 }
 
@@ -631,6 +722,39 @@ mod tests {
     fn failures_back_off_1_5_15_60_minutes() {
         let mins: Vec<u64> = (0..7).map(|n| backoff(n).as_secs() / 60).collect();
         assert_eq!(mins, vec![1, 1, 5, 15, 60, 60, 60]);
+    }
+
+    #[test]
+    fn the_stats_line_names_the_decoder_and_its_cost() {
+        let then = decode::Stats {
+            units: 10,
+            pictures: 100,
+            busy: Duration::from_millis(50),
+        };
+        let now = decode::Stats {
+            units: 910,
+            pictures: 1000,
+            busy: Duration::from_millis(500),
+        };
+        let wall = Duration::from_secs(30);
+        assert_eq!(
+            stats_line("v4l2", then, now, wall, Some(Duration::from_millis(600))),
+            "decoder v4l2: 900 pictures in 30 s, 0.50 ms each, thread cpu 2.0 %"
+        );
+        // no pictures and no clock: still a line, no division by zero
+        assert_eq!(
+            stats_line("software", now, now, Duration::ZERO, None),
+            "decoder software: 0 pictures in 0 s, 0.00 ms each"
+        );
+        // this thread's clock runs
+        let a = thread_cpu();
+        let mut x = 0u64;
+        for i in 0..2_000_000u64 {
+            x = std::hint::black_box(x.wrapping_add(i));
+        }
+        if let (Some(a), Some(b)) = (a, thread_cpu()) {
+            assert!(b > a);
+        }
     }
 
     #[test]

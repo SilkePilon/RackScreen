@@ -98,7 +98,9 @@ fn bench(path: &str) {
             });
         }
     }
-    let decode_ms = t.elapsed().as_secs_f64() * 1000.0 / pictures as f64;
+    let decode_ms = t.elapsed().as_secs_f64() * 1000.0 / pictures.max(1) as f64;
+    // RACKSCREEN_SEN_DECODER=software|v4l2 picks one
+    println!("decoder {}", dec.name());
     drop(dec);
     let pic = kept.expect("a picture");
     println!("{}x{} from {path}", pic.width, pic.height);

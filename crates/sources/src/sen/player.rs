@@ -8,7 +8,7 @@ use anyhow::Result;
 use rackscreen_core::event::SenEvent;
 use rackscreen_core::video::{CropMap, Planes, VideoFrame, VideoRef};
 
-use super::decode::H264;
+use super::decode::{Stats, H264};
 use super::detect::{classify, Detector, Verdict};
 use super::ts::Demuxer;
 
@@ -99,6 +99,11 @@ impl Player {
 
     pub fn live(&self) -> bool {
         self.detector.live()
+    }
+
+    /// The decoder in use ("v4l2" or "software") and what it has done.
+    pub fn decoder(&self) -> (&'static str, Stats) {
+        (self.dec.name(), self.dec.stats())
     }
 
     /// What the last picture looked at showed.
