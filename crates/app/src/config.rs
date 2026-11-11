@@ -618,16 +618,121 @@ impl From<String> for RoleEntry {
     }
 }
 
-/// The YAML and JSON shape of a `RoleEntry`.
-#[derive(Deserialize, Serialize)]
+/// The YAML and JSON shape of a `RoleEntry`: a name, or a map with `role`
+/// and maybe `secs`. Read by hand (not as an untagged enum) so a bad
+/// `secs` is reported as such, with the role, instead of "did not match
+/// any variant".
+#[derive(Serialize)]
 #[serde(untagged)]
 enum RawRoleEntry {
     Name(String),
-    Timed {
-        role: String,
-        #[serde(default)]
-        secs: Option<u64>,
-    },
+    Timed { role: String, secs: Option<u64> },
+}
+
+/// A `secs` value as written: whole seconds, or what was there instead.
+enum SecsIn {
+    Whole(u64),
+    Bad(String),
+}
+
+impl<'de> Deserialize<'de> for SecsIn {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl serde::de::Visitor<'_> for V {
+            type Value = SecsIn;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a whole number of seconds")
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<SecsIn, E> {
+                Ok(SecsIn::Whole(v))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<SecsIn, E> {
+                Ok(u64::try_from(v).map_or_else(|_| SecsIn::Bad(v.to_string()), SecsIn::Whole))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<SecsIn, E> {
+                Ok(if v >= 0.0 && v.fract() == 0.0 && v <= 1e9 {
+                    SecsIn::Whole(v as u64)
+                } else {
+                    SecsIn::Bad(v.to_string())
+                })
+            }
+            fn visit_str<E>(self, v: &str) -> Result<SecsIn, E> {
+                Ok(SecsIn::Bad(format!("\"{v}\"")))
+            }
+            fn visit_bool<E>(self, v: bool) -> Result<SecsIn, E> {
+                Ok(SecsIn::Bad(v.to_string()))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+impl<'de> Deserialize<'de> for RawRoleEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = RawRoleEntry;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a role name, or a map like { role: iss, secs: 30 }")
+            }
+            fn visit_str<E>(self, v: &str) -> Result<RawRoleEntry, E> {
+                Ok(RawRoleEntry::Name(v.to_string()))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<RawRoleEntry, A::Error> {
+                let (mut role, mut secs) = (None::<String>, None::<SecsIn>);
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "role" => role = Some(map.next_value()?),
+                        "secs" => secs = map.next_value()?,
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                let role = role.ok_or_else(|| A::Error::missing_field("role"))?;
+                match secs {
+                    Some(SecsIn::Bad(got)) => Err(A::Error::custom(bad_secs(&role, &got))),
+                    Some(SecsIn::Whole(n)) => Ok(RawRoleEntry::Timed {
+                        role,
+                        secs: Some(n),
+                    }),
+                    None => Ok(RawRoleEntry::Timed { role, secs: None }),
+                }
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// What is wrong with a `secs` that is not a whole number.
+fn bad_secs(role: &str, got: &str) -> String {
+    format!("{role} secs must be a whole number between 3 and 300 (got {got})")
+}
+
+/// Name the screen and the role of a `secs` that is not a whole number,
+/// before the typed parse meets it (which knows the role but not the screen).
+fn check_role_secs(raw: &serde_yaml_ng::Value) -> Result<()> {
+    let screens = raw.get("screens").and_then(|s| s.as_sequence());
+    for (i, screen) in screens.into_iter().flatten().enumerate() {
+        let roles = screen.get("roles").and_then(|r| r.as_sequence());
+        for entry in roles.into_iter().flatten() {
+            let Some(secs) = entry.get("secs").filter(|s| !s.is_null()) else {
+                continue;
+            };
+            let whole = secs.as_u64().is_some()
+                || secs.as_f64().is_some_and(|f| f >= 0.0 && f.fract() == 0.0);
+            if !whole {
+                let role = entry.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+                let got = serde_yaml_ng::to_string(secs).unwrap_or_default();
+                anyhow::bail!("screen {}: {}", i + 1, bad_secs(role, got.trim()));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl From<RawRoleEntry> for RoleEntry {
@@ -930,6 +1035,7 @@ impl Config {
                 tracing::warn!("config: the `{block}:` block is no longer used and is ignored");
             }
         }
+        check_role_secs(&raw)?;
         let mut cfg: Config = serde_yaml_ng::from_str(text).context("parse yaml")?;
         cfg.normalize()?;
         Ok(cfg)
@@ -1630,6 +1736,57 @@ mod tests {
             serde_json::to_value(roles).unwrap(),
             serde_json::json!(["cpu", { "role": "iss", "secs": 30 }, "mem"])
         );
+    }
+
+    #[test]
+    fn role_secs_that_are_not_whole_numbers_say_so() {
+        let yaml = |secs: &str| {
+            format!(
+                "screens:\n  - {{ roles: [cpu], spi: 0, cs: 0, dc: 6, rst: 5 }}\n  - {{ roles: [cpu, {{ role: iss, secs: {secs} }}], spi: 0, cs: 1, dc: 13, rst: 26 }}\n"
+            )
+        };
+        for (secs, got) in [
+            ("-5", "-5"),
+            ("12.5", "12.5"),
+            ("soon", "soon"),
+            ("true", "true"),
+        ] {
+            let e = format!("{:#}", Config::from_yaml(&yaml(secs)).unwrap_err());
+            assert_eq!(
+                e,
+                format!("screen 2: iss secs must be a whole number between 3 and 300 (got {got})")
+            );
+        }
+        // whole numbers in any spelling still load
+        for secs in ["30", "30.0", "null", "~"] {
+            Config::from_yaml(&yaml(secs)).unwrap();
+        }
+        // JSON from the web UI: the role and the value, no "untagged enum"
+        let json = |secs: &str| format!(r#"["cpu", {{ "role": "iss", "secs": {secs} }}]"#);
+        for (secs, got) in [("-5", "-5"), ("12.5", "12.5"), ("\"x\"", "\"x\"")] {
+            let e = serde_json::from_str::<Vec<RoleEntry>>(&json(secs))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                e.starts_with(&format!(
+                    "iss secs must be a whole number between 3 and 300 (got {got})"
+                )),
+                "{e}"
+            );
+        }
+        let ok: Vec<RoleEntry> = serde_json::from_str(&json("30")).unwrap();
+        assert_eq!(ok[1].secs, Some(30));
+        let ok: Vec<RoleEntry> = serde_json::from_str(&json("null")).unwrap();
+        assert_eq!(ok[1].secs, None);
+        // other shapes say what is expected
+        let e = serde_json::from_str::<Vec<RoleEntry>>("[7]")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("a role name, or a map"), "{e}");
+        let e = serde_json::from_str::<Vec<RoleEntry>>(r#"[{"secs": 5}]"#)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("missing field `role`"), "{e}");
     }
 
     #[test]
