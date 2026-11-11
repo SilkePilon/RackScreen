@@ -77,6 +77,49 @@ pub struct Player {
     /// Pictures decoded so far.
     pictures: u64,
     verdict: Option<Verdict>,
+    scratch: Scratch,
+}
+
+/// A cached copy of a shown picture. The hardware decoder's pictures sit in
+/// DMA memory that the CPU maps uncached: the classifier and the crop read
+/// hundreds of thousands of scattered bytes, each a slow trip to RAM there
+/// (about 30 ms a picture on the Pi 3B+). One sequential copy row by row
+/// first, then everything reads from the cache.
+#[derive(Default)]
+struct Scratch {
+    y: Vec<u8>,
+    u: Vec<u8>,
+    v: Vec<u8>,
+}
+
+impl Scratch {
+    /// The visible part of `p`, tightly packed (strides = widths).
+    fn copy<'a>(&'a mut self, p: &Planes) -> Option<Planes<'a>> {
+        if !p.valid() {
+            return None;
+        }
+        let (w, h) = (p.width, p.height);
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        fn rows(dst: &mut Vec<u8>, src: &[u8], stride: usize, w: usize, h: usize) {
+            dst.clear();
+            dst.reserve(w * h);
+            for r in 0..h {
+                dst.extend_from_slice(&src[r * stride..r * stride + w]);
+            }
+        }
+        rows(&mut self.y, p.y, p.y_stride, w, h);
+        rows(&mut self.u, p.u, p.c_stride, cw, ch);
+        rows(&mut self.v, p.v, p.c_stride, cw, ch);
+        Some(Planes {
+            y: &self.y,
+            u: &self.u,
+            v: &self.v,
+            width: w,
+            height: h,
+            y_stride: w,
+            c_stride: cw,
+        })
+    }
 }
 
 impl Player {
@@ -94,6 +137,7 @@ impl Player {
             last_sq: None,
             pictures: 0,
             verdict: None,
+            scratch: Scratch::default(),
         })
     }
 
@@ -144,12 +188,13 @@ impl Player {
                     }
                 }
             }
-            let (detector, map, pool, pictures, verdict) = (
+            let (detector, map, pool, pictures, verdict, scratch) = (
                 &mut self.detector,
                 &mut self.map,
                 &mut self.pool,
                 &mut self.pictures,
                 &mut self.verdict,
+                &mut self.scratch,
             );
             let mut looked = None;
             self.dec.decode(&au, |_, planes| {
@@ -157,6 +202,10 @@ impl Player {
                 if *pictures % SHOW_EVERY != 0 {
                     return;
                 }
+                let Some(planes) = scratch.copy(planes) else {
+                    return;
+                };
+                let planes = &planes;
                 let v = classify(planes);
                 looked = Some(v);
                 *verdict = Some(v);
