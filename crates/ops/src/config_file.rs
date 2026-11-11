@@ -70,10 +70,23 @@ impl Preset {
     }
 }
 
+/// Give screen `index` these roles. A role the screen already had keeps its
+/// own seconds (`{ role, secs }`); new ones use the screen's `cycle_secs`.
 pub fn set_screen_roles(cfg: &mut Config, index: usize, roles: &[Role], cycle_secs: u64) {
-    let names: Vec<RoleEntry> = roles.iter().map(|r| cfg.role_name(*r).into()).collect();
+    let names: Vec<String> = roles.iter().map(|r| cfg.role_name(*r)).collect();
     if let Some(s) = cfg.screens.get_mut(index) {
-        s.roles = names;
+        // each old entry is used once, so a role listed twice keeps both times
+        let mut old: Vec<Option<RoleEntry>> =
+            std::mem::take(&mut s.roles).into_iter().map(Some).collect();
+        s.roles = names
+            .into_iter()
+            .map(|name| {
+                old.iter_mut()
+                    .find(|e| e.as_ref().is_some_and(|e| e.role == name))
+                    .and_then(Option::take)
+                    .unwrap_or_else(|| name.into())
+            })
+            .collect();
         s.cycle_secs = cycle_secs.clamp(3, 300);
     }
 }
@@ -133,6 +146,48 @@ mod tests {
         );
         assert_eq!(c.screens[0].cycle_secs, 300);
         set_screen_roles(&mut c, 99, &[Role::Cpu], 15);
+    }
+
+    #[test]
+    fn roles_that_stay_keep_their_own_seconds() {
+        let timed = |role: &str, secs| RoleEntry {
+            role: role.into(),
+            secs: Some(secs),
+        };
+        let mut c = Config::default();
+        c.screens[0].roles = vec![
+            "cpu".into(),
+            timed("iss", 30),
+            timed("sen", 60),
+            timed("iss", 45),
+        ];
+        // reordered, one dropped, one new, one listed twice
+        set_screen_roles(
+            &mut c,
+            0,
+            &[
+                Role::Sen,
+                Role::Mem,
+                Role::Iss,
+                Role::Cpu,
+                Role::Iss,
+                Role::Iss,
+            ],
+            10,
+        );
+        assert_eq!(
+            c.screens[0].roles,
+            vec![
+                timed("sen", 60),
+                "mem".into(),
+                timed("iss", 30),
+                "cpu".into(),
+                timed("iss", 45),
+                "iss".into(),
+            ]
+        );
+        assert_eq!(c.screens[0].cycle_secs, 10);
+        c.validate().unwrap();
     }
 
     #[test]
