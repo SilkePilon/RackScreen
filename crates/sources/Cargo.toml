@@ -23,7 +23,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 urlencoding = "2"
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "charset", "query", "form", "gzip"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "charset", "query", "form"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-platform-verifier = "0.7"
 chrono = { version = "0.4", features = ["clock"] }
@@ -34,6 +34,7 @@ sha2 = "0.11"
 openh264 = "0.9"
 zune-jpeg = "0.5"
 png = "0.18"
+flate2 = "1"
 base64 = "0.22"
 getrandom = "0.3"
 url = "2"

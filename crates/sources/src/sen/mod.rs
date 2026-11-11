@@ -22,7 +22,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use rackscreen_core::event::{Event, SenEvent};
 use tokio::sync::watch;
 
-use crate::http::{client, read_capped};
+use crate::http::read_capped;
 use crate::SourceCtx;
 use player::{Player, Segment};
 use resolve::SegmentUrl;
@@ -80,6 +80,28 @@ fn gone(e: &anyhow::Error) -> Option<u16> {
     e.downcast_ref::<Gone>().map(|g| g.0)
 }
 
+/// The stream's own HTTP client. YouTube binds the stream URLs to the
+/// address that asked for them, so every request goes out over IPv4: on a
+/// dual-stack network the player and the video hosts could otherwise be
+/// reached over different families and the segments answer 403. Redirects
+/// are followed only to the stream's hosts. It lives as long as the stream
+/// runs.
+fn stream_client() -> Result<reqwest::Client> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent(resolve::USER_AGENT)
+        .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+        .redirect(reqwest::redirect::Policy::custom(
+            |attempt| match resolve::check_redirect(attempt.url(), attempt.previous().len()) {
+                Ok(()) => attempt.follow(),
+                Err(e) => attempt.error(e),
+            },
+        ))
+        .build()
+        .context("sen http client")
+}
+
 async fn get(req: reqwest::RequestBuilder, what: &str) -> Result<reqwest::Response> {
     let resp = req
         .send()
@@ -95,21 +117,51 @@ async fn get(req: reqwest::RequestBuilder, what: &str) -> Result<reqwest::Respon
     Ok(resp)
 }
 
+/// Unpacks a gzip response body piece by piece (the live page and the
+/// media playlist shrink ten to ninety times); a plain body passes through.
+struct Inflate(Option<flate2::write::GzDecoder<Vec<u8>>>);
+
+impl Inflate {
+    fn of(resp: &reqwest::Response) -> Inflate {
+        let gzip = resp
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"gzip"));
+        Inflate(gzip.then(|| flate2::write::GzDecoder::new(Vec::new())))
+    }
+
+    /// The plain bytes of the next piece of the body.
+    fn push<'a>(&'a mut self, chunk: &'a [u8]) -> Result<&'a [u8]> {
+        use std::io::Write;
+        match &mut self.0 {
+            None => Ok(chunk),
+            Some(dec) => {
+                dec.get_mut().clear();
+                dec.write_all(chunk).context("gzip body")?;
+                dec.flush().context("gzip body")?;
+                Ok(dec.get_ref())
+            }
+        }
+    }
+}
+
 /// The channel's live page, read only as far as the two values in it.
-async fn fetch_live_page() -> Result<resolve::LivePage> {
-    let req = client()
+async fn fetch_live_page(client: &reqwest::Client) -> Result<resolve::LivePage> {
+    let req = client
         .get(resolve::LIVE_PAGE_URL)
-        .header(reqwest::header::USER_AGENT, resolve::USER_AGENT)
+        .header(reqwest::header::ACCEPT_ENCODING, "gzip")
         .header(reqwest::header::ACCEPT_LANGUAGE, "en");
     let mut resp = get(req, "live page").await?;
+    let mut inflate = Inflate::of(&resp);
     let mut scan = resolve::PageScan::default();
     let mut read = 0usize;
     while let Some(chunk) = resp.chunk().await.context("read live page")? {
-        read += chunk.len();
+        let plain = inflate.push(&chunk)?;
+        read += plain.len();
         if read > MAX_PAGE {
             break;
         }
-        if let Some(found) = scan.push(&chunk) {
+        if let Some(found) = scan.push(plain) {
             return Ok(found);
         }
     }
@@ -117,11 +169,10 @@ async fn fetch_live_page() -> Result<resolve::LivePage> {
 }
 
 /// From the channel to the 360p media playlist's URL.
-async fn resolve_stream() -> Result<String> {
-    let page = fetch_live_page().await?;
-    let req = client()
+async fn resolve_stream(client: &reqwest::Client) -> Result<String> {
+    let page = fetch_live_page(client).await?;
+    let req = client
         .post(resolve::PLAYER_URL)
-        .header(reqwest::header::USER_AGENT, resolve::USER_AGENT)
         .header("X-Goog-Visitor-Id", &page.visitor)
         .header("X-YouTube-Client-Name", resolve::CLIENT_NAME_ID)
         .header("X-YouTube-Client-Version", resolve::CLIENT_VERSION)
@@ -129,7 +180,7 @@ async fn resolve_stream() -> Result<String> {
     let body = read_capped(get(req, "player").await?, MAX_PLAYER, "player response").await?;
     let manifest = resolve::parse_player(&body)?;
     let master = read_capped(
-        get(client().get(&manifest), "master playlist").await?,
+        get(client.get(&manifest), "master playlist").await?,
         MAX_MASTER,
         "master playlist",
     )
@@ -139,16 +190,23 @@ async fn resolve_stream() -> Result<String> {
 
 /// The newest segment of the media playlist. The playlist lists an hour of
 /// segments (900 KB, 10 KB gzipped on the wire); only its end is kept.
-async fn newest_segment(media_url: &str) -> Result<SegmentUrl> {
-    let mut resp = get(client().get(media_url), "media playlist").await?;
+async fn newest_segment(client: &reqwest::Client, media_url: &str) -> Result<SegmentUrl> {
+    let req = client
+        .get(media_url)
+        .header(reqwest::header::ACCEPT_ENCODING, "gzip");
+    let mut resp = get(req, "media playlist").await?;
+    let mut inflate = Inflate::of(&resp);
     let mut tail: Vec<u8> = Vec::with_capacity(2 * PLAYLIST_TAIL);
     let mut total = 0usize;
     while let Some(chunk) = resp.chunk().await.context("read media playlist")? {
-        total += chunk.len();
+        let plain = inflate.push(&chunk)?;
+        total += plain.len();
         if total > MAX_PLAYLIST {
             bail!("media playlist is larger than {MAX_PLAYLIST} bytes");
         }
-        tail.extend_from_slice(&chunk);
+        // only the end matters: a big piece is cut before it is kept
+        let keep = &plain[plain.len().saturating_sub(PLAYLIST_TAIL)..];
+        tail.extend_from_slice(keep);
         if tail.len() > 2 * PLAYLIST_TAIL {
             tail.drain(..tail.len() - PLAYLIST_TAIL);
         }
@@ -156,8 +214,8 @@ async fn newest_segment(media_url: &str) -> Result<SegmentUrl> {
     resolve::newest_segment(&String::from_utf8_lossy(&tail))
 }
 
-async fn fetch_segment(url: &str) -> Result<Vec<u8>> {
-    let resp = get(client().get(url).timeout(SEGMENT_TIMEOUT), "segment").await?;
+async fn fetch_segment(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
+    let resp = get(client.get(url).timeout(SEGMENT_TIMEOUT), "segment").await?;
     read_capped(resp, MAX_SEGMENT, "segment").await
 }
 
@@ -343,13 +401,19 @@ async fn stream(
             tokio::time::sleep(SEGMENT).await;
         }
     }
+    let client = stream_client()?;
     let mut errors = 0u32;
-    // rounds of resolving and reading the playlist that led to no segment
+    // rounds of resolving and reading the playlist that led to no segment,
+    // and what went wrong in the last of them
     let mut idle_rounds = 0u32;
+    let mut last_error: Option<anyhow::Error> = None;
     loop {
         if idle_rounds > 0 {
             if idle_rounds > 3 {
-                bail!("the stream gives no segments");
+                return Err(match last_error {
+                    Some(e) => e.context("the stream gives no segments"),
+                    None => anyhow!("the stream gives no segments"),
+                });
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -361,7 +425,7 @@ async fn stream(
         let media_url = match fresh {
             Some(url) => url,
             None => {
-                let media_url = resolve_stream().await?;
+                let media_url = resolve_stream(&client).await?;
                 tracing::info!("sen: stream resolved");
                 *resolved = Some(Resolved {
                     media_url: media_url.clone(),
@@ -370,11 +434,12 @@ async fn stream(
                 media_url
             }
         };
-        let newest = match newest_segment(&media_url).await {
+        let newest = match newest_segment(&client, &media_url).await {
             Ok(seg) => seg,
             Err(e) if gone(&e).is_some() => {
                 tracing::info!("sen: {e:#}; resolving again");
                 *resolved = None;
+                last_error = Some(e);
                 continue;
             }
             Err(e) => {
@@ -383,6 +448,7 @@ async fn stream(
                     return Err(e);
                 }
                 tracing::debug!("sen: {e:#}");
+                last_error = Some(e);
                 continue;
             }
         };
@@ -396,10 +462,11 @@ async fn stream(
                 idle_rounds = 0;
                 break;
             }
-            match fetch_segment(&newest.url(sq)).await {
+            match fetch_segment(&client, &newest.url(sq)).await {
                 Ok(data) => {
                     errors = 0;
                     idle_rounds = 0;
+                    last_error = None;
                     *played = true;
                     decoder.push(Segment { sq, data });
                     // nothing live: look at every third segment only
@@ -416,6 +483,7 @@ async fn stream(
                     if gone(&e) == Some(403) {
                         *resolved = None;
                     }
+                    last_error = Some(e);
                     break;
                 }
                 Err(e) => {
@@ -426,6 +494,7 @@ async fn stream(
                     tracing::debug!("sen: {e:#}");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     if errors.is_multiple_of(3) {
+                        last_error = Some(e);
                         break;
                     }
                 }
@@ -509,9 +578,10 @@ pub async fn run_sen(feed: Feed, ctx: SourceCtx, mut demand: watch::Receiver<boo
 /// for a look from the command line: what each segment showed and how many
 /// frames came out.
 pub async fn probe(secs: u64, mut report: impl FnMut(String)) -> Result<()> {
-    let media_url = resolve_stream().await?;
+    let client = stream_client()?;
+    let media_url = resolve_stream(&client).await?;
     report("resolved the 360p media playlist".into());
-    let newest = newest_segment(&media_url).await?;
+    let newest = newest_segment(&client, &media_url).await?;
     report(format!("newest segment {}", newest.sq));
     let mut player = Player::new(false).map_err(|e| anyhow!("{e:#}"))?;
     let segments = secs.div_ceil(SEGMENT.as_secs()).max(1);
@@ -519,7 +589,12 @@ pub async fn probe(secs: u64, mut report: impl FnMut(String)) -> Result<()> {
     let first = newest.sq.saturating_sub(segments.saturating_sub(1));
     for sq in first..first + segments {
         let t = Instant::now();
-        let data = fetch_segment(&newest.url(sq)).await?;
+        let data = fetch_segment(&client, &newest.url(sq)).await?;
+        // SEN_PROBE_SAVE=<dir> keeps the segments, to look at them later
+        if let Some(dir) = std::env::var_os("SEN_PROBE_SAVE") {
+            let path = std::path::Path::new(&dir).join(format!("{sq}.ts"));
+            std::fs::write(&path, &data).with_context(|| format!("write {}", path.display()))?;
+        }
         let fetch_ms = t.elapsed().as_millis();
         let (mut frames, mut changes) = (0, Vec::new());
         let t = Instant::now();
@@ -563,6 +638,32 @@ mod tests {
         assert_eq!(gone(&e), Some(403));
         assert!(format!("{e:#}").contains("HTTP 403"));
         assert_eq!(gone(&anyhow!("timed out")), None);
+    }
+
+    #[test]
+    fn gzip_bodies_unpack_piece_by_piece() {
+        use std::io::Write;
+        let text: Vec<u8> = (0..50_000u32)
+            .flat_map(|i| i.to_string().into_bytes())
+            .collect();
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&text).unwrap();
+        let packed = enc.finish().unwrap();
+        let mut inflate = Inflate(Some(flate2::write::GzDecoder::new(Vec::new())));
+        let mut out = Vec::new();
+        for chunk in packed.chunks(1000) {
+            out.extend_from_slice(inflate.push(chunk).unwrap());
+        }
+        assert_eq!(out, text);
+        // a plain body passes through; a broken gzip one is an error
+        assert_eq!(Inflate(None).push(b"plain").unwrap(), b"plain");
+        let mut bad = Inflate(Some(flate2::write::GzDecoder::new(Vec::new())));
+        assert!(bad.push(&[0x55; 64]).is_err());
+    }
+
+    #[test]
+    fn the_stream_client_builds() {
+        stream_client().unwrap();
     }
 
     fn sen_events(rx: &mpsc::Receiver<Event>, wait: Duration) -> Vec<SenEvent> {

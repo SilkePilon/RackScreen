@@ -4,6 +4,9 @@
 //!     cargo run --release -p rackscreen-sources --example sen -- bench [segment.ts]
 //!     cargo run --release -p rackscreen-sources --example sen -- live [seconds]
 //!     cargo run --release -p rackscreen-sources --example sen -- run [seconds]
+//!     cargo run --release -p rackscreen-sources --example sen -- dump <segment.ts> <out-dir>
+//!
+//! `SEN_PROBE_SAVE=<dir>` makes `live` keep the segments it fetched.
 use std::time::{Duration, Instant};
 
 use rackscreen_core::event::SenEvent;
@@ -193,6 +196,59 @@ fn bench(path: &str) {
     );
 }
 
+fn write_png(path: &std::path::Path, w: usize, h: usize, rgb: &[u8]) {
+    let file = std::fs::File::create(path).expect("create png");
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()
+        .and_then(|mut w| w.write_image_data(rgb))
+        .expect("write png");
+}
+
+/// What the detector says about every shown picture of a segment, and the
+/// whole picture as a PNG wherever the verdict changes.
+fn dump(path: &str, out: &str) {
+    let data = std::fs::read(path).expect("read segment");
+    std::fs::create_dir_all(out).expect("out dir");
+    let mut dec = H264::new().expect("decoder");
+    let mut demux = Demuxer::new();
+    demux.begin();
+    let (mut n, mut last) = (0u32, None);
+    while let Some(au) = demux.next(&data) {
+        dec.decode(&au, |_, p| {
+            n += 1;
+            if n % 2 != 0 {
+                return;
+            }
+            let v = classify(p);
+            if last == Some(v) {
+                return;
+            }
+            last = Some(v);
+            println!("picture {n}: {v:?}");
+            let mut rgb = Vec::with_capacity(p.width * p.height * 3);
+            for y in 0..p.height {
+                for x in 0..p.width {
+                    let c = 298 * (p.y[y * p.y_stride + x] as i32 - 16) + 128;
+                    let d = p.u[(y / 2) * p.c_stride + x / 2] as i32 - 128;
+                    let e = p.v[(y / 2) * p.c_stride + x / 2] as i32 - 128;
+                    rgb.push(((c + 459 * e) >> 8).clamp(0, 255) as u8);
+                    rgb.push(((c - 55 * d - 136 * e) >> 8).clamp(0, 255) as u8);
+                    rgb.push(((c + 541 * d) >> 8).clamp(0, 255) as u8);
+                }
+            }
+            let name = format!("{n:03}-{v:?}.png");
+            write_png(
+                &std::path::Path::new(out).join(name),
+                p.width,
+                p.height,
+                &rgb,
+            );
+        });
+    }
+}
+
 fn live(secs: u64) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -289,8 +345,9 @@ fn main() {
         ["bench", segment] => bench(segment),
         ["live"] => live(10),
         ["live", secs] => live(secs.parse().unwrap_or(10)),
+        ["dump", segment, out] => dump(segment, out),
         ["run"] => run(15),
         ["run", secs] => run(secs.parse().unwrap_or(15)),
-        _ => eprintln!("usage: sen bench [segment.ts] | sen live [seconds] | sen run [seconds]"),
+        _ => eprintln!("usage: sen bench [segment.ts] | sen live [seconds] | sen run [seconds] | sen dump <segment.ts> <dir>"),
     }
 }

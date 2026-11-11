@@ -119,15 +119,34 @@ pub fn parse_player(body: &[u8]) -> Result<String> {
 /// playlist is not followed.
 pub fn check_url(url: &str) -> Result<()> {
     let parsed = url::Url::parse(url).map_err(|e| anyhow!("stream URL: {e}"))?;
-    let host = parsed.host_str().unwrap_or("");
-    let ok = parsed.scheme() == "https"
+    check_host(&parsed).map_err(|e| anyhow!(e))
+}
+
+/// The same rule for a parsed URL: HTTPS on YouTube or its video hosts.
+/// Redirects are held to it as well.
+pub fn check_host(url: &url::Url) -> Result<(), String> {
+    let host = url.host_str().unwrap_or("");
+    let ok = url.scheme() == "https"
         && (host == "googlevideo.com"
             || host.ends_with(".googlevideo.com")
+            || host == "youtube.com"
             || host.ends_with(".youtube.com"));
-    if !ok {
-        bail!("stream URL on an unexpected host: {host}");
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("stream URL on an unexpected host: {host}"))
     }
-    Ok(())
+}
+
+/// Redirects the stream's requests may follow: a few, and only to hosts
+/// `check_host` allows (the consent bounce stays on youtube.com).
+pub const MAX_REDIRECTS: usize = 5;
+
+pub fn check_redirect(to: &url::Url, hops_before: usize) -> Result<(), String> {
+    if hops_before >= MAX_REDIRECTS {
+        return Err("too many redirects".into());
+    }
+    check_host(to)
 }
 
 /// The media playlist of the variant to play: H.264 at 360p when there is
@@ -325,6 +344,26 @@ mod tests {
         assert!(next.contains("/sq/4294238/"));
         assert_eq!(next.len(), last.len());
         assert_eq!(SegmentUrl::parse(&next).unwrap().sq, seg.sq + 1);
+    }
+
+    #[test]
+    fn redirects_stay_on_the_stream_hosts() {
+        let url = |s: &str| url::Url::parse(s).unwrap();
+        let consent = url("https://consent.youtube.com/m?continue=https%3A%2F%2Fevil.example");
+        assert!(check_redirect(&consent, 0).is_ok());
+        assert!(check_redirect(&url("https://www.youtube.com/@Sen/live?cbrd=1"), 1).is_ok());
+        assert!(check_redirect(&url("https://rr4---sn-x.googlevideo.com/a"), 2).is_ok());
+        for bad in [
+            "https://evil.example/x",
+            "http://www.youtube.com/@Sen/live",
+            "https://youtube.com.evil.example/",
+            "https://notyoutube.com/",
+            "https://192.168.1.1/",
+            "https://localhost/",
+        ] {
+            assert!(check_redirect(&url(bad), 0).is_err(), "{bad}");
+        }
+        assert!(check_redirect(&consent, MAX_REDIRECTS).is_err(), "a loop");
     }
 
     #[test]
