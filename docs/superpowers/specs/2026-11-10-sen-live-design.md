@@ -143,3 +143,42 @@ Where the implementation differs from the plan above, and why:
   picture, 0.10 ms crop + convert and 0.015 ms classify per shown frame;
   about 8 MB RSS while running, back to the start value when stopped.
   `cargo run --release -p rackscreen-sources --example sen -- bench|live|run`.
+
+## Hardware decoding (2026-11-11)
+
+On the Pi 3B+ OpenH264 took 26 % of a core for the 360p stream (every
+picture is a reference, so none can be skipped). The decode thread now uses
+the board's decoder where there is one:
+
+- **Device.** `/dev/video10` (`bcm2835-codec`), a V4L2 stateful
+  memory-to-memory decoder, driven by raw ioctls through `libc`
+  (`sen/v4l2/device.rs`; no new dependency). 64-bit little-endian Linux
+  with glibc only; elsewhere the module is a stub that never opens.
+- **Flow.** One access unit per bitstream buffer (3 buffers, up to 512 KB
+  each), numbered in the buffer's timestamp. The picture queue (4 buffers of
+  350 KB, single-plane `YU12`) is built when the decoder reports the
+  stream's format, and again on every source change. Nothing waits: each
+  unit's call takes back what the decoder is done with and hands out the
+  pictures of earlier units, which is the same one-picture delay OpenH264
+  has. Only a full bitstream queue waits, a second at most.
+- **No copy of pictures.** Detector and crop read the mapped buffer in
+  place, through the padded layout the driver reports (640x368 rows for
+  360 visible ones); the buffer goes back to the decoder right after.
+- **Breaks.** After a skipped segment the pictures of units queued before
+  it are recognised by their number and dropped; the decoder itself is not
+  flushed.
+- **Falling back.** No device, no H.264, a failed ioctl, a decoder that
+  takes no unit for a second or gives no picture for 90 units: OpenH264
+  takes over from the next keyframe, with one line in the log. Three
+  failures in a row leave the hardware alone until the service restarts
+  (a missing device counts as three). `RACKSCREEN_SEN_DECODER=software`
+  turns it off, `=v4l2` ignores the count; `RACKSCREEN_SEN_V4L2_DEVICE`
+  names another device.
+- **Log.** `sen: decoder v4l2 (/dev/video10, bcm2835-codec)` or
+  `sen: decoder software (openh264)` at every stream start, and after 30 s
+  and then every 5 minutes
+  `sen: decoder v4l2: 900 pictures in 30 s, 0.20 ms each, thread cpu 1.5 %`
+  (time in the decoder per picture; CPU of the whole decode thread).
+- **Not done.** The decoder is not drained with `V4L2_DEC_CMD_STOP` when
+  the stream stops: the pictures left in it are not wanted, so the queues
+  are stopped and the device is closed.
