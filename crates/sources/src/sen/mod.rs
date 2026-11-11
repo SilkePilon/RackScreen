@@ -362,6 +362,14 @@ impl Meter {
     }
 }
 
+/// Pictures shown a second (the config's `sen.fps`); one stream per process.
+static FPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(15);
+
+/// Show `fps` pictures a second (10, 15 or 30) from the next stream start.
+pub fn set_fps(fps: u32) {
+    FPS.store(fps, Ordering::Relaxed);
+}
+
 /// Counts the streams started, so a decode thread knows at its end whether
 /// it still is the newest.
 type Generation = Arc<AtomicU64>;
@@ -370,7 +378,7 @@ type Generation = Arc<AtomicU64>;
 /// the decoder and its buffers and says so, unless a newer stream has
 /// started meanwhile (its pictures must not be cleared by this one's end).
 fn decode_thread(shared: Arc<Shared>, ctx: SourceCtx, generation: Generation, id: u64) {
-    match Player::new(true) {
+    match Player::new(true).map(|p| p.with_fps(FPS.load(Ordering::Relaxed))) {
         Ok(mut player) => {
             let mut meter = Meter::new();
             while let Some(seg) = shared.next() {

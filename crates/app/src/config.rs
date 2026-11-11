@@ -32,6 +32,8 @@ pub struct Config {
     pub rain: RainCfg,
     #[serde(default)]
     pub iss: IssCfg,
+    #[serde(default, skip_serializing_if = "SenCfg::is_default")]
+    pub sen: SenCfg,
     #[serde(default)]
     pub github: GithubCfg,
     #[serde(default)]
@@ -356,6 +358,28 @@ pub struct IssCfg {
     pub enabled: bool,
     /// Degrees above the horizon that count as a pass.
     pub min_elevation: f32,
+}
+
+/// The SEN live view.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct SenCfg {
+    /// Pictures shown per second: 10, 15 or 30 (the stream has 30). Each
+    /// shown picture is a full-panel push: on the SPI1 bus about 2 % of a
+    /// core per frame per second.
+    pub fps: u32,
+}
+
+impl Default for SenCfg {
+    fn default() -> Self {
+        Self { fps: 15 }
+    }
+}
+
+impl SenCfg {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// GitHub activity: a fine-grained token with read access to contributions,
@@ -1337,6 +1361,11 @@ impl Config {
             "weather, rain and iss need location.lat and location.lon"
         );
         anyhow::ensure!(
+            matches!(self.sen.fps, 10 | 15 | 30),
+            "sen.fps must be 10, 15 or 30 (got {})",
+            self.sen.fps
+        );
+        anyhow::ensure!(
             (0.0..=90.0).contains(&self.iss.min_elevation),
             "iss.min_elevation must be 0..90 (got {})",
             self.iss.min_elevation
@@ -1918,6 +1947,22 @@ mod tests {
         let c = Config::from_yaml("screens:\n  - { roles: [], spi: 0, cs: 0, dc: 6, rst: 5 }\n")
             .unwrap();
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn sen_fps_is_10_15_or_30_and_hidden_at_its_default() {
+        let mut c = Config::default();
+        assert_eq!(c.sen.fps, 15);
+        assert!(
+            !c.to_yaml().unwrap().contains("sen:"),
+            "default not written"
+        );
+        c.sen.fps = 10;
+        c.validate().unwrap();
+        assert!(c.to_yaml().unwrap().contains("fps: 10"));
+        c.sen.fps = 12;
+        let err = c.validate().unwrap_err().to_string();
+        assert!(err.contains("sen.fps"), "{err}");
     }
 
     #[test]

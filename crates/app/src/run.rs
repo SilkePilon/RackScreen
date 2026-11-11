@@ -324,6 +324,7 @@ fn spawn_sen_source(
     } else {
         rackscreen_sources::sen::Feed::Live
     };
+    rackscreen_sources::sen::set_fps(cfg.sen.fps);
     let (tx, rx) = tokio::sync::watch::channel(false);
     runtime.spawn(rackscreen_sources::sen::run_sen(feed, ctx.clone(), rx));
     Some(tx)

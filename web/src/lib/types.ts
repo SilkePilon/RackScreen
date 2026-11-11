@@ -188,6 +188,8 @@ export interface Config {
   weather: WeatherCfg
   rain: RainCfg
   iss: IssCfg
+  /** SEN live view; absent = defaults (15 fps). */
+  sen?: { fps: number }
   github: GithubCfg
   argocd: ArgocdCfg
   media: MediaCfg

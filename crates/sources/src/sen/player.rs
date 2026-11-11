@@ -15,6 +15,12 @@ use super::ts::Demuxer;
 /// Every n-th decoded picture is looked at and shown: 15 of the stream's 30
 /// a second.
 pub const SHOW_EVERY: u64 = 2;
+
+/// Every how many decoded pictures one is shown, for `fps` shown a second
+/// out of the stream's 30.
+pub fn show_every(fps: u32) -> u64 {
+    (30 / fps.clamp(1, 30)) as u64
+}
 /// Live pictures in a row before the stream counts as live: a second.
 pub const LIVE_AFTER: u32 = 15;
 /// Frame buffers kept for reuse: the one the model holds, the ones the render
@@ -78,6 +84,7 @@ pub struct Player {
     pictures: u64,
     verdict: Option<Verdict>,
     scratch: Scratch,
+    show_every: u64,
 }
 
 /// A cached copy of a shown picture. The hardware decoder's pictures sit in
@@ -138,7 +145,14 @@ impl Player {
             pictures: 0,
             verdict: None,
             scratch: Scratch::default(),
+            show_every: SHOW_EVERY,
         })
+    }
+
+    /// Show `fps` pictures a second (10, 15 or 30) instead of 15.
+    pub fn with_fps(mut self, fps: u32) -> Player {
+        self.show_every = show_every(fps);
+        self
     }
 
     pub fn live(&self) -> bool {
@@ -197,9 +211,10 @@ impl Player {
                 &mut self.scratch,
             );
             let mut looked = None;
+            let every = self.show_every;
             self.dec.decode(&au, |_, planes| {
                 *pictures += 1;
-                if *pictures % SHOW_EVERY != 0 {
+                if *pictures % every != 0 {
                     return;
                 }
                 let Some(planes) = scratch.copy(planes) else {
@@ -388,6 +403,18 @@ mod tests {
         });
         assert!(held.len() > 50);
         assert!(p.pool.len() <= POOL);
+    }
+
+    #[test]
+    fn the_shown_rate_follows_fps() {
+        assert_eq!(show_every(15), 2);
+        assert_eq!(show_every(10), 3);
+        assert_eq!(show_every(30), 1);
+        let mut p = Player::new(false).unwrap().with_fps(10);
+        let shown = frames(&play(&mut p, 1, LIVE)) + frames(&play(&mut p, 2, LIVE));
+        let mut q = Player::new(false).unwrap();
+        let shown15 = frames(&play(&mut q, 1, LIVE)) + frames(&play(&mut q, 2, LIVE));
+        assert!(shown < shown15, "{shown} vs {shown15}");
     }
 
     #[test]

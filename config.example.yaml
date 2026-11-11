@@ -50,6 +50,8 @@ rain:
 iss:
   enabled: false           # next ISS pass, computed from the Celestrak TLE
   min_elevation: 10        # degrees above the horizon that count as a pass
+# sen:
+#   fps: 15                # SEN live pictures a second: 10, 15 or 30
 
 github:
   enabled: false           # fine-grained token: read access to contributions, events and Actions
