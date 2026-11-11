@@ -194,3 +194,23 @@ the board's decoder where there is one:
   one core on the SPI1 (aux, polled) bus that panel 4 uses; a `sen` panel on
   SPI0 costs much less.
 - ISS globe: one raster about 21 ms, every 2 s.
+
+### Long run (v0.20.4, 2026-11-11 03:57-04:07, panel 4 on SPI1)
+
+| | 15 fps (5 min) | 10 fps (3 min) |
+|---|---|---|
+| shown rate | 15.0 steady | 10.0 steady |
+| `sen-decode` thread | 6.4-7.0 % | 4.3-5.3 % |
+| SPI1 bus thread | 26.8 % | 19.9 % |
+| render of the panel | 0.3 ms/frame | 0.35 ms/frame |
+| RSS | 60 MB | 60 MB |
+
+The SPI1 cost is the wire time of ~95 KB a frame at 50 MHz on a bus the CPU
+polls (no DMA on the aux controller): round-panel clipping in 30-row bands
+is already the cheapest split under the window cost, and every picture of
+moving Earth changes nearly every pixel. `sen.fps` (10/15/30) is the lever.
+During the 10 fps run a real loss of signal switched the stream to REPLAY
+(04:05:23): the panel fell back to the globe and returned to live at
+04:06:30. Detector calibration on an hour of real stream (360 segments):
+292 live, 38 night, 15 REPLAY, 5 Trailer, 7 with the slate; no replay or
+trailer picture accepted, no sampled live one refused.
