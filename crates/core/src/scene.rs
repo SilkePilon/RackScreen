@@ -63,9 +63,10 @@ pub enum Drawable {
         color: Color,
         alpha: f32,
     },
-    /// Open stroked path with round joins and caps.
+    /// Open stroked path with round joins and caps. The points are shared:
+    /// a scene is rebuilt every frame, a long path (the ISS track) is not.
     Polyline {
-        points: Vec<(f32, f32)>,
+        points: Points,
         width: f32,
         color: Color,
         alpha: f32,
@@ -73,7 +74,7 @@ pub enum Drawable {
     /// A `Polyline` drawn as round-capped dashes, `on` px long and `off` px
     /// apart along the path.
     Dashed {
-        points: Vec<(f32, f32)>,
+        points: Points,
         width: f32,
         on: f32,
         off: f32,
@@ -136,6 +137,9 @@ pub enum Drawable {
     /// A live video picture, copied over the whole screen.
     Video(crate::video::VideoRef),
 }
+
+/// The points of a path, shared so a copy of the drawable copies no points.
+pub type Points = std::sync::Arc<[(f32, f32)]>;
 
 /// A shared world frame, compared by identity: all screens of one tick hold
 /// the same `Arc`, and a new frame is a new `Arc`.

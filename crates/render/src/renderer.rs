@@ -773,7 +773,7 @@ mod tests {
         assert!(lit(&ell, 150, 120));
         assert!(!lit(&ell, 120, 100), "ten tall, not forty");
         let line = render_one(Drawable::Polyline {
-            points: vec![(20.0, 200.0), (120.0, 100.0), (220.0, 200.0)],
+            points: vec![(20.0, 200.0), (120.0, 100.0), (220.0, 200.0)].into(),
             width: 3.0,
             color: WHITE,
             alpha: 1.0,

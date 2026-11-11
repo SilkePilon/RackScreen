@@ -186,7 +186,7 @@ pub fn card_drawables(
                 }
                 let curve = clip_left(&smooth_curve(&pts), x);
                 out.push(Drawable::Polyline {
-                    points: curve,
+                    points: curve.into(),
                     width: 1.8,
                     color: *color,
                     alpha: 1.0,
@@ -197,7 +197,7 @@ pub fn card_drawables(
                     let mut yy = y - 2.0;
                     while yy < y + h + 2.0 {
                         out.push(Drawable::Polyline {
-                            points: vec![(lp.0, yy), (lp.0, (yy + 2.0).min(y + h + 2.0))],
+                            points: [(lp.0, yy), (lp.0, (yy + 2.0).min(y + h + 2.0))].into(),
                             width: 1.0,
                             color: TEXT3,
                             alpha: 1.0,
@@ -428,7 +428,7 @@ pub fn card_drawables(
                     let dd = (d as i32).rem_euclid(360);
                     let major = dd % 45 == 0;
                     out.push(Drawable::Polyline {
-                        points: vec![(xx, y + if major { 2.0 } else { 5.0 }), (xx, y + 9.0)],
+                        points: [(xx, y + if major { 2.0 } else { 5.0 }), (xx, y + 9.0)].into(),
                         width: 1.0,
                         color: if major { TEXT2 } else { TEXT3 },
                         alpha: 1.0,

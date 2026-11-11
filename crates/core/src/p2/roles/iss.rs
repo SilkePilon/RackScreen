@@ -93,7 +93,8 @@ fn globe_layer(track: &IssTrack, unix: i64) -> Vec<Drawable> {
     };
     let cam = Camera::following(iss);
     let (sun_lat, sun_lon) = subsolar(unix);
-    let walk = |dir: i64, max: i64| -> Vec<(f32, f32)> {
+    // shared points: the scene copies these drawables every frame
+    let walk = |dir: i64, max: i64| -> crate::scene::Points {
         near_side_track(track, &cam, unix, dir, max, TRACK_STEP_SECS)
             .into_iter()
             .map(to_screen)
@@ -492,6 +493,31 @@ mod tests {
         assert_ne!(globe(&a), globe(&c), "the next second moves the globe");
         // a fresh screen state builds the same thing
         assert_eq!(c, iss_scene(&m, 11.0, &mut ScreenUi::new()));
+    }
+
+    #[test]
+    fn frames_of_one_second_share_the_track_points() {
+        let m = model(UNIX, Some(pass()));
+        let mut ui = ScreenUi::new();
+        let tracks = |s: &Scene| -> Vec<crate::scene::Points> {
+            s.items
+                .iter()
+                .filter_map(|d| match d {
+                    Drawable::Polyline { points, .. } | Drawable::Dashed { points, .. } => {
+                        Some(points.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let a = tracks(&iss_scene(&m, 10.0, &mut ui));
+        let b = tracks(&iss_scene(&m, 10.5, &mut ui));
+        assert_eq!(a.len(), 3);
+        for (a, b) in a.iter().zip(&b) {
+            assert!(std::sync::Arc::ptr_eq(a, b), "no copy of the points");
+        }
+        // the shadow and the line of the track behind are one set of points
+        assert!(std::sync::Arc::ptr_eq(&a[1], &a[2]));
     }
 
     #[test]
