@@ -135,6 +135,17 @@ impl Orient {
         }
     }
 
+    /// The orientation that maps panel pixels back to source pixels. A flip
+    /// with a rotation is a reflection, its own inverse; a plain rotation is
+    /// undone by the opposite one.
+    pub fn inverse(&self) -> Orient {
+        if self.hflip {
+            self.clone()
+        } else {
+            Orient::new_sized(self.size, (360 - self.rotate) % 360, false)
+        }
+    }
+
     pub fn is_identity(&self) -> bool {
         self.map.iter().enumerate().all(|(i, &m)| i as u32 == m)
     }
@@ -229,10 +240,21 @@ fn merge_overlaps(rects: &mut Vec<Rect>) {
 
 /// Overlaps merged, at most `MAX_RECTS` (closest pairs merged first: least
 /// added area), one full rect when they cover more than 70 % of `w`×`h`.
-pub fn merge_rects(mut rects: Vec<Rect>, w: u32, h: u32) -> Vec<Rect> {
+pub fn merge_rects(rects: Vec<Rect>, w: u32, h: u32) -> Vec<Rect> {
+    merge_rects_max(rects, w, h, MAX_RECTS, FULL_FRACTION)
+}
+
+/// `merge_rects` with its limits given.
+fn merge_rects_max(
+    mut rects: Vec<Rect>,
+    w: u32,
+    h: u32,
+    max_rects: usize,
+    full_fraction: f64,
+) -> Vec<Rect> {
     rects.retain(|r| !r.is_empty());
     merge_overlaps(&mut rects);
-    while rects.len() > MAX_RECTS {
+    while rects.len() > max_rects {
         let mut best = (0, 1, u64::MAX);
         for i in 0..rects.len() {
             for j in i + 1..rects.len() {
@@ -250,10 +272,85 @@ pub fn merge_rects(mut rects: Vec<Rect>, w: u32, h: u32) -> Vec<Rect> {
         merge_overlaps(&mut rects);
     }
     let total: u64 = rects.iter().map(Rect::area).sum();
-    if total as f64 > FULL_FRACTION * (w as u64 * h as u64) as f64 {
+    if total as f64 > full_fraction * (w as u64 * h as u64) as f64 {
         return vec![Rect { x: 0, y: 0, w, h }];
     }
     rects
+}
+
+/// Video frames: changed rows within this many rows of each other share a
+/// rect. Finer than `BAND_GAP_ROWS`: a moving picture changes in many
+/// scattered rows, and each window costs only ~470 pixels of wire time.
+const VIDEO_GAP_ROWS: u32 = 2;
+const VIDEO_MAX_RECTS: usize = 16;
+const VIDEO_FULL_FRACTION: f64 = 0.85;
+/// A video pixel counts as changed when one RGB565 channel moved by more
+/// than one step from what the panel shows (the green channel's step is
+/// half the size, so two of its steps): an error of at most one step, which
+/// the next real change clears.
+const VIDEO_TOLERANCE_STEPS: u8 = 1;
+
+/// The panel's 565 steps of an 8-bit channel value: red and blue keep 5
+/// bits, green 6 (counted in 5-bit steps by halving).
+fn steps_differ(a: &[u8], b: &[u8]) -> bool {
+    let d = |x: u8, y: u8, shift: u32| (x >> shift).abs_diff(y >> shift);
+    d(a[0], b[0], 3) > VIDEO_TOLERANCE_STEPS
+        || d(a[1], b[1], 2) > 2 * VIDEO_TOLERANCE_STEPS
+        || d(a[2], b[2], 3) > VIDEO_TOLERANCE_STEPS
+}
+
+/// Changed regions of a video frame against what the panel shows (`shown`,
+/// unrotated): only pixels off by more than `VIDEO_TOLERANCE_STEPS`, grouped
+/// in fine row bands. About 40 % less to push than `dirty_rects` on the SEN
+/// stream, where compression noise touches nearly every pixel a little.
+pub fn video_rects(shown: &Pixmap, next: &Pixmap) -> Vec<Rect> {
+    let w = shown.width() as usize;
+    let h = shown.height() as usize;
+    let (a, b) = (shown.data(), next.data());
+    let mut bands: Vec<Rect> = Vec::new();
+    for y in 0..h {
+        let ra = &a[y * w * 4..(y + 1) * w * 4];
+        let rb = &b[y * w * 4..(y + 1) * w * 4];
+        let differs = |x: usize| steps_differ(&ra[x * 4..x * 4 + 3], &rb[x * 4..x * 4 + 3]);
+        // only what the round panel shows: outside it nothing is ever sent
+        let (lo, hi) = round_span(w as u32, y as u32, y as u32 + 1);
+        let (lo, hi) = (lo as usize, hi as usize);
+        let Some(x0) = (lo..hi).find(|&x| differs(x)) else {
+            continue;
+        };
+        let x1 = (x0..hi).rev().find(|&x| differs(x)).unwrap_or(x0);
+        let row = Rect {
+            x: x0 as u32,
+            y: y as u32,
+            w: (x1 - x0 + 1) as u32,
+            h: 1,
+        };
+        match bands.last_mut() {
+            Some(last) if (y as u32) <= last.y + last.h - 1 + VIDEO_GAP_ROWS => {
+                *last = last.union(row)
+            }
+            _ => bands.push(row),
+        }
+    }
+    merge_rects_max(
+        bands,
+        w as u32,
+        h as u32,
+        VIDEO_MAX_RECTS,
+        VIDEO_FULL_FRACTION,
+    )
+}
+
+/// Copy `r` (source space) of `from` into `to`.
+pub fn copy_rect(from: &Pixmap, to: &mut Pixmap, r: Rect) {
+    let w = from.width() as usize;
+    let (x0, x1) = (r.x as usize, (r.x + r.w) as usize);
+    let src = from.data();
+    let dst = to.data_mut();
+    for y in r.y as usize..(r.y + r.h) as usize {
+        let (i0, i1) = ((y * w + x0) * 4, (y * w + x1) * 4);
+        dst[i0..i1].copy_from_slice(&src[i0..i1]);
+    }
 }
 
 /// Rows per band when a rect is cut to the round panel.
@@ -409,6 +506,38 @@ mod tests {
         d[i + 1] = rgb.1;
         d[i + 2] = rgb.2;
         d[i + 3] = 255;
+    }
+
+    #[test]
+    fn the_inverse_orientation_undoes_every_orientation() {
+        for rotate in [0, 90, 180, 270] {
+            for hflip in [false, true] {
+                let o = Orient::new_sized(240, rotate, hflip);
+                let back = o.inverse();
+                for p in [(0, 0), (5, 17), (239, 3), (120, 200)] {
+                    let (x, y) = o.src_to_dst(p.0, p.1);
+                    assert_eq!(back.src_to_dst(x, y), p, "{rotate} {hflip}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn video_rects_skip_changes_within_one_step() {
+        let mut a = new_pixmap();
+        a.fill(tiny_skia::Color::from_rgba8(100, 100, 100, 255));
+        let mut b = a.clone();
+        // one 565 step or less: not worth a push
+        for x in 0..240 {
+            px(&mut b, x, 50, (106, 103, 104));
+        }
+        assert!(video_rects(&a, &b).is_empty());
+        // more than a step, on two rows far apart: two thin rects
+        px(&mut b, 30, 40, (120, 100, 100));
+        px(&mut b, 200, 180, (100, 100, 80));
+        let rs = video_rects(&a, &b);
+        assert_eq!(rs.len(), 2, "{rs:?}");
+        assert!(rs.iter().all(|r| r.h == 1 && r.w == 1));
     }
 
     fn get(p: &Pixmap, x: u32, y: u32) -> (u8, u8, u8) {

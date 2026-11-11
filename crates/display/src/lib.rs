@@ -143,12 +143,18 @@ impl Mailbox {
     pub fn put_frame(&self, rects: &[Rect], pack: impl FnOnce(&[Rect]) -> Vec<u8>) {
         let (lock, cv) = &*self.inner;
         let mut slot = lock.lock().unwrap();
-        let mut all = rects.to_vec();
-        if let Some(old) = slot.frame.take() {
-            all.extend(old.rects);
-        }
         let full = Rect::full();
-        let rects = round_rects(&merge_rects(all, full.w, full.h), full.w);
+        // the caller's rects are already merged; only a frame still waiting
+        // to be sent adds rects to merge with
+        let merged = match slot.frame.take() {
+            Some(old) => {
+                let mut all = rects.to_vec();
+                all.extend(old.rects);
+                merge_rects(all, full.w, full.h)
+            }
+            None => rects.to_vec(),
+        };
+        let rects = round_rects(&merged, full.w);
         if rects.is_empty() {
             // every change (and any pending one) lies outside the circle
             return;

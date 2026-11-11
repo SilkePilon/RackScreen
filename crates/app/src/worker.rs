@@ -11,7 +11,8 @@ use rackscreen_core::scene::{Blend, Scene};
 use rackscreen_core::transition::composite;
 use rackscreen_display::Mailbox;
 use rackscreen_render::frame::{
-    brightness_lut, darken, dirty_rects, new_pixmap, pack_oriented, Orient, Rect,
+    brightness_lut, copy_rect, darken, dirty_rects, new_pixmap, pack_oriented, video_rects, Orient,
+    Rect,
 };
 use rackscreen_render::renderer::Renderer;
 use tiny_skia::Pixmap;
@@ -141,8 +142,15 @@ impl ScreenFrames {
             darken(&mut self.cur, 1.0 - f);
         }
         let render_ms = t.elapsed().as_secs_f32() * 1000.0;
+        let video = job.blend.is_none()
+            && job.fade.is_none()
+            && job
+                .scene
+                .items
+                .iter()
+                .any(|d| matches!(d, rackscreen_core::scene::Drawable::Video(_)));
         let t = Instant::now();
-        self.flush();
+        self.flush_as(video);
         let flush_ms = t.elapsed().as_secs_f32() * 1000.0;
         self.last = Some((job.scene, job.blend, job.fade));
         self.tap_dirty = true;
@@ -157,8 +165,18 @@ impl ScreenFrames {
     /// Diff the fresh frame against the last pushed one (both unrotated), pack
     /// the changed panel rects, push. Returns the panel rects pushed.
     pub fn flush(&mut self) -> Option<Vec<Rect>> {
-        let src = if self.first {
+        self.flush_as(false)
+    }
+
+    /// `video`: the frame is a moving picture; push only what changed by
+    /// more than one RGB565 step from what the panel shows, and keep `prev`
+    /// equal to the panel (only the pushed parts are copied into it).
+    pub fn flush_as(&mut self, video: bool) -> Option<Vec<Rect>> {
+        let first = self.first;
+        let src = if first {
             vec![Rect::full()]
+        } else if video {
+            video_rects(&self.prev, &self.cur)
         } else {
             dirty_rects(&self.prev, &self.cur)
         };
@@ -168,9 +186,21 @@ impl ScreenFrames {
         }
         let panel: Vec<Rect> = src.iter().map(|r| self.orient.map_rect(*r)).collect();
         let (cur, orient, lut) = (&self.cur, &self.orient, &self.lut);
-        self.mailbox
-            .put_frame(&panel, |rs| pack_oriented(cur, orient, rs, lut));
-        std::mem::swap(&mut self.prev, &mut self.cur);
+        let mut sent: Vec<Rect> = Vec::new();
+        self.mailbox.put_frame(&panel, |rs| {
+            sent.extend_from_slice(rs);
+            pack_oriented(cur, orient, rs, lut)
+        });
+        if video && !first {
+            // what the panel got: the pushed rects, plus any of an unsent
+            // frame they were merged with, all taken from `cur`
+            let back = self.orient.inverse();
+            for r in sent {
+                copy_rect(&self.cur, &mut self.prev, back.map_rect(r));
+            }
+        } else {
+            std::mem::swap(&mut self.prev, &mut self.cur);
+        }
         Some(panel)
     }
 }
@@ -280,6 +310,30 @@ mod tests {
 
     fn job(s: Scene) -> Job {
         Job::single(s, None, false)
+    }
+
+    #[test]
+    fn video_pushes_only_changes_beyond_a_step_from_what_the_panel_shows() {
+        let mb = Mailbox::new();
+        let mut f = ScreenFrames::new(Orient::new(270, false), mb.clone(), 1.0);
+        let fill = |p: &mut Pixmap, v: u8| {
+            for c in p.data_mut().as_chunks_mut::<4>().0 {
+                *c = [v, v, v, 255];
+            }
+        };
+        fill(&mut f.cur, 100);
+        assert!(f.flush_as(true).is_some(), "the first frame is full");
+        let _ = mb.take();
+        // within a step of the panel: nothing to push
+        fill(&mut f.cur, 106);
+        assert!(f.flush_as(true).is_none());
+        assert!(mb.try_take().is_none());
+        // only 6 from the last frame, but 12 from what the panel shows
+        fill(&mut f.cur, 112);
+        assert!(f.flush_as(true).is_some());
+        assert!(matches!(mb.take(), DisplayCmd::Frame(_)));
+        let mid = (120 * 240 + 120) * 4;
+        assert_eq!(f.prev.data()[mid], 112, "the panel copy follows the push");
     }
 
     #[test]
