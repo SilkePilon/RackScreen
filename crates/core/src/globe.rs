@@ -108,20 +108,43 @@ impl IssTrack {
         Some(in_shadow(self.at(unix)?, unit(lat, lon)))
     }
 
-    /// Whether the ground under the station is lit at `unix` (sun above
-    /// `GROUND_LIT_MIN_ELEVATION_DEG` there); `None` outside the ephemeris.
-    /// The cameras look down at the ground, which goes dark well before the
-    /// station itself enters the shadow.
+    /// Whether the camera's view of the ground is lit at `unix`; `None`
+    /// outside the ephemeris. The cameras look down and ahead along the
+    /// orbit: flying into the night the picture goes dark while the sun is
+    /// still up under the station, flying into the day it is lit as the sun
+    /// rises there. So the sun's elevation at the ground point must clear
+    /// `SETTING_MIN_ELEVATION_DEG` while it sinks and
+    /// `RISING_MIN_ELEVATION_DEG` while it climbs.
     pub fn ground_lit(&self, unix: i64) -> Option<bool> {
-        let (lat, lon) = subsolar(unix);
-        let min = GROUND_LIT_MIN_ELEVATION_DEG.to_radians().sin();
-        Some(dot(self.at(unix)?, unit(lat, lon)) > min)
+        let elevation = |t: i64| -> Option<f64> {
+            let (lat, lon) = subsolar(t);
+            Some(
+                dot(self.at(t)?, unit(lat, lon))
+                    .clamp(-1.0, 1.0)
+                    .asin()
+                    .to_degrees(),
+            )
+        };
+        let now = elevation(unix)?;
+        // the slope over a minute (backwards at the end of the ephemeris)
+        let rising = match elevation(unix + 60) {
+            Some(later) => later > now,
+            None => elevation(unix - 60).is_none_or(|earlier| now > earlier),
+        };
+        let min = if rising {
+            RISING_MIN_ELEVATION_DEG
+        } else {
+            SETTING_MIN_ELEVATION_DEG
+        };
+        Some(now > min)
     }
 }
 
-/// Below this sun elevation at the station's ground point the view down is
-/// too dark to show (late civil twilight).
-pub const GROUND_LIT_MIN_ELEVATION_DEG: f64 = -4.0;
+/// Sun elevations at the station's ground point (degrees) where the stream's
+/// picture turns dark or lit, measured on the Pi on 2026-11-11: dark at
+/// +7.9° flying into the night, live at -0.2° flying into the day.
+pub const SETTING_MIN_ELEVATION_DEG: f64 = 8.0;
+pub const RISING_MIN_ELEVATION_DEG: f64 = -2.0;
 
 /// The globe is centred this far west of the station, and on this share of
 /// its latitude, so the station sits right of centre with its way ahead in
@@ -292,22 +315,35 @@ mod tests {
     }
 
     #[test]
-    fn the_ground_goes_dark_before_the_station_does() {
+    fn the_view_follows_the_sun_under_the_station_and_its_direction() {
         let t = 1_790_000_000;
         let (lat, lon) = subsolar(t);
-        let at = |dlon: f64| IssTrack {
-            t0: t,
-            step_secs: 20,
-            points: vec![(lat as f32, (lon + dlon) as f32); 2],
+        // two points a minute apart, east (towards the evening) or west
+        let pass = |dlon: f64, step: f64| IssTrack {
+            t0: t - 60,
+            step_secs: 60,
+            points: vec![
+                (lat as f32, (lon + dlon - step) as f32),
+                (lat as f32, (lon + dlon) as f32),
+                (lat as f32, (lon + dlon + step) as f32),
+            ],
             home: (0.0, 0.0),
         };
-        assert_eq!(at(60.0).ground_lit(t), Some(true));
-        assert_eq!(at(92.0).ground_lit(t), Some(true), "sun just set");
-        // 100° past the subsolar point: the station is still sunlit, the
-        // ground below is in deep twilight
-        assert_eq!(at(100.0).in_shadow(t), Some(false));
-        assert_eq!(at(100.0).ground_lit(t), Some(false));
-        assert_eq!(at(100.0).ground_lit(t + 60), None);
+        // flying into the night (away from the subsolar point)
+        assert_eq!(pass(60.0, 1.0).ground_lit(t), Some(true));
+        assert_eq!(
+            pass(85.0, 1.0).ground_lit(t),
+            Some(false),
+            "sun 5° up, sinking"
+        );
+        // flying into the day: lit from just below the horizon
+        assert_eq!(
+            pass(91.0, -1.0).ground_lit(t),
+            Some(true),
+            "sun 1° down, rising"
+        );
+        assert_eq!(pass(95.0, -1.0).ground_lit(t), Some(false));
+        assert_eq!(pass(60.0, 1.0).ground_lit(t + 600), None);
     }
 
     #[test]
