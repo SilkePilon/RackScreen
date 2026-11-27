@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,700,1,0" rel="stylesheet">
+<style>
+  body{background:#111114;color:#EDEDEF;font-family:Outfit,system-ui,sans-serif;margin:0;padding:28px}
+  h2{margin:0 0 4px;font-weight:600} .sub{color:#8E8E93;margin:0 0 24px;max-width:900px;line-height:1.45}
+  .option{background:#1a1a1f;border:2px solid #2C2C33;border-radius:18px;padding:18px 20px;margin-bottom:22px;cursor:pointer}
+  .option.selected{border-color:#4CC38A}
+  .head{display:flex;gap:12px;align-items:baseline;margin-bottom:6px}
+  .letter{font-weight:700;font-size:20px;color:#4CC38A}
+  .title{font-weight:600;font-size:18px} .desc{color:#8E8E93;font-size:14px;margin-bottom:14px}
+  .row{display:flex;gap:22px;flex-wrap:wrap}
+  .cell{text-align:center} .cap{color:#80808A;font-size:12px;margin-top:6px}
+  svg{width:300px;height:300px;display:block}
+  .ms{font-family:'Material Symbols Rounded';font-weight:700}
+  .true{width:121px;height:121px}
+  .cell.small{display:flex;flex-direction:column;justify-content:center}
+  #opts{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
+  .row svg{width:230px;height:230px}
+</style></head><body>
+<h2>PortWatch: Complete marker icon</h2>
+<p class="sub">Design C (route-map markers) with the GPU tile. Only the gold Complete marker (last band) changes. Shown at 91.3 % (marker is the current one) and 100 % (reached, filled). Click the one you like.</p>
+<div id="opts"></div>
+
+<svg id="measure" width="0" height="0" style="position:absolute"></svg>
+<script>
+const T = {TEXT:'#EDEDEF',TEXT2:'#8E8E93',TEXT3:'#80808A',TRACK:'#2C2C33',CARD:'#24242A',INK:'#0B0B0C'};
+const GPU = {
+  AMD:{c:'#ED1C24', d:"M18.324 9.137l1.559 1.56h2.556v2.557L24 14.814V9.137zM2 9.52l-2 4.96h1.309l.37-.982H3.9l.408.982h1.338L3.432 9.52zm4.209 0v4.955h1.238v-3.092l1.338 1.562h.188l1.338-1.556v3.091h1.238V9.52H10.47l-1.592 1.845L7.287 9.52zm6.283 0v4.96h2.057c1.979 0 2.88-1.046 2.88-2.472 0-1.36-.937-2.488-2.747-2.488zm1.237.91h.792c1.17 0 1.63.711 1.63 1.57 0 .728-.372 1.572-1.616 1.572h-.806zm-10.985.273l.791 1.932H2.008zm17.137.307l-1.604 1.603v2.25h2.246l1.604-1.607h-2.246z", h:7.5},
+  NVIDIA:{c:'#76B900', d:"M8.948 8.798v-1.43a6.7 6.7 0 0 1 .424-.018c3.922-.124 6.493 3.374 6.493 3.374s-2.774 3.851-5.75 3.851c-.398 0-.787-.062-1.158-.185v-4.346c1.528.185 1.837.857 2.747 2.385l2.04-1.714s-1.492-1.952-4-1.952a6.016 6.016 0 0 0-.796.035m0-4.735v2.138l.424-.027c5.45-.185 9.01 4.47 9.01 4.47s-4.08 4.964-8.33 4.964c-.37 0-.733-.035-1.095-.097v1.325c.3.035.61.062.91.062 3.957 0 6.82-2.023 9.593-4.408.459.371 2.34 1.263 2.73 1.652-2.633 2.208-8.772 3.984-12.253 3.984-.335 0-.653-.018-.971-.053v1.864H24V4.063zm0 10.326v1.131c-3.657-.654-4.673-4.46-4.673-4.46s1.758-1.944 4.673-2.262v1.237H8.94c-1.528-.186-2.73 1.245-2.73 1.245s.68 2.412 2.739 3.11M2.456 10.9s2.164-3.197 6.5-3.533V6.201C4.153 6.59 0 10.653 0 10.653s2.35 6.802 8.948 7.42v-1.237c-4.84-.6-6.492-5.936-6.492-5.936z", h:10},
+  Intel:{c:'#0071C5', d:"M20.42 7.345v9.18h1.651v-9.18zM0 7.475v1.737h1.737V7.474zm9.78.352v6.053c0 .513.044.945.13 1.292.087.34.235.618.44.828.203.21.475.359.803.451.334.093.754.136 1.255.136h.216v-1.533c-.24 0-.445-.012-.593-.037a.672.672 0 0 1-.39-.173.693.693 0 0 1-.173-.377 4.002 4.002 0 0 1-.037-.606v-2.182h1.193v-1.416h-1.193V7.827zm-3.505 2.312c-.396 0-.76.08-1.082.241-.327.161-.6.384-.822.668l-.087.117v-.902H2.658v6.256h1.639v-3.214c.018-.588.16-1.02.433-1.299.29-.297.642-.445 1.044-.445.476 0 .841.149 1.082.433.235.284.359.686.359 1.2v3.324h1.663V12.97c.006-.89-.229-1.595-.686-2.09-.458-.495-1.1-.742-1.917-.742zm10.065.006a3.252 3.252 0 0 0-2.306.946c-.29.29-.525.637-.692 1.033a3.145 3.145 0 0 0-.254 1.273c0 .452.08.878.241 1.274.161.395.39.742.674 1.032.284.29.637.526 1.045.693.408.173.86.26 1.342.26 1.397 0 2.262-.637 2.782-1.23l-1.187-.904c-.248.297-.841.699-1.583.699-.464 0-.847-.105-1.138-.321a1.588 1.588 0 0 1-.593-.872l-.019-.056h4.915v-.587c0-.451-.08-.872-.235-1.267a3.393 3.393 0 0 0-.661-1.033 3.013 3.013 0 0 0-1.02-.692 3.345 3.345 0 0 0-1.311-.248zm-16.297.118v6.256h1.651v-6.256zm16.278 1.286c1.132 0 1.664.797 1.664 1.255l-3.32.006c0-.458.525-1.255 1.656-1.261zm7.073 3.814a.606.606 0 0 0-.606.606.606.606 0 0 0 .606.606.606.606 0 0 0 .606-.606.606.606 0 0 0-.606-.606zm-.008.105a.5.5 0 0 1 .002 0 .5.5 0 0 1 .5.501.5.5 0 0 1-.5.5.5.5 0 0 1-.5-.5.5.5 0 0 1 .498-.5zm-.233.155v.699h.13v-.285h.093l.173.285h.136l-.18-.297a.191.191 0 0 0 .118-.056c.03-.03.05-.074.05-.136 0-.068-.02-.117-.063-.154-.037-.038-.105-.056-.185-.056zm.13.099h.154c.019 0 .037.006.056.012a.064.064 0 0 1 .037.031c.013.013.012.031.012.056a.124.124 0 0 1-.012.055.164.164 0 0 1-.037.031c-.019.006-.037.013-.056.013h-.154Z", h:8},
+};
+const MS = [
+  {k:'Groundwork',s:'BASE',at:0,c:'#80808A'},{k:'Exe runs',s:'EXE',at:10,c:'#A48BFA'},{k:'First frame',s:'FRAME',at:20,c:'#8C9CFF'},
+  {k:'Main menu',s:'MENU',at:30,c:'#6EA8FE'},{k:'In the world',s:'WORLD',at:40,c:'#5CC8C3'},{k:'Playable',s:'PLAY',at:50,c:'#4CC38A'},{k:'Complete',s:'DONE',at:100,c:'#F2B84B'},
+];
+const msAt = p => { let m = MS[0]; for (const x of MS) if (p >= x.at) m = x; return m; };
+const STATES = [
+  {score:91.3, name:'Belobug', priv:false, verified:true, fps:22, stab:'stable', upd:'2h ago', gpu:['AMD']},
+  {score:100, name:'Belobug', priv:false, verified:true, fps:31, stab:'stable', upd:'5m ago', gpu:['AMD']},
+];
+const STAB_ICON = {'stable':'check_circle','rare crash':'warning','crashes':'error','unknown':'help'};
+const CX=120, CY=120, START=16, SWEEP=328; let RR=102, RW=15;
+const MICON=["construction","terminal","image","list","public","directions_run",null,null,null,"emoji_events"];
+const cv = document.createElement('canvas').getContext('2d');
+const tw = (txt,size,weight=600) => { cv.font = `${weight} ${size}px Outfit`; return cv.measureText(txt).width; };
+const CAP = 0.70; let uid = 0;
+
+const pt = (f,r=RR) => { const a=(START+SWEEP*f)*Math.PI/180; return [CX+r*Math.sin(a), CY-r*Math.cos(a)]; };
+const arcPath = (f0,f1,r=RR,rev=false) => { const [x0,y0]=pt(f0,r),[x1,y1]=pt(f1,r); const large=(SWEEP*(f1-f0))>180?1:0;
+  return rev ? `M${x1} ${y1} A${r} ${r} 0 ${large} 0 ${x0} ${y0}` : `M${x0} ${y0} A${r} ${r} 0 ${large} 1 ${x1} ${y1}`; };
+const arc = (f0,f1,c,a=1) => f1-f0<0.002 ? '' : `<path d="${arcPath(f0,f1)}" stroke="${c}" stroke-opacity="${a}" stroke-width="${RW}" fill="none" stroke-linecap="round"/>`;
+const gap = k => RW*k/RR/(SWEEP*Math.PI/180);
+const LBL=[0,1,2,3,4,5,9];
+const bandC = i => i===9?MS[6].c:MS[Math.min(i,5)].c;
+const bandLit = (s,i) => Math.min(1,Math.max(0,(s.score-i*10)/10));
+function bars(s){ let o=''; const g=gap(1.4)/2;
+  for(let i=0;i<10;i++){ const c=bandC(i), lit=bandLit(s,i), a=i/10+g, b=(i+1)/10-g;
+    o += lit<=0 ? arc(a,b,c,.3) : lit>=1 ? arc(a,b,c,1) : arc(a,b,c,.3)+arc(a,a+(b-a)*lit,c,1); } return o; }
+const icAt = (i,r,size,color,op=1) => { const [x,y]=pt((i+.5)/10,r); return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" class="ms" font-size="${size}" fill="${color}" fill-opacity="${op}">${MICON[i]}</text>`; };
+function splitIcon(s,i,size){ const lit=bandLit(s,i), c=bandC(i);
+  if(lit>=1) return icAt(i,RR,size,T.INK,.9); if(lit<=0) return icAt(i,RR,size,c,1);
+  const g=gap(1.4)/2, a=i/10+g, b=(i+1)/10-g, e=a+(b-a)*lit, id='w'+(uid++);
+  return `<clipPath id="${id}a"><polygon points="${wedge(i/10,e)}"/></clipPath><clipPath id="${id}b"><polygon points="${wedge(e,(i+1)/10)}"/></clipPath><g clip-path="url(#${id}a)">${icAt(i,RR,size,T.INK,.9)}</g><g clip-path="url(#${id}b)">${icAt(i,RR,size,c,1)}</g>`; }
+const RINGS = {
+  inside: s => bars(s) + LBL.map(i=>splitIcon(s,i,11)).join(''),
+  outside: s => bars(s) + LBL.map(i=>{ const lit=bandLit(s,i); const cur = lit>0 && lit<1;
+      return icAt(i,113.5,cur?11:9.5, lit>0?bandC(i):T.TEXT3, lit>0?1:.55); }).join(''),
+  nodes: s => bars(s) + LBL.map(i=>{ const lit=bandLit(s,i), c=bandC(i); const [x,y]=pt((i+.5)/10,RR);
+      const full = lit>=1;
+      return `<circle cx="${x}" cy="${y}" r="9.5" fill="#000"/><circle cx="${x}" cy="${y}" r="8" fill="${full?c:'#000'}" stroke="${c}" stroke-width="1.6" stroke-opacity="${lit>0?1:.45}"/>`
+        + icAt(i,RR,10.5, full?T.INK:c, full?.9:(lit>0?1:.55)); }).join(''),
+};
+function curved(i,text,size,color,opacity){ const mid=START+SWEEP*(i+.5)/10; const bottom=mid>90&&mid<270; const id='p'+(uid++);
+  const rr = bottom ? RR + size*CAP/2 : RR - size*CAP/2;
+  return `<path id="${id}" d="${arcPath(i/10,(i+1)/10,rr,bottom)}" fill="none"/><text font-size="${size}" font-weight="700" fill="${color}" fill-opacity="${opacity}" letter-spacing=".6"><textPath href="#${id}" startOffset="50%" text-anchor="middle">${text}</textPath></text>`; }
+function wedge(f0,f1){ const pts=[[CX,CY]]; for(let k=0;k<=24;k++){ const f=f0+(f1-f0)*k/24; const a=(START+SWEEP*f)*Math.PI/180; pts.push([CX+140*Math.sin(a), CY-140*Math.cos(a)]); } return pts.map(p=>p.join(',')).join(' '); }
+function splitLabel(i,text,size,color,s){ const lit=Math.min(1,Math.max(0,(s.score-i*10)/10));
+  if(lit>=1) return curved(i,text,size,T.INK,.9); if(lit<=0) return curved(i,text,size,color,1);
+  const g=gap(1.4)/2, a=i/10+g, b=(i+1)/10-g, e=a+(b-a)*lit, id='w'+(uid++);
+  return `<clipPath id="${id}a"><polygon points="${wedge(i/10,e)}"/></clipPath><clipPath id="${id}b"><polygon points="${wedge(e,(i+1)/10)}"/></clipPath><g clip-path="url(#${id}a)">${curved(i,text,size,T.INK,.9)}</g><g clip-path="url(#${id}b)">${curved(i,text,size,color,1)}</g>`; }
+
+// logos: measured bboxes, drawn at a given height
+const BB = {};
+function measureLogos(){ const m=document.getElementById('measure');
+  for(const [k,g] of Object.entries(GPU)){ m.innerHTML=`<path d="${g.d}"/>`; const b=m.firstChild.getBBox(); BB[k]=b; } }
+const logoW = (k,h) => (h||GPU[k].h) * BB[k].width / BB[k].height;
+function logo(k,x,cy,h){ h=h||GPU[k].h; const b=BB[k]; const w=logoW(k,h);
+  return `<svg x="${x}" y="${cy-h/2}" width="${w}" height="${h}" viewBox="${b.x} ${b.y} ${b.width} ${b.height}"><path d="${GPU[k].d}" fill="${GPU[k].c}"/></svg>`; }
+function logos(list,cx,cy,gapPx=7,scale=1){ const ws=list.map(k=>logoW(k,GPU[k].h*scale)); const total=ws.reduce((a,b)=>a+b,0)+gapPx*(list.length-1);
+  let x=cx-total/2, o=''; list.forEach((k,i)=>{ o+=logo(k,x,cy,GPU[k].h*scale); x+=ws[i]+gapPx; }); return {svg:o,width:total}; }
+
+function row(items, cx, baseline, gapPx, capSize){
+  const ws = items.map(it => it.icon ? it.size : it.logos ? it.w : it.rule ? 1 : tw(it.text,it.size,it.weight));
+  const total = ws.reduce((a,b)=>a+b,0) + gapPx*(items.length-1);
+  let x = cx - total/2, out = ''; const mid = baseline - capSize*CAP/2;
+  items.forEach((it,i)=>{
+    if (it.icon) out += `<text x="${x+ws[i]/2}" y="${mid}" text-anchor="middle" dominant-baseline="central" class="ms" font-size="${it.size}" fill="${it.color}">${it.icon}</text>`;
+    else if (it.logos) out += logos(it.logos, x+ws[i]/2, mid, 6, it.scale).svg;
+    else if (it.rule) out += `<rect x="${x}" y="${mid-5}" width="1" height="10" fill="${it.color}" opacity=".5"/>`;
+    else out += `<text x="${x}" y="${baseline}" font-size="${it.size}" font-weight="${it.weight}" fill="${it.color}">${it.text}</text>`;
+    x += ws[i] + gapPx; });
+  return {svg: out, width: total};
+}
+const lg = (list,scale=1) => ({logos:list, scale, w:logos(list,0,0,6,scale).width});
+
+// shared pieces
+function pill(s,dy,extra=[]){ const m=msAt(s.score); const items=[];
+  if (s.verified) items.push({icon:'verified', size:12, color:m.c});
+  items.push({text:s.name, size:10.5, weight:600, color:m.c});
+  if (s.priv) items.push({icon:'lock', size:11, color:m.c});
+  items.push(...extra);
+  const p=row(items,120,126+dy+10.5*CAP/2,3,10.5); const pw=p.width+24;
+  return `<rect x="${120-pw/2}" y="${116+dy}" width="${pw}" height="20" rx="10" fill="${m.c}" fill-opacity=".3"/>${p.svg}`; }
+function tiles(s,dy){ const tileW=52, g=4, tileH=44, tileY=145+dy, topMid=163+dy, labelBase=180+dy;
+  let x=120-(2*tileW+g)/2, o='';
+  // fps
+  let cx=x+tileW/2;
+  o+=`<rect x="${x}" y="${tileY}" width="${tileW}" height="${tileH}" rx="12" fill="${T.CARD}"/>`;
+  o+=`<text x="${cx}" y="${topMid+18*CAP/2}" text-anchor="middle" font-size="18" font-weight="600" fill="${T.TEXT}">${s.fps>0?s.fps:'—'}</text>`;
+  o+=`<text x="${cx}" y="${labelBase}" text-anchor="middle" font-size="8.5" font-weight="500" fill="${T.TEXT2}">fps</text>`;
+  // gpu
+  x+=tileW+g; cx=x+tileW/2;
+  o+=`<rect x="${x}" y="${tileY}" width="${tileW}" height="${tileH}" rx="12" fill="${T.CARD}"/>`;
+  const list=s.gpu.slice(0,2);
+  if(!list.length) o+=`<text x="${cx}" y="${topMid+18*CAP/2}" text-anchor="middle" font-size="18" font-weight="600" fill="${T.TEXT3}">—</text>`;
+  else { const gp=5; let sc=list.length===1?1.35:1; const w0=logos(list,0,0,gp,1).width; sc=Math.min(sc, 42/w0); o+=logos(list,cx,topMid,gp,sc).svg; }
+  o+=`<text x="${cx}" y="${labelBase}" text-anchor="middle" font-size="8.5" font-weight="500" fill="${T.TEXT2}">gpu</text>`;
+  return o; }
+const updRow = (s,dy,extra=[]) => row([...extra,{icon:'schedule',size:10,color:T.TEXT3},{text:s.upd,size:9,weight:500,color:T.TEXT3}],120,202+dy,3,9).svg;
+const hero = (s,y=96,size=60) => `<text x="120" y="${y}" text-anchor="middle" font-size="${size}" font-weight="600" fill="${T.TEXT}" letter-spacing="-1">${s.score.toFixed(1).replace(/\.0$/,'')}<tspan font-size="${size*.35}" dx="3" dy="${-size*.45}">%</tspan></text>`;
+
+const foot = s => hero(s)+pill(s,-2)+tiles(s,-2)+updRow(s,-2);
+const VARIANTS = [
+ {id:'sports_score', title:'Finish flag', R:104, W:9, ring:'nodes', icon:'sports_score', desc:'<code>sports_score</code>'},
+ {id:'flag', title:'Flag', R:104, W:9, ring:'nodes', icon:'flag', desc:'<code>flag</code>'},
+ {id:'workspace_premium', title:'Medal', R:104, W:9, ring:'nodes', icon:'workspace_premium', desc:'<code>workspace_premium</code>'},
+ {id:'star', title:'Star', R:104, W:9, ring:'nodes', icon:'star', desc:'<code>star</code>'},
+ {id:'celebration', title:'Party popper', R:104, W:9, ring:'nodes', icon:'celebration', desc:'<code>celebration</code>'},
+ {id:'check_circle', title:'Check', R:104, W:9, ring:'nodes', icon:'check_circle', desc:'<code>check_circle</code>'}
+];
+function panel(v,s,cls=''){ RR=v.R; RW=v.W; MICON[9]=v.icon;
+  return `<svg class="${cls}" viewBox="0 0 240 240"><circle cx="120" cy="120" r="120" fill="#000"/>${arc(0,1,T.TRACK)}${RINGS[v.ring](s)}
+    <text x="120" y="${120-RR}" text-anchor="middle" dominant-baseline="central" class="ms" font-size="20" fill="${T.TEXT}" fill-opacity=".7">sports_esports</text>
+    ${foot(s)}</svg>`; }
+Promise.all([document.fonts.load('600 10px Outfit'),document.fonts.load('500 10px Outfit'),document.fonts.load('700 10px Outfit'),document.fonts.load('700 12px "Material Symbols Rounded"', 'sports_scoreflagworkspace_premiumstarcelebrationconstructionterminalimagelistpublicdirections_runemoji_eventssports_esportsverifiedlockschedulecheck_circlewarninghelp')])
+  .then(()=>document.fonts.ready).then(()=>{ measureLogos();
+  document.getElementById('opts').innerHTML = VARIANTS.map((v,i)=>`
+  <div class="option" data-choice="${v.id}" onclick="toggleSelect && toggleSelect(this)">
+    <div class="head"><span class="letter">${'ABCDEF'[i]}</span><span class="title">${v.title}</span></div>
+    <div class="desc" style="color:#8E8E93;font-size:14px;margin-bottom:14px">${v.desc}</div>
+    <div class="row">${STATES.map(s=>`<div class="cell">${panel(v,s)}<div class="cap">${s.score}%</div></div>`).join('')}
+      <div class="cell small">${panel(v,STATES[1],'true')}<div class="cap">≈ real size</div></div></div>
+  </div>`).join('');
+});
+</script>
+</body></html>
