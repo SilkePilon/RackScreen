@@ -150,6 +150,7 @@ transitions:
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,
 #        printer, sen (live video of Earth from the ISS),
+#        portwatch (the leading GTA VI PC port on portwatch-vi.xyz),
 #        gif:<name> (a GIF from the gifs: list),
 #        ha:<name> (an entity from homeassistant.entities)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps

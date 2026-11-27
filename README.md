@@ -63,8 +63,8 @@ Every GIF below is the real renderer fed by the simulator, one panel, 20 fps.
 | **`ci`** — the last twelve GitHub Actions runs as segments, passes over total, the newest run in the pill | **`jellyfin`** — time left on what is playing, the ring is the position, direct play or transcoding, title and viewer in the card |
 | <img src=".github/media/screens/music.gif" alt="MUSIC role" width="200"> | <img src=".github/media/screens/printer.gif" alt="3D PRINTER role" width="200"> |
 | **`music`** — the album cover, the track's progress on the ring (green Spotify, violet Jellyfin), time left in the pill, song, artist and device in the card | **`printer`** — a Bambu Lab print: progress on the ring in the filament's colour, time left in the pill, job, layer and temperatures in the card |
-| <img src=".github/media/screens/sen.gif" alt="SEN LIVE role" width="200"> |  |
-| **`sen`** — [Sen](https://www.sen.com/live)'s live video of the Earth from the ISS, 15 fps over the whole panel (5 fps in this GIF); shown only while it is live and in daylight, skipped otherwise |  |
+| <img src=".github/media/screens/sen.gif" alt="SEN LIVE role" width="200"> | <img src="web/public/roles/portwatch.webp" alt="PORTWATCH role" width="200"> |
+| **`sen`** — [Sen](https://www.sen.com/live)'s live video of the Earth from the ISS, 15 fps over the whole panel (5 fps in this GIF); shown only while it is live and in daylight, skipped otherwise | **`portwatch`** — the leading GTA VI PC-port effort on [PortWatch VI](https://portwatch-vi.xyz): its score on a ring of milestones, its name in the pill, fps and GPUs in the tiles |
 
 <p align="center">
   <img src=".github/media/screens/health-torrent.gif" alt="HEALTH as a download monitor" width="200">
@@ -366,6 +366,7 @@ Every screen shows one or more **roles** and cycles through them. Thirty-two rol
 | `ha:<name>` | Home Assistant | a number with its unit and a 30-minute sparkline, or a state as a word (On, Open, Away); the icon follows the device class |
 | `music` | Spotify + Jellyfin | album cover, ring the track's progress (green Spotify, violet Jellyfin, dim when paused), pill time left / paused / played N ago, card song, artist and device |
 | `sen` | Sen's ISS stream (YouTube) | the live picture of the Earth, full panel, nothing drawn over it; skipped at night, during camera switches and replays |
+| `portwatch` | portwatch-vi.xyz (no key) | the leading GTA VI PC-port effort's score on a route ring with a marker per milestone, pill its name (a check when verified, a lock for a private build), tiles its fps and GPU logos, footer the site's update age; skipped until the first data arrives |
 
 The **Screens** page of the web UI edits them: drag roles to reorder, add from the picker, set the cycle interval, or apply a preset: cluster (`cpu`, `mem`, `pods`, `health`), electricity (`power-mix` and `renewable` on the first two screens; the others keep their roles), mixed (`cpu`+`power-mix`, `mem`+`renewable`, `pods`, `health`) and sky (`weather`+`aqi`, `rain`+`wind`, `sun`+`moon`, `iss`+`gh-activity`). A screen with a single role never cycles.
 
@@ -477,6 +478,10 @@ The stream costs nothing while no screen shows it. It starts about 8 seconds bef
 
 The simulator (`--source fake`) plays a recorded five seconds of the stream in a loop instead.
 
+## PortWatch role
+
+`portwatch` shows who leads the race to port GTA VI to PC, as ranked by [PortWatch VI](https://portwatch-vi.xyz): the leader's score with the site's own formula, on a ring of ten bands with a marker per milestone (groundwork, exe runs, first frame, main menu, in the world, playable, complete), the effort's name in the pill, its fps and GPUs in the tiles. There is no key and nothing to configure: add `portwatch` to a screen. The Pi fetches the site's `tracker.json` only while a screen uses the role, every 15 minutes (`portwatch.poll_secs`, at least 300) and with its ETag, so an unchanged file costs one short request. Until the first fetch succeeds the role is skipped (a screen with nothing else shows "Waiting for data"); after that a failed fetch keeps the last leader on screen and is tried again after 1, 5, 15 and then every 60 minutes. The footer says how long ago the site updated, which shows when the data is stale.
+
 ## GIF role
 
 `gif:<name>` shows a GIF over the whole panel, with no ring or icon, for the screen's `cycle_secs` like any role, and crossfades in and out like the rest. Add GIFs on the **GIFs** page of the web UI (it checks the link and previews it), or in the config:
@@ -551,6 +556,10 @@ rain:
 iss:
   enabled: false           # next ISS pass, computed from the Celestrak TLE
   min_elevation: 10        # degrees above the horizon that count as a pass
+
+# portwatch:
+#   poll_secs: 900         # how often portwatch-vi.xyz/data/tracker.json is
+#                          # checked (min 300); used by the portwatch role
 
 github:
   enabled: false           # fine-grained token: read access to contributions, events and Actions
@@ -645,6 +654,7 @@ transitions:
 #        weather, wind, aqi, rain, sun, moon, iss, ups, net, deploys, media,
 #        traffic, restarts, uptime, fans, mains, load, ci, jellyfin, music,
 #        printer, sen (live video of Earth from the ISS),
+#        portwatch (the leading GTA VI PC port on portwatch-vi.xyz),
 #        gif:<name> (a GIF from the gifs: list),
 #        ha:<name> (an entity from homeassistant.entities)
 # hz: SPI clock. The Pi 3B+ divides a 400 MHz core clock, so the real steps
