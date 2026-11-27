@@ -28,6 +28,7 @@ pub fn group(role: Role) -> &'static str {
         Role::Media | Role::Jellyfin | Role::Music => "Media",
         Role::Gif(_) => "GIFs",
         Role::Printer | Role::Ha(_) => "Home",
+        Role::PortWatch => "Gaming",
         _ => "Cluster",
     }
 }
@@ -92,6 +93,9 @@ pub fn description(role: Role) -> &'static str {
         }
         Role::Sen => {
             "Sen's live video of Earth from the ISS. Shown only while it is live and in daylight; skipped otherwise."
+        }
+        Role::PortWatch => {
+            "How close the GTA VI PC port is: the leading effort's score from PortWatch VI, its milestone, fps and GPU."
         }
     }
 }

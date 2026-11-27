@@ -6,6 +6,7 @@ pub mod home;
 pub mod iss;
 pub mod media;
 pub mod music;
+pub mod portwatch;
 pub mod power_mix;
 pub mod rack;
 pub mod sky;
@@ -17,7 +18,7 @@ use crate::p2::screen::P2Screen;
 use crate::theme::Role;
 
 /// The P2 screen for a role with live data. `None` for roles that still draw
-/// their legacy scene, and for power-mix, music and iss, which draw themselves.
+/// their legacy scene, and for power-mix, music, iss and portwatch, which draw themselves.
 pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
     let mut screen = match role {
         Role::Cpu => cluster::cpu(model, now),
@@ -49,7 +50,9 @@ pub fn screen(model: &Model, role: Role, now: Secs) -> Option<P2Screen> {
         Role::Printer => home::printer(model, now),
         // the icon follows the entity's device class
         Role::Ha(i) => return Some(home::ha(model, i, now)),
-        Role::PowerMix | Role::Music | Role::Iss | Role::Gif(_) | Role::Sen => return None,
+        Role::PowerMix | Role::Music | Role::Iss | Role::Gif(_) | Role::Sen | Role::PortWatch => {
+            return None
+        }
     };
     screen.icon = role.icon();
     Some(screen)

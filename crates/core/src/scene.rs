@@ -233,6 +233,7 @@ pub fn role_scene(model: &Model, role: Role, now: Secs, ui: &mut ScreenUi) -> Sc
         Role::PowerMix => crate::p2::roles::power_mix::power_mix_scene(model, now, ui),
         Role::Music => crate::p2::roles::music::music_scene(model, now, ui),
         Role::Iss => crate::p2::roles::iss::iss_scene(model, now, ui),
+        Role::PortWatch => crate::p2::roles::portwatch::portwatch_scene(model, now, ui),
         Role::Gif(index) => model.gif_scene(index, now, ui),
         // `sen` returned above
         _ => {

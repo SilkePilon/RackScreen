@@ -905,12 +905,14 @@ impl Model {
     }
 
     /// Whether `role` has something to show right now. A screen skips an entry
-    /// whose role cannot show, and leaves one that stops being able to. Only
-    /// `sen` can be unavailable: it shows while the stream is live, its
-    /// pictures keep coming and the station is on the day side.
+    /// whose role cannot show, and leaves one that stops being able to. `sen`
+    /// shows while the stream is live, its pictures keep coming and the
+    /// station is on the day side; `portwatch` once its data arrived.
     pub fn role_available(&self, role: Role) -> bool {
         match role {
             Role::Sen => self.sen.live && self.sen_frame().is_some() && self.sen_daylight(),
+            // skipped in the cycle until the first tracker.json arrived
+            Role::PortWatch => self.portwatch().is_some(),
             _ => true,
         }
     }

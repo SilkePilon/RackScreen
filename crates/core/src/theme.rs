@@ -88,6 +88,8 @@ pub enum Role {
     /// Sen's live Earth view from the ISS. Shows only while the stream has
     /// live daylight footage; otherwise the screen skips it.
     Sen,
+    /// The leading GTA VI PC-port effort from PortWatch VI.
+    PortWatch,
     /// `gif:<name>`: the GIF at this index of the config's `gifs:` list. Not
     /// in `ALL`; the config knows which exist and what they are called.
     Gif(u16),
@@ -97,7 +99,7 @@ pub enum Role {
 }
 
 impl Role {
-    pub const ALL: [Role; 31] = [
+    pub const ALL: [Role; 32] = [
         Role::Cpu,
         Role::Mem,
         Role::Pods,
@@ -129,6 +131,7 @@ impl Role {
         Role::Music,
         Role::Printer,
         Role::Sen,
+        Role::PortWatch,
     ];
 
     /// Position in `ALL`; `Gif(i)` and `Ha(i)` count on after it, taking
@@ -182,6 +185,7 @@ impl Role {
             Role::Music => "MUSIC",
             Role::Printer => "3D PRINTER",
             Role::Sen => "SEN LIVE",
+            Role::PortWatch => "PORTWATCH",
             Role::Gif(_) => "GIF",
             Role::Ha(_) => "HOME",
         }
@@ -222,6 +226,7 @@ impl Role {
             Role::Music => "ms-music_note",
             Role::Printer => "ms-view_in_ar",
             Role::Sen => "ms-videocam",
+            Role::PortWatch => "ms-sports_esports",
             Role::Gif(_) => "ms-gif_box",
             // the screen picks one by the entity's domain and device class
             Role::Ha(_) => "ms-home",
@@ -261,6 +266,7 @@ impl Role {
             Role::Music => "music",
             Role::Printer => "printer",
             Role::Sen => "sen",
+            Role::PortWatch => "portwatch",
             // `gif:<name>` and `ha:<name>` come from the config (`Config::role_name`).
             Role::Gif(_) => "gif",
             Role::Ha(_) => "ha",
@@ -434,10 +440,12 @@ mod tests {
     }
 
     #[test]
-    fn thirty_one_roles_with_unique_names() {
-        assert_eq!(Role::ALL.len(), 31);
+    fn thirty_two_roles_with_unique_names() {
+        assert_eq!(Role::ALL.len(), 32);
         let names: std::collections::HashSet<&str> = Role::ALL.iter().map(|r| r.name()).collect();
-        assert_eq!(names.len(), 31);
+        assert_eq!(names.len(), 32);
+        assert_eq!(Role::parse("portwatch"), Some(Role::PortWatch));
+        assert!(!Role::PortWatch.is_cluster() && !Role::PortWatch.is_sky());
         assert_eq!(Role::parse("printer"), Some(Role::Printer));
         assert_eq!(Role::Printer.icon(), "ms-view_in_ar");
         assert!(!Role::Printer.is_cluster() && !Role::Printer.is_sky());

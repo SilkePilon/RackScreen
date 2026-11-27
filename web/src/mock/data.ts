@@ -70,6 +70,7 @@ export const ROLE_DEFS: R[] = [
   ["jellyfin", "NOW PLAYING", "Media", "What Jellyfin is playing."],
   ["music", "MUSIC", "Media", "Now playing from Spotify or Jellyfin."],
   ["printer", "3D PRINTER", "Home", "Bambu Lab print progress, time left and temperatures."],
+  ["portwatch", "PORTWATCH", "Gaming", "How close the GTA VI PC port is, from PortWatch VI."],
   ["gh-activity", "CONTRIBUTIONS", "Developer", "Your GitHub contribution graph."],
   ["ci", "CI", "Developer", "Latest GitHub Actions runs."],
 ]

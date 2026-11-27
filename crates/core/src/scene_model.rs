@@ -72,6 +72,7 @@ impl crate::model::Model {
             Role::Gif(i) => !matches!(self.gif(i), GifState::Ready(_)),
             // without a picture it draws the ISS globe, with that role's states
             Role::Sen => false,
+            Role::PortWatch => self.portwatch().is_none(),
         }
     }
 
@@ -910,9 +911,10 @@ mod tests {
         fn sen_is_available_only_while_live_with_fresh_frames_by_day() {
             let mut m = model(&[(Role::Cpu, 10.0), (Role::Sen, 10.0)]);
             assert!(!m.role_available(Role::Sen), "nothing came yet");
+            // portwatch also waits, for its first data
             assert!(Role::ALL
                 .iter()
-                .all(|r| *r == Role::Sen || m.role_available(*r)));
+                .all(|r| matches!(r, Role::Sen | Role::PortWatch) || m.role_available(*r)));
             let f = frame();
             m.apply(Event::Sen(SenEvent::Frame(f.clone())), 1.0);
             m.tick(1.0);

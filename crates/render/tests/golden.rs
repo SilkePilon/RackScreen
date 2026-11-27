@@ -8,6 +8,7 @@ use rackscreen_core::event::{
 };
 use rackscreen_core::model::{HaSlot, Model, Thresholds};
 use rackscreen_core::p2::ui::ScreenUi;
+use rackscreen_core::portwatch::{Gpu, Milestone, PortWatchSnapshot};
 use rackscreen_core::theme::Role;
 use rackscreen_render::frame::new_pixmap;
 use rackscreen_render::renderer::Renderer;
@@ -600,6 +601,19 @@ fn full_model() -> Model {
         },
         0.0,
     );
+    m.apply(
+        Event::PortWatch(PortWatchSnapshot {
+            score: 91.3,
+            milestone: Milestone::Playable,
+            name: "Belobug".into(),
+            private: false,
+            verified: true,
+            fps: Some(22.0),
+            gpus: vec![Gpu::Amd],
+            updated_unix: UNIX - 2 * 3600,
+        }),
+        0.0,
+    );
     m.tick(0.0);
     m
 }
@@ -745,6 +759,61 @@ fn printer_and_home_assistant() {
         1.0,
     );
     check("p2_printer_off", &render(&off, Role::Printer, 120.0));
+}
+
+/// PortWatch: a private leader, an early race and a complete port.
+#[test]
+fn portwatch_states() {
+    let states = [
+        (
+            "private",
+            PortWatchSnapshot {
+                score: 78.7,
+                milestone: Milestone::Playable,
+                name: "Doomsday".into(),
+                private: true,
+                verified: true,
+                fps: Some(4.0),
+                gpus: vec![Gpu::Amd, Gpu::Nvidia],
+                updated_unix: UNIX - 14 * 60,
+            },
+        ),
+        (
+            "early",
+            PortWatchSnapshot {
+                score: 34.0,
+                milestone: Milestone::MainMenu,
+                name: "VIctory-NVIDIA".into(),
+                private: false,
+                verified: false,
+                fps: None,
+                gpus: vec![Gpu::Nvidia, Gpu::Intel],
+                updated_unix: UNIX - 3 * 3600,
+            },
+        ),
+        (
+            "complete",
+            PortWatchSnapshot {
+                score: 100.0,
+                milestone: Milestone::Complete,
+                name: "Belobug".into(),
+                private: false,
+                verified: true,
+                fps: Some(31.0),
+                gpus: vec![Gpu::Amd],
+                updated_unix: UNIX - 5 * 60,
+            },
+        ),
+    ];
+    for (name, snap) in states {
+        let mut m = full_model();
+        m.apply(Event::PortWatch(snap), 0.0);
+        m.tick(0.0);
+        check(
+            &format!("p2_portwatch_{name}"),
+            &render(&m, Role::PortWatch, 120.0),
+        );
+    }
 }
 
 /// A track with a made-up cover: Spotify's is dusk blue to amber, Jellyfin's
