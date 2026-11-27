@@ -23,6 +23,7 @@ pub mod k8s;
 pub mod mem;
 pub mod open_meteo;
 pub mod owned_fs;
+pub mod portwatch;
 pub mod prometheus;
 pub mod qbittorrent;
 pub mod sen;

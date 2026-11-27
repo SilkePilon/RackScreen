@@ -1,0 +1,1189 @@
+{
+ "updated": "2026-11-27T16:18:23.809Z",
+ "efforts": [
+  {
+   "id": "kelvaroq",
+   "name": "Kelvaroq",
+   "repo": "stellarr-studio/kelvaroq",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.25,
+    "render": 0.25,
+    "fps": 10,
+    "stability": 0.8
+   },
+   "stats": {
+    "stars": 474
+   }
+  },
+  {
+   "id": "victory-nvidia",
+   "name": "VIctory-NVIDIA",
+   "repo": "trustno1-coder/VIctory-NVIDIA",
+   "verification": "portwatch",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.75,
+    "fps": 20,
+    "stability": 1
+   },
+   "stats": {
+    "stars": 1009
+   }
+  },
+  {
+   "id": "belobug",
+   "name": "Belobug",
+   "repo": "Belobug/VIctory-Belobug-AMD",
+   "verification": "portwatch",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.8,
+    "fps": 22,
+    "stability": 1
+   },
+   "stats": {
+    "stars": 4112
+   }
+  },
+  {
+   "id": "dexnom",
+   "name": "DexNom",
+   "repo": "DexNom/VIctory",
+   "verification": "portwatch",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.5,
+    "render": 0.85,
+    "fps": 3,
+    "stability": 0.7
+   },
+   "stats": {
+    "stars": 1369
+   }
+  },
+  {
+   "id": "zettrox",
+   "name": "ZETTROX",
+   "repo": "Zettrox/ztrx",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.1,
+    "render": 0.3,
+    "fps": 2,
+    "stability": 0.8
+   },
+   "nuked": {
+    "at": "2026-11-25",
+    "note": "GitHub repo and the Zettrox account gone on Nov 25 (HTTP 404 by 17:26 UTC). No DMCA notice is published yet."
+   },
+   "stats": {
+    "stars": 1499
+   }
+  },
+  {
+   "id": "vitoriabr",
+   "name": "Uilian",
+   "repo": "uiliannn/VItoriaBr",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.1,
+    "render": 0.2,
+    "fps": 4,
+    "stability": 0.4
+   },
+   "stats": {
+    "stars": 238
+   }
+  },
+  {
+   "id": "avatarmanz",
+   "name": "AvatarManz",
+   "repo": "avatarmanz/VIctory-7900XTX",
+   "verification": "portwatch",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.5,
+    "render": 0.7,
+    "fps": 16,
+    "stability": 0.9
+   },
+   "stats": {
+    "stars": 1924
+   }
+  },
+  {
+   "id": "notnozy",
+   "name": "NotNozy",
+   "repo": null,
+   "verification": "self-reported",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.7,
+    "fps": 16,
+    "stability": 0.9
+   },
+   "stats": {}
+  },
+  {
+   "id": "doomsday",
+   "name": "Doomsday",
+   "repo": null,
+   "verification": "portwatch",
+   "gpu": [
+    "AMD",
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.7,
+    "fps": 4,
+    "stability": 0.8
+   },
+   "stats": {}
+  },
+  {
+   "id": "darkworldhm",
+   "name": "darkworldhm",
+   "repo": null,
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.7,
+    "fps": 15,
+    "stability": 0.7
+   },
+   "stats": {}
+  },
+  {
+   "id": "suri",
+   "name": "suri",
+   "repo": null,
+   "verification": "self-reported",
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.7,
+    "fps": 3,
+    "stability": "unknown"
+   },
+   "stats": {}
+  },
+  {
+   "id": "omonkey",
+   "name": "omonkey",
+   "repo": null,
+   "verification": "self-reported",
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0,
+    "render": 0.5,
+    "fps": 5,
+    "stability": "unknown"
+   },
+   "nuked": {
+    "at": "2026-11-25",
+    "note": "Taken down on Nov 25 (the owner's report). Its code was never public; Swaggely's Rumble channel, where it was streamed, still loaded at 18:18 UTC."
+   },
+   "stats": {}
+  },
+  {
+   "id": "cgbj",
+   "name": "CGBJ",
+   "repo": null,
+   "verification": "portwatch",
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0.8,
+    "render": 0.7,
+    "fps": 25,
+    "stability": 0.85
+   },
+   "stats": {}
+  },
+  {
+   "id": "victory-gta6",
+   "name": "hyphennn",
+   "repo": "fxceless/victory-fork",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0,
+    "render": 0.7,
+    "fps": 3,
+    "stability": "unknown"
+   },
+   "stats": {
+    "stars": 3339
+   }
+  },
+  {
+   "id": "marvis",
+   "name": "VIctory",
+   "repo": "Marvisak/VIctory",
+   "verification": "self-reported",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 1,
+    "playable": 1,
+    "story": 0,
+    "render": 0,
+    "fps": 1,
+    "stability": "unknown"
+   },
+   "stats": {
+    "stars": 13690
+   }
+  },
+  {
+   "id": "xbox-emulator",
+   "name": "xbox-emulator",
+   "repo": "omonkeyz/xbox-emulator",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.85,
+    "shaders": 0.35,
+    "graphics": 0.7,
+    "proven": 0.8
+   },
+   "stats": {
+    "stars": 1852
+   }
+  },
+  {
+   "id": "xcl",
+   "name": "XCL",
+   "repo": "xcl-dev/xcl",
+   "verification": "self-reported",
+   "gpu": [
+    "AMD",
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 0.5,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.9,
+    "shaders": 0.9,
+    "graphics": 0.85,
+    "proven": 0.9
+   },
+   "stats": {
+    "stars": 8693
+   }
+  },
+  {
+   "id": "scarlettx",
+   "name": "ScarlettX",
+   "repo": "Freminet/ScarlettX",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.8,
+    "shaders": 0,
+    "graphics": 0.6,
+    "proven": 0.85
+   },
+   "stats": {
+    "stars": 268
+   }
+  },
+  {
+   "id": "tuxbox",
+   "name": "TuxBox",
+   "repo": "brcly/TuxBox",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.6,
+    "shaders": 0.3,
+    "graphics": 0.5,
+    "proven": 0.6
+   },
+   "stats": {
+    "stars": 394
+   }
+  },
+  {
+   "id": "americas-recomp",
+   "name": "americas-recomp",
+   "repo": "realdody/americas-recomp",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.65,
+    "shaders": 0.9,
+    "graphics": 0.3,
+    "proven": 0
+   },
+   "nuked": {
+    "at": "2026-11-23",
+    "note": "GitHub repo gone since about 22:00 UTC on Nov 23 (HTTP 404). Its owner's account is still active and no DMCA notice is published, so it was likely deleted or made private."
+   },
+   "stats": {
+    "stars": 586
+   }
+  },
+  {
+   "id": "leonida",
+   "name": "Leonida",
+   "repo": "ItsNotRexed/Leonida",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 1,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.7,
+    "shaders": 0.9,
+    "graphics": 0.5,
+    "proven": 0
+   },
+   "nuked": {
+    "at": "2026-11-23",
+    "note": "Discord gone, GitHub repo deleted and creator quit on Nov 23. On Nov 24 a Take-Two DMCA notice disabled its network of 3,007 GitHub forks; separately uploaded copies and a frozen mirror remain."
+   },
+   "stats": {
+    "stars": 32312
+   }
+  },
+  {
+   "id": "openscarlett",
+   "name": "OpenScarlett",
+   "repo": "californiaAlmonds/OpenScarlett",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA",
+    "Intel"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.65,
+    "shaders": 0.45,
+    "graphics": 0.5,
+    "proven": 0.15
+   },
+   "stats": {
+    "stars": 108
+   }
+  },
+  {
+   "id": "scarlett-layer",
+   "name": "scarlett-layer",
+   "repo": "jadeowaowa/scarlett-layer",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.6,
+    "shaders": 0.2,
+    "graphics": 0.35,
+    "proven": 0.25
+   },
+   "stats": {
+    "stars": 46
+   }
+  },
+  {
+   "id": "xbox2windows",
+   "name": "Xbox2Windows",
+   "repo": "R0Y00/Xbox2Windows",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA",
+    "AMD",
+    "Intel"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 0.5,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.4,
+    "shaders": 0.25,
+    "graphics": 0.25,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 2033
+   }
+  },
+  {
+   "id": "anyxboxx",
+   "name": "AnyXboxX",
+   "repo": "LooperSalty/AnyXboxX",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA",
+    "AMD"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.65,
+    "shaders": 0.15,
+    "graphics": 0.15,
+    "proven": 0.15
+   },
+   "stats": {
+    "stars": 497
+   }
+  },
+  {
+   "id": "keylime",
+   "name": "keylime",
+   "repo": "ethan00013/keylime",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.5,
+    "shaders": 0.1,
+    "graphics": 0.35,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 5
+   }
+  },
+  {
+   "id": "xvalkyrie",
+   "name": "XValkyrie",
+   "repo": "sammwyy/xvalkyrie",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.6,
+    "shaders": 0.1,
+    "graphics": 0.35,
+    "proven": 0.15
+   },
+   "stats": {
+    "stars": 236
+   }
+  },
+  {
+   "id": "gtavi-recomp",
+   "name": "GTAVI-Recomp",
+   "repo": "JamesCicada/GTAVI-Recomp",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.3,
+    "shaders": 0.3,
+    "graphics": 0.2,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 80
+   }
+  },
+  {
+   "id": "anyxboxseries",
+   "name": "AnyXboxSeries",
+   "repo": "edupode/anyxboxseries",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.25,
+    "shaders": 0.05,
+    "graphics": 0.1,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 3
+   }
+  },
+  {
+   "id": "scarab",
+   "name": "SCARAB",
+   "repo": "p-portela/SCARAB",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.25,
+    "shaders": 0,
+    "graphics": 0.15,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 2
+   }
+  },
+  {
+   "id": "anybox",
+   "name": "AnyBox",
+   "repo": "Dark3581/AnyBox",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.35,
+    "shaders": 0,
+    "graphics": 0,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 4
+   }
+  },
+  {
+   "id": "percyscarlett",
+   "name": "PercyScarlett",
+   "repo": "rpatty-dev/PercyScarlett",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.3,
+    "shaders": 0.15,
+    "graphics": 0.1,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 44
+   }
+  },
+  {
+   "id": "grandtheftxbox",
+   "name": "GrandTheftXbox",
+   "repo": "zohaiblazuli/GrandTheftXbox",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.15,
+    "shaders": 0,
+    "graphics": 0,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 5
+   }
+  },
+  {
+   "id": "scarlett-windows-compat",
+   "name": "Scarlett Windows Compat",
+   "repo": "ProhorovIlja/NativeX-Runtime",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.05,
+    "shaders": 0,
+    "graphics": 0,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 3
+   }
+  },
+  {
+   "id": "dedsec",
+   "name": "DedSec",
+   "repo": "Hylanderry/DedSec",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.15,
+    "shaders": 0.2,
+    "graphics": 0.1,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 17
+   }
+  },
+  {
+   "id": "xbgtasix",
+   "name": "Xbgtasix",
+   "repo": "ljm-233/Xbgtasix",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.2,
+    "shaders": 0,
+    "graphics": 0.25,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 4
+   }
+  },
+  {
+   "id": "seriesx-emulator",
+   "name": "SeriesX Emulator",
+   "repo": "anrq0/SeriesX-Emulator",
+   "verification": "self-reported",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.15,
+    "shaders": 0,
+    "graphics": 0,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 4
+   }
+  },
+  {
+   "id": "gta6-compat-layer",
+   "name": "GTA6-COMPAT-LAYER (ScarlettCompat)",
+   "repo": "SSTGxf/ScarlettCompat",
+   "verification": "self-reported",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.15,
+    "shaders": 0,
+    "graphics": 0,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 8
+   }
+  },
+  {
+   "id": "xlaunchvi",
+   "name": "XlaunchVI",
+   "repo": "JPTuba9/xlaunch-vi",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.3,
+    "shaders": 0.05,
+    "graphics": 0.2,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 10
+   }
+  },
+  {
+   "id": "openscarlett-ce",
+   "name": "OpenScarlett (Community Edition)",
+   "repo": "OpenCommunityEdition/OpenScarlett",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA",
+    "Intel"
+   ],
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.7,
+    "shaders": 0.15,
+    "graphics": 0.6,
+    "proven": 0.6
+   },
+   "stats": {
+    "stars": 95
+   }
+  },
+  {
+   "id": "port-of-the-americas",
+   "name": "Port of the Americas",
+   "repo": "Steinkoloss/port-of-the-americas",
+   "verification": "self-reported",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 0.5,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.5,
+    "shaders": 0.1,
+    "graphics": 0.35,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 15
+   }
+  },
+  {
+   "id": "five-star-recomp",
+   "name": "Five Star Recomp",
+   "repo": "ThatRecompDev/five-star-recomp",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 1,
+    "boots": 1,
+    "menu": 1,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.35,
+    "shaders": 0.2,
+    "graphics": 0.2,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 234
+   }
+  },
+  {
+   "id": "g6recomp",
+   "name": "G6Recomp",
+   "repo": "Kajcsi/G6Recomp",
+   "verification": "self-reported",
+   "gta": {
+    "loads": 0,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.3,
+    "shaders": 0.05,
+    "graphics": 0,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 14
+   }
+  },
+  {
+   "id": "gta6-boottest",
+   "name": "GTA6-BootTest",
+   "repo": "OnlyMoisties/GTA6-BootTest",
+   "verification": "self-reported",
+   "gpu": [
+    "AMD"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.5,
+    "shaders": 0.05,
+    "graphics": 0.2,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 45
+   }
+  },
+  {
+   "id": "palmetto",
+   "name": "Palmetto",
+   "repo": "luizwidmer/palmetto",
+   "verification": "self-reported",
+   "gpu": [
+    "NVIDIA"
+   ],
+   "gta": {
+    "loads": 1,
+    "boots": 0,
+    "menu": 0,
+    "world": 0,
+    "playable": 0,
+    "story": 0,
+    "render": 0,
+    "fps": 0,
+    "stability": "unknown"
+   },
+   "groundwork": {
+    "loader": 0.5,
+    "shaders": 0.3,
+    "graphics": 0.3,
+    "proven": 0
+   },
+   "stats": {
+    "stars": 19
+   }
+  }
+ ],
+ "history": [
+  {
+   "date": "2026-11-27",
+   "leader": 91.3,
+   "leaderId": "belobug",
+   "top3": 90.3,
+   "furthest": "playable",
+   "tracked": 45
+  }
+ ]
+}
