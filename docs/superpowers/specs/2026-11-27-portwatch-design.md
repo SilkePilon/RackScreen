@@ -94,11 +94,11 @@ Role `portwatch` in `Role::ALL` (`crates/core/src/theme.rs`): title
 `PORTWATCH`, top icon Material `sports_esports`. Renderer in
 `crates/core/src/p2/roles/` (new `portwatch.rs`, wired in `roles/mod.rs`).
 
-Milestone colours (all existing theme constants, no gradients):
+Milestone colours (all existing theme constants, no gradients; Groundwork uses `TEXT2` because `TEXT3` at the pill's 30 % fill falls under the panel contrast floor):
 
 | Milestone | From | Colour | Marker icon |
 |---|---|---|---|
-| Groundwork | 0 % | `TEXT3` #80808A | `construction` |
+| Groundwork | 0 % | `TEXT2` #8E8E93 | `construction` |
 | Exe runs | 10 % | `VIOLET` #A48BFA | `terminal` |
 | First frame | 20 % | `INDIGO` #8C9CFF | `image` |
 | Main menu | 30 % | `BLUE` #6EA8FE | `list` |
