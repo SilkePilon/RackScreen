@@ -1,11 +1,12 @@
-//! Ring kinds (fill, parts, discrete segments, bands with one lit) drawn as
-//! round-capped arcs over a `TRACK` arc.
+//! Ring kinds (fill, parts, discrete segments, bands with one lit, a route
+//! of bands with milestone markers) drawn as round-capped arcs over a `TRACK`
+//! arc.
 
 use crate::p2::layout::{RING_R, RING_START_DEG, RING_SWEEP_DEG, RING_W};
 use crate::scene::Drawable;
 use crate::theme::layout::{CX, CY};
-use crate::theme::p2::TRACK;
-use crate::theme::Color;
+use crate::theme::p2::{INK, TRACK};
+use crate::theme::{Color, BLACK};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RingKind {
@@ -19,6 +20,21 @@ pub enum RingKind {
     Discrete(Vec<Color>),
     /// `n` equal bands; the one holding `frac` at full alpha, the rest dimmed.
     Bands { colors: Vec<Color>, frac: f32 },
+    /// Equal bands lit up to `frac` (behind it full, the band holding it lit
+    /// to `frac` over a dimmed band, ahead dimmed), with a round marker per
+    /// milestone: reached filled, current outlined and bright, ahead faint.
+    Route {
+        frac: f32,
+        bands: Vec<Color>,
+        markers: Vec<RouteMarker>,
+    },
+}
+
+/// A milestone marker on a `Route` ring, centred on band `band`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RouteMarker {
+    pub band: usize,
+    pub icon: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -34,6 +50,14 @@ pub const PARTS_GAP_K: f32 = 1.3;
 pub const DISCRETE_GAP_K: f32 = 1.6;
 pub const BANDS_GAP_K: f32 = 1.4;
 pub const DIM_BAND_ALPHA: f32 = 0.3;
+/// The route ring sits 2 px inside the usual radius so its markers fit.
+pub const ROUTE_R: f32 = 104.0;
+/// Dimmed route bands; 0.3 would put `TEXT3` under the panel's floor.
+pub const ROUTE_DIM_ALPHA: f32 = 0.35;
+pub const MARKER_R: f32 = 8.0;
+pub const MARKER_CUT_R: f32 = 9.5;
+pub const MARKER_STROKE: f32 = 1.6;
+pub const MARKER_ICON_PX: f32 = 10.5;
 /// Runs shorter than this fraction of the sweep are not drawn.
 pub const MIN_FRAC: f32 = 0.002;
 /// A fill never vanishes: at least a dot at the start.
@@ -63,6 +87,16 @@ impl RingSpec {
     }
     pub fn bands(colors: Vec<Color>, frac: f32) -> RingSpec {
         RingSpec::new(RingKind::Bands { colors, frac })
+    }
+    pub fn route(frac: f32, bands: Vec<Color>, markers: Vec<RouteMarker>) -> RingSpec {
+        RingSpec {
+            r: ROUTE_R,
+            ..RingSpec::new(RingKind::Route {
+                frac,
+                bands,
+                markers,
+            })
+        }
     }
 
     /// `k` stroke widths of gap, as a fraction of the sweep.
@@ -140,6 +174,83 @@ impl RingSpec {
                     let alpha = if i == cur { 1.0 } else { DIM_BAND_ALPHA };
                     let i = i as f32;
                     out.extend(self.arc(i / n + gap / 2.0, (i + 1.0) / n - gap / 2.0, *c, alpha));
+                }
+            }
+            RingKind::Route {
+                frac,
+                bands,
+                markers,
+            } => {
+                if bands.is_empty() {
+                    return out;
+                }
+                let n = bands.len() as f32;
+                let gap = self.gap_frac(BANDS_GAP_K);
+                let fr = frac.clamp(0.0, 1.0);
+                let lit_of = |i: usize| ((fr * n) - i as f32).clamp(0.0, 1.0);
+                for (i, c) in bands.iter().enumerate() {
+                    let (a, b) = (i as f32 / n + gap / 2.0, (i as f32 + 1.0) / n - gap / 2.0);
+                    let lit = lit_of(i);
+                    if lit >= 1.0 {
+                        out.extend(self.arc(a, b, *c, 1.0));
+                    } else {
+                        out.extend(self.arc(a, b, *c, ROUTE_DIM_ALPHA));
+                        if lit > 0.0 {
+                            out.extend(self.arc(a, a + (b - a) * lit, *c, 1.0));
+                        }
+                    }
+                }
+                for m in markers {
+                    let Some(c) = bands.get(m.band).copied() else {
+                        continue;
+                    };
+                    let (cx, cy) = self.point((m.band as f32 + 0.5) / n);
+                    let lit = lit_of(m.band);
+                    let (fill, stroke_a, icon_c, icon_a) = if lit >= 1.0 {
+                        (Some(c), 1.0, INK, 0.9)
+                    } else if lit > 0.0 {
+                        (None, 1.0, c, 1.0)
+                    } else {
+                        (None, 0.45, c, 0.55)
+                    };
+                    out.push(Drawable::Ellipse {
+                        cx,
+                        cy,
+                        rx: MARKER_CUT_R,
+                        ry: MARKER_CUT_R,
+                        color: BLACK,
+                        alpha: 1.0,
+                    });
+                    if let Some(f) = fill {
+                        out.push(Drawable::Ellipse {
+                            cx,
+                            cy,
+                            rx: MARKER_R,
+                            ry: MARKER_R,
+                            color: f,
+                            alpha: 1.0,
+                        });
+                    }
+                    out.push(Drawable::Arc {
+                        cx,
+                        cy,
+                        r: MARKER_R,
+                        width: MARKER_STROKE,
+                        start_deg: 0.0,
+                        sweep_deg: 360.0,
+                        color: c,
+                        alpha: stroke_a,
+                    });
+                    out.push(Drawable::Icon {
+                        name: m.icon,
+                        cx,
+                        cy,
+                        size: MARKER_ICON_PX,
+                        color: icon_c,
+                        alpha: icon_a,
+                        scale: 1.0,
+                        dy: 0.0,
+                    });
                 }
             }
         }
@@ -257,5 +368,84 @@ mod tests {
         );
         let top = arcs(&RingSpec::bands(colors, 1.5));
         assert_eq!(top[3].3, 1.0, "clamps into the last band");
+    }
+
+    fn route(frac: f32) -> RingSpec {
+        use crate::theme::p2::{GREEN, TEXT3};
+        let mut bands = vec![TEXT3; 5];
+        bands.extend([GREEN; 5]);
+        RingSpec::route(
+            frac,
+            bands,
+            vec![
+                RouteMarker {
+                    band: 0,
+                    icon: "ms-construction",
+                },
+                RouteMarker {
+                    band: 5,
+                    icon: "ms-directions_run",
+                },
+            ],
+        )
+    }
+
+    fn route_arcs(d: &[Drawable]) -> Vec<(f32, f32)> {
+        d.iter()
+            .filter_map(|x| match x {
+                Drawable::Arc {
+                    sweep_deg,
+                    alpha,
+                    r,
+                    ..
+                } if (*r - ROUTE_R).abs() < 0.01 => Some((*sweep_deg, *alpha)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn route_lights_bands_up_to_frac() {
+        let d = route(0.25).overlay();
+        let a = route_arcs(&d);
+        // two full bands, the third dimmed with its first half lit, seven dimmed
+        let lit = a.iter().filter(|(_, al)| *al == 1.0).count();
+        let dim = a.iter().filter(|(_, al)| *al == ROUTE_DIM_ALPHA).count();
+        assert_eq!((lit, dim), (3, 8));
+        assert_eq!(route(0.25).r, ROUTE_R);
+    }
+
+    #[test]
+    fn route_markers_show_reached_current_and_ahead() {
+        use crate::theme::p2::{GREEN, INK};
+        let icon = |d: &[Drawable], name: &str| {
+            d.iter()
+                .find_map(|x| match x {
+                    Drawable::Icon {
+                        name: n,
+                        color,
+                        alpha,
+                        ..
+                    } if *n == name => Some((*color, *alpha)),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        // band 0 reached, band 5 ahead
+        let d = route(0.3).overlay();
+        assert_eq!(icon(&d, "ms-construction"), (INK, 0.9));
+        assert_eq!(icon(&d, "ms-directions_run"), (GREEN, 0.55));
+        // band 5 current
+        let d = route(0.55).overlay();
+        assert_eq!(icon(&d, "ms-directions_run"), (GREEN, 1.0));
+        // every marker cuts the ring with a black disc first
+        let cuts = d
+            .iter()
+            .filter(|x| {
+                matches!(x, Drawable::Ellipse { rx, color, .. }
+                if *rx == MARKER_CUT_R && *color == crate::theme::BLACK)
+            })
+            .count();
+        assert_eq!(cuts, 2);
     }
 }

@@ -17,10 +17,18 @@ MS_ICONS="air aq battery_charging_full bolt build commit dark_mode deployed_code
   partly_cloudy_day rainy restart_alt rocket_launch satellite_alt speed swap_vert sync
   thermostat timer video_library wb_sunny bedtime gif_box
   view_in_ar home humidity_percentage water_drop sensor_door lightbulb toggle_on
-  videocam"
+  videocam
+  construction terminal image list public directions_run check_circle verified lock
+  schedule sports_esports"
 for i in $MS_ICONS; do
   curl -fsSL "$MATERIAL/$i.svg" | sed 's/width="48" height="48"/width="24" height="24"/' > "assets/icons/ms-$i.svg"
   grep -q '<svg[^>]*width="24" height="24"' "assets/icons/ms-$i.svg" || { echo "bad svg: ms-$i"; exit 1; }
+done
+# GPU vendor logos (Simple Icons, CC0-1.0) for the portwatch screen.
+SIMPLE="https://cdn.jsdelivr.net/npm/simple-icons@13.21.0/icons"
+for i in amd nvidia intel; do
+  curl -fsSL "$SIMPLE/$i.svg" -o "assets/icons/brand-$i.svg"
+  grep -q 'viewBox="0 0 24 24"' "assets/icons/brand-$i.svg" || { echo "bad svg: brand-$i"; exit 1; }
 done
 curl -fsSL "https://raw.githubusercontent.com/google/material-design-icons/master/LICENSE" -o assets/icons/MATERIAL-LICENSE.txt
 OUTFIT="https://raw.githubusercontent.com/Outfitio/Outfit-Fonts/main"

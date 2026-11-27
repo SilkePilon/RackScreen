@@ -68,6 +68,20 @@ icons!(
     "ms-sensor_door",
     "ms-lightbulb",
     "ms-toggle_on",
+    "ms-construction",
+    "ms-terminal",
+    "ms-image",
+    "ms-list",
+    "ms-public",
+    "ms-directions_run",
+    "ms-check_circle",
+    "ms-verified",
+    "ms-lock",
+    "ms-schedule",
+    "ms-sports_esports",
+    "brand-amd",
+    "brand-nvidia",
+    "brand-intel",
 );
 
 #[cfg(test)]
