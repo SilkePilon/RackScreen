@@ -406,6 +406,63 @@ mod tests {
         assert_eq!(icon_of(&s), Some("ms-sync"));
     }
 
+    fn portwatch_event() -> Event {
+        Event::PortWatch(crate::portwatch::PortWatchSnapshot {
+            score: 91.3,
+            milestone: crate::portwatch::Milestone::Playable,
+            name: "Belobug".into(),
+            private: false,
+            verified: true,
+            fps: Some(22.0),
+            gpus: vec![],
+            updated_unix: 0,
+        })
+    }
+
+    #[test]
+    fn portwatch_waits_for_its_first_data() {
+        let mut m = ready_model();
+        assert!(!m.role_available(Role::PortWatch));
+        assert!(m.needs_data(Role::PortWatch));
+        assert_eq!(
+            pill_of(&for_role(&m, Role::PortWatch, 1.0)).as_deref(),
+            Some("Waiting for data")
+        );
+        m.apply(portwatch_event(), 1.0);
+        assert!(m.role_available(Role::PortWatch));
+        assert!(!m.needs_data(Role::PortWatch));
+        assert_eq!(
+            pill_of(&for_role(&m, Role::PortWatch, 1.0)).as_deref(),
+            Some("Belobug")
+        );
+    }
+
+    #[test]
+    fn a_screen_moves_past_portwatch_until_its_data_comes() {
+        use crate::screens::Entry;
+        let mut m = ready_model();
+        m.set_screen_entries(vec![
+            vec![
+                Entry::new(Role::PortWatch, 30.0),
+                Entry::new(Role::Cpu, 30.0),
+            ],
+            vec![Entry::new(Role::PortWatch, 30.0)],
+        ]);
+        for i in 0..=60 {
+            m.tick(i as f64 / 30.0);
+        }
+        assert_eq!(m.current_role(0), Role::Cpu, "skipped before data");
+        assert_eq!(m.current_role(1), Role::PortWatch, "nowhere else to go");
+        let s = m.scene(1, 2.0, &mut ScreenUi::new());
+        assert_eq!(pill_of(&s).as_deref(), Some("Waiting for data"));
+        // with data, the first screen comes back to it after cpu's dwell
+        m.apply(portwatch_event(), 2.0);
+        for i in 60..=(40 * 30) {
+            m.tick(i as f64 / 30.0);
+        }
+        assert_eq!(m.current_role(0), Role::PortWatch);
+    }
+
     #[test]
     fn electricity_roles_go_back_to_no_data_when_the_link_drops() {
         let mut m = ready_model();

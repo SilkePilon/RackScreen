@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use rackscreen_core::event::Event;
 use rackscreen_core::portwatch::{
     parse_gpus, snapshot, stability_label, Effort, PortWatchSnapshot,
 };
@@ -11,10 +12,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::http::{client, read_capped};
+use crate::SourceCtx;
 
 pub const URL: &str = "https://portwatch-vi.xyz/data/tracker.json";
 /// The file is ~320 KB; refuse anything absurd.
 const MAX_BYTES: usize = 4 * 1024 * 1024;
+/// The leader's name is the site's untrusted text: at most this many chars.
+const MAX_NAME_CHARS: usize = 40;
 
 #[derive(Clone, Debug)]
 pub struct PortWatchConfig {
@@ -32,6 +36,7 @@ struct Tracker {
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct RawEffort {
+    id: Value,
     name: Value,
     repo: Value,
     verification: Value,
@@ -66,6 +71,19 @@ fn truthy(v: &Value) -> bool {
     }
 }
 
+/// A display string from untrusted JSON: control characters dropped,
+/// trimmed and capped to `MAX_NAME_CHARS`; empty when not a string.
+fn clean(v: &Value) -> String {
+    let s: String = v
+        .as_str()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let capped: String = s.trim().chars().take(MAX_NAME_CHARS).collect();
+    capped.trim_end().to_string()
+}
+
 fn effort(raw: &RawEffort) -> Effort {
     let gta = raw.gta.as_object();
     let g = |k: &str| num(gta.and_then(|m| m.get(k)));
@@ -84,7 +102,9 @@ fn effort(raw: &RawEffort) -> Effort {
         .map(|a| parse_gpus(a.iter().filter_map(Value::as_str)))
         .unwrap_or_default();
     Effort {
-        name: raw.name.as_str().unwrap_or("").trim().to_string(),
+        name: Some(clean(&raw.name))
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| clean(&raw.id)),
         repo: raw.repo.as_str().map(str::to_string),
         verified: raw.verification.as_str() == Some("portwatch"),
         gpus,
@@ -144,10 +164,6 @@ pub async fn fetch(etag: Option<&str>) -> Result<Fetched> {
     let body = read_capped(resp, MAX_BYTES, "tracker.json").await?;
     Ok(Fetched::Body { body, etag })
 }
-
-use rackscreen_core::event::Event;
-
-use crate::SourceCtx;
 
 /// Poll the tracker: a changed file is parsed and sent; an unchanged one
 /// (304) costs one request; failures keep the last snapshot on screen and
@@ -283,6 +299,35 @@ mod tests {
         assert_eq!(e[1].manual_score, Some(12.5));
         assert!(!e[1].nuked && e[1].private());
         assert_eq!(e[2], Effort::default());
+    }
+
+    fn names_of(efforts: &str) -> Vec<String> {
+        let body = format!(r#"{{"updated":"2026-11-27T00:00:00Z","efforts":[{efforts}]}}"#);
+        let (e, _) = parse_efforts(body.as_bytes()).unwrap();
+        e.into_iter().map(|e| e.name).collect()
+    }
+
+    #[test]
+    fn a_long_name_is_capped() {
+        let long = "x".repeat(10_000);
+        let names = names_of(&format!(r#"{{"id":"a","name":"{long}"}}"#));
+        assert_eq!(names[0].chars().count(), 40);
+        assert_eq!(names[0], "x".repeat(40));
+    }
+
+    #[test]
+    fn control_characters_are_dropped() {
+        let names = names_of(r#"{"id":"a","name":"  Be\u0007lo\nbug\u001b[2J\t "}"#);
+        assert_eq!(names[0], "Belobug[2J");
+    }
+
+    #[test]
+    fn an_empty_name_falls_back_to_the_id() {
+        let names = names_of(
+            r#"{"id":"belobug","name":"  "},{"id":"x\u0000y","name":null},
+               {"id":"z"},{"name":"\u0007"}"#,
+        );
+        assert_eq!(names, vec!["belobug", "xy", "z", ""]);
     }
 
     #[test]

@@ -285,11 +285,15 @@ pub struct PortWatchSnapshot {
     pub name: String,
     pub private: bool,
     pub verified: bool,
-    /// `None` when the leader has no fps figure (0 or missing).
+    /// `None` when the leader has no usable fps figure (0, missing, or not
+    /// a finite number up to `MAX_FPS`).
     pub fps: Option<f32>,
     pub gpus: Vec<Gpu>,
     pub updated_unix: i64,
 }
+
+/// An fps figure above this is a typo or junk, not a measurement.
+pub const MAX_FPS: f64 = 999.0;
 
 /// The leader as a snapshot; `None` when no effort is ranked.
 pub fn snapshot(efforts: &[Effort], updated_unix: i64) -> Option<PortWatchSnapshot> {
@@ -301,7 +305,7 @@ pub fn snapshot(efforts: &[Effort], updated_unix: i64) -> Option<PortWatchSnapsh
         name: e.name.trim().to_string(),
         private: e.private(),
         verified: e.verified,
-        fps: (e.fps.is_finite() && e.fps > 0.0).then_some(e.fps as f32),
+        fps: (e.fps.is_finite() && e.fps > 0.0 && e.fps <= MAX_FPS).then_some(e.fps as f32),
         gpus: e.gpus.clone(),
         updated_unix,
     })
@@ -397,7 +401,8 @@ mod tests {
 
     #[test]
     fn a_partial_step_never_drops_below_the_groundwork() {
-        // groundwork 10 × 1 = 10, then loads 0.5 → 0 + 0.5 × (10 − 10) = 10
+        // groundwork 10 × 1 = 10, and the site starts prevTick at the
+        // groundwork score: loads 0.5 → max(10, 10 + 0.5 × (10 − 10)) = 10
         let e = Effort {
             groundwork: [1.0; 4],
             ladder: [0.5, 0.0, 0.0, 0.0, 0.0],
@@ -529,6 +534,21 @@ mod tests {
         let mut e = playable(0.0, 0.0, 0.0, 0.0);
         e.fps = 0.0;
         assert_eq!(snapshot(&[e], 0).unwrap().fps, None);
+    }
+
+    #[test]
+    fn absurd_fps_is_no_figure() {
+        let fps_of = |fps: f64| {
+            let mut e = playable(0.0, 0.0, 0.0, 0.0);
+            e.fps = fps;
+            snapshot(&[e], 0).unwrap().fps
+        };
+        assert_eq!(fps_of(f64::INFINITY), None);
+        assert_eq!(fps_of(f64::NAN), None);
+        assert_eq!(fps_of(1e30), None);
+        assert_eq!(fps_of(1000.0), None);
+        assert_eq!(fps_of(999.0), Some(999.0));
+        assert_eq!(fps_of(22.0), Some(22.0));
     }
 
     #[test]

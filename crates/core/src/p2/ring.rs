@@ -52,7 +52,9 @@ pub const BANDS_GAP_K: f32 = 1.4;
 pub const DIM_BAND_ALPHA: f32 = 0.3;
 /// The route ring sits 2 px inside the usual radius so its markers fit.
 pub const ROUTE_R: f32 = 104.0;
-/// Dimmed route bands; 0.3 would put `TEXT3` under the panel's floor.
+/// Dimmed route bands. The groundwork bands are `TEXT2`, whose 0x8E × 0.3
+/// lands at about 0x2A, right on the panel's contrast floor; × 0.35 keeps
+/// them at about 0x31, just above it.
 pub const ROUTE_DIM_ALPHA: f32 = 0.35;
 pub const MARKER_R: f32 = 8.0;
 pub const MARKER_CUT_R: f32 = 9.5;
@@ -206,9 +208,11 @@ impl RingSpec {
                     };
                     let (cx, cy) = self.point((m.band as f32 + 0.5) / n);
                     let lit = lit_of(m.band);
+                    // on the exact tick (10, 20, … %) the band is reached
+                    // with nothing of it lit yet: current, not ahead
                     let (fill, stroke_a, icon_c, icon_a) = if lit >= 1.0 {
                         (Some(c), 1.0, INK, 0.9)
-                    } else if lit > 0.0 {
+                    } else if fr * n >= m.band as f32 {
                         (None, 1.0, c, 1.0)
                     } else {
                         (None, 0.45, c, 0.55)
@@ -447,5 +451,38 @@ mod tests {
             })
             .count();
         assert_eq!(cuts, 2);
+    }
+
+    #[test]
+    fn a_marker_on_the_exact_tick_is_current() {
+        use crate::theme::p2::GREEN;
+        // 0.5 is exactly where band 5 starts: nothing of it lit yet, but reached
+        let d = route(0.5).overlay();
+        let (cx, _) = route(0.5).point(5.5 / 10.0);
+        let at_marker = |x: &&Drawable| match x {
+            Drawable::Ellipse { cx: x, .. }
+            | Drawable::Arc { cx: x, .. }
+            | Drawable::Icon { cx: x, .. } => (*x - cx).abs() < 0.01,
+            _ => false,
+        };
+        let marker: Vec<&Drawable> = d.iter().filter(at_marker).collect();
+        assert_eq!(marker.len(), 3, "cut, stroke and icon: {marker:?}");
+        assert!(
+            !marker
+                .iter()
+                .any(|x| matches!(x, Drawable::Ellipse { rx, .. } if *rx == MARKER_R)),
+            "not filled"
+        );
+        assert!(marker.iter().any(|x| matches!(x,
+            Drawable::Arc { r, color, alpha, .. }
+            if *r == MARKER_R && *color == GREEN && *alpha == 1.0)));
+        assert!(marker.iter().any(|x| matches!(x,
+            Drawable::Icon { name, color, alpha, .. }
+            if *name == "ms-directions_run" && *color == GREEN && *alpha == 1.0)));
+        // just short of it the marker is still ahead
+        let d = route(0.49).overlay();
+        assert!(d.iter().any(|x| matches!(x,
+            Drawable::Icon { name, alpha, .. }
+            if *name == "ms-directions_run" && *alpha == 0.55)));
     }
 }
