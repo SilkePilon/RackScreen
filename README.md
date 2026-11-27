@@ -330,7 +330,7 @@ Everything else is plain Tailscale: `tailscale status` over SSH shows the same s
 
 ## Screens and roles
 
-Every screen shows one or more **roles** and cycles through them. Thirty-two roles exist:
+Every screen shows one or more **roles** and cycles through them. Thirty-three roles exist:
 
 | Role | Data source | Tile |
 |---|---|---|
