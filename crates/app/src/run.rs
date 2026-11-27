@@ -411,6 +411,14 @@ fn bambu_config(cfg: &Config) -> Option<rackscreen_sources::bambu::BambuConfig> 
 
 /// Sky and GitHub sources: public APIs and local maths, independent of the cluster.
 fn spawn_external_sources(runtime: &tokio::runtime::Runtime, cfg: &Config, ctx: &SourceCtx) {
+    if cfg.uses_role(Role::PortWatch) {
+        runtime.spawn(rackscreen_sources::portwatch::run_portwatch(
+            rackscreen_sources::portwatch::PortWatchConfig {
+                poll_secs: cfg.portwatch.effective_poll_secs(),
+            },
+            ctx.clone(),
+        ));
+    }
     if cfg.jellyfin.enabled && !cfg.jellyfin.url.trim().is_empty() {
         runtime.spawn(rackscreen_sources::jellyfin::run_jellyfin(
             rackscreen_sources::jellyfin::JellyfinConfig {

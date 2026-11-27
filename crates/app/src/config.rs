@@ -34,6 +34,8 @@ pub struct Config {
     pub iss: IssCfg,
     #[serde(default, skip_serializing_if = "SenCfg::is_default")]
     pub sen: SenCfg,
+    #[serde(default, skip_serializing_if = "PortWatchCfg::is_default")]
+    pub portwatch: PortWatchCfg,
     #[serde(default)]
     pub github: GithubCfg,
     #[serde(default)]
@@ -379,6 +381,31 @@ impl Default for SenCfg {
 impl SenCfg {
     fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+}
+
+/// PortWatch VI (portwatch-vi.xyz): how often tracker.json is checked.
+/// The site updates about every 3 hours; an unchanged file costs one 304.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct PortWatchCfg {
+    pub poll_secs: u64,
+}
+
+pub const PORTWATCH_MIN_POLL_SECS: u64 = 300;
+
+impl Default for PortWatchCfg {
+    fn default() -> Self {
+        Self { poll_secs: 900 }
+    }
+}
+
+impl PortWatchCfg {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+    pub fn effective_poll_secs(&self) -> u64 {
+        self.poll_secs.max(PORTWATCH_MIN_POLL_SECS)
     }
 }
 
@@ -1963,6 +1990,19 @@ mod tests {
         c.sen.fps = 12;
         let err = c.validate().unwrap_err().to_string();
         assert!(err.contains("sen.fps"), "{err}");
+    }
+
+    #[test]
+    fn portwatch_poll_defaults_and_floor() {
+        let cfg = Config::default();
+        assert_eq!(cfg.portwatch.poll_secs, 900);
+        assert_eq!(cfg.portwatch.effective_poll_secs(), 900);
+        let mut low = cfg.clone();
+        low.portwatch.poll_secs = 10;
+        assert_eq!(low.portwatch.effective_poll_secs(), 300);
+        // the default is not written back to the file
+        let yaml = serde_yaml_ng::to_string(&cfg).unwrap();
+        assert!(!yaml.contains("portwatch"), "{yaml}");
     }
 
     #[test]

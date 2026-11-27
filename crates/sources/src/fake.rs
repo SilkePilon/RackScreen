@@ -911,10 +911,26 @@ impl FakeState {
             self.jellyfin(),
             self.printer(),
             self.home_assistant(),
+            self.portwatch(),
         ]
         .into_iter()
         .chain(self.music())
         .collect()
+    }
+
+    /// Today's PortWatch leader, updated two hours before the clock.
+    fn portwatch(&self) -> Event {
+        use rackscreen_core::portwatch::{Gpu, Milestone, PortWatchSnapshot};
+        Event::PortWatch(PortWatchSnapshot {
+            score: 91.3,
+            milestone: Milestone::Playable,
+            name: "Belobug".into(),
+            private: false,
+            verified: true,
+            fps: Some(22.0),
+            gpus: vec![Gpu::Amd],
+            updated_unix: self.unix_start - 2 * 3600,
+        })
     }
 
     /// A print that runs for ten minutes, finishes and starts again. Built
@@ -1460,6 +1476,7 @@ mod tests {
             .iter()
             .any(|e| matches!(e, Event::MetricsHistory { cpu, .. } if cpu.len() == 31)));
         assert!(evs.iter().any(|e| matches!(e, Event::Forecast { .. })));
+        assert!(evs.iter().any(|e| matches!(e, Event::PortWatch(_))));
         assert!(evs
             .iter()
             .any(|e| matches!(e, Event::AirQualityHistory { .. })));

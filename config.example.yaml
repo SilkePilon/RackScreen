@@ -54,6 +54,9 @@ iss:
 #   fps: 15                # SEN live pictures a second: 10, 15 or 30
 #                          # (video costs ~2 %/fps of a core on an spi: 1 panel,
 #                          # almost nothing on spi: 0, which has DMA)
+# portwatch:
+#   poll_secs: 900         # how often portwatch-vi.xyz/data/tracker.json is
+#                          # checked (min 300); used by the portwatch role
 
 github:
   enabled: false           # fine-grained token: read access to contributions, events and Actions
