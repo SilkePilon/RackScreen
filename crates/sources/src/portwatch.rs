@@ -1,6 +1,8 @@
 //! PortWatch VI tracker: `tracker.json` from portwatch-vi.xyz, scored with
 //! the site's formula (`rackscreen_core::portwatch`) into the leader snapshot.
 
+use std::time::Duration;
+
 use anyhow::{bail, Context, Result};
 use rackscreen_core::portwatch::{
     parse_gpus, snapshot, stability_label, Effort, PortWatchSnapshot,
@@ -141,6 +143,59 @@ pub async fn fetch(etag: Option<&str>) -> Result<Fetched> {
         .map(str::to_string);
     let body = read_capped(resp, MAX_BYTES, "tracker.json").await?;
     Ok(Fetched::Body { body, etag })
+}
+
+use rackscreen_core::event::Event;
+
+use crate::SourceCtx;
+
+/// Poll the tracker: a changed file is parsed and sent; an unchanged one
+/// (304) costs one request; failures keep the last snapshot on screen and
+/// retry after 1, 5, 15, then 60 minutes.
+pub async fn run_portwatch(cfg: PortWatchConfig, ctx: SourceCtx) {
+    let mut etag: Option<String> = None;
+    let mut failures = 0u32;
+    loop {
+        if ctx.shutdown.is_cancelled() {
+            return;
+        }
+        let got = match fetch(etag.as_deref()).await {
+            Ok(Fetched::NotModified) => Ok(None),
+            Ok(Fetched::Body { body, etag: tag }) => parse(&body).map(|s| Some((s, tag))),
+            Err(e) => Err(e),
+        };
+        let wait = match got {
+            Ok(None) => {
+                failures = 0;
+                Duration::from_secs(cfg.poll_secs)
+            }
+            Ok(Some((snap, tag))) => {
+                failures = 0;
+                etag = tag;
+                tracing::info!(
+                    "portwatch: leader {} {} % ({})",
+                    snap.name,
+                    snap.score,
+                    snap.milestone.label()
+                );
+                ctx.emit(Event::PortWatch(snap));
+                Duration::from_secs(cfg.poll_secs)
+            }
+            Err(e) => {
+                failures += 1;
+                if failures == 1 {
+                    tracing::warn!("portwatch: {e:#}");
+                } else {
+                    tracing::debug!("portwatch: {e:#} (failure {failures})");
+                }
+                crate::gif::retry_delay(failures)
+            }
+        };
+        tokio::select! {
+            _ = ctx.shutdown.cancelled() => return,
+            _ = tokio::time::sleep(wait) => {}
+        }
+    }
 }
 
 #[cfg(test)]

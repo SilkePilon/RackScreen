@@ -630,6 +630,8 @@ pub enum Event {
     },
     /// The SEN live stream: a frame, or a change of what it shows.
     Sen(SenEvent),
+    /// The PortWatch VI leader, scored; sent when tracker.json changed.
+    PortWatch(crate::portwatch::PortWatchSnapshot),
 }
 
 /// What the SEN stream source reports.

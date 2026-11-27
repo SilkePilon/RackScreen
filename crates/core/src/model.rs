@@ -506,6 +506,7 @@ pub struct Model {
     /// Decoded GIFs by index into the config's `gifs:` list.
     gifs: Vec<crate::gif::GifState>,
     sen: SenState,
+    portwatch: Option<crate::portwatch::PortWatchSnapshot>,
     /// The time of the last `tick`.
     now: Secs,
 }
@@ -594,12 +595,16 @@ impl Model {
             show_frame: None,
             gifs: Vec::new(),
             sen: SenState::default(),
+            portwatch: None,
             now: 0.0,
         }
     }
 
     pub fn sen(&self) -> &SenState {
         &self.sen
+    }
+    pub fn portwatch(&self) -> Option<&crate::portwatch::PortWatchSnapshot> {
+        self.portwatch.as_ref()
     }
     /// The SEN picture to draw: the newest one while it is fresh. A little
     /// after the last one it still shows, so a screen leaving the role fades
@@ -1466,6 +1471,7 @@ impl Model {
                 crate::event::SenEvent::Live(live) => self.sen.live = live,
                 crate::event::SenEvent::Stopped => self.sen = SenState::default(),
             },
+            Event::PortWatch(snap) => self.portwatch = Some(snap),
             Event::GifFailed { index, reason } => {
                 let slot = self.gif_slot(index);
                 // A GIF that plays keeps playing.
@@ -2588,5 +2594,24 @@ mod tests {
         assert!(m.show_run().is_none(), "waits for the crossfade");
         m.tick(0.5);
         assert_eq!(m.show_run().map(|r| r.started), Some(0.5));
+    }
+
+    #[test]
+    fn portwatch_keeps_the_last_snapshot() {
+        use crate::portwatch::{Milestone, PortWatchSnapshot};
+        let mut m = Model::new(Thresholds::default());
+        assert!(m.portwatch().is_none());
+        let snap = PortWatchSnapshot {
+            score: 91.3,
+            milestone: Milestone::Playable,
+            name: "Belobug".into(),
+            private: false,
+            verified: true,
+            fps: Some(22.0),
+            gpus: vec![],
+            updated_unix: 1_795_796_303,
+        };
+        m.apply(Event::PortWatch(snap.clone()), 0.0);
+        assert_eq!(m.portwatch(), Some(&snap));
     }
 }
